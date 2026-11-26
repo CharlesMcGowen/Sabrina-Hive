@@ -1,0 +1,28 @@
+Business Source License 1.1
+
+Parameters:
+
+Licensed Work:
+    Sabrina Console (including sabrina_console_desktop, swarm_console, swarm_command, and associated framework tools)
+
+Initial Licensee:
+    Charles McGowen (the "Licensor")
+
+Change Date:
+    November 26, 2028
+
+Change License:
+    Apache License, Version 2.0
+
+Additional Use Grant:
+    You may use the Licensed Work for non-commercial personal, educational, and internal evaluation purposes.
+    You may make modifications, create custom plugins, and execute swarm missions for your personal workflows.
+    
+    Any use of the Licensed Work to provide a commercial managed service, hosted SaaS offering,
+    or competing agent platform to third parties requires an explicit commercial license from the Licensor.
+
+---
+
+The Licensor hereby grants you the right to make use of the Licensed Work under the terms of this License.
+On the Change Date, or on such earlier date as the Licensor may determine, this License will terminate
+and the Licensed Work will become subject to the terms of the Change License.

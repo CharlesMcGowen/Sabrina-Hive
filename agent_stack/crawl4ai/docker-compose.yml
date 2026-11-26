@@ -1,0 +1,17 @@
+services:
+  crawl4ai:
+    image: unclecode/crawl4ai:latest
+    container_name: livingarchive-crawl4ai
+    restart: unless-stopped
+    shm_size: "2g"
+    ports:
+      - "11235:11235"
+    # Crawl4AI 0.9+ requires CRAWL4AI_API_TOKEN to bind [::]:11235 (all interfaces).
+    # Create a .env file in this directory with CRAWL4AI_API_TOKEN=<hex-secret>.
+    env_file:
+      - .env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

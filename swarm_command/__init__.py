@@ -1,0 +1,85 @@
+"""Sabrina Swarm Command architecture: hierarchical fan-out, peer handoffs, and durable blackboard."""
+
+from .blackboard import (
+    BlackboardError,
+    PartitionWriteError,
+    SessionBlackboard,
+    VersionConflictError,
+)
+from .console_bridge import SwarmConsoleBridge
+from .role_binding import (
+    RoleBindingConfig,
+    RoleBindingResolutionError,
+    RoleModelBinding,
+    infer_model_provider,
+)
+from .models import (
+    DEFAULT_ROLE_SPECS,
+    AgentRole,
+    AgentRoleSpec,
+    BudgetSpec,
+    ComplexityClass,
+    ExecutionMode,
+    HandoffEnvelope,
+    HandoffMode,
+    SchemaValidationError,
+    validate_return_payload,
+)
+from .router import (
+    MAX_HOPS_CIRCUIT_BREAKER,
+    MAX_SAME_AGENT_LOOPS,
+    RESEARCH_SCOUT_CONCURRENCY_CAP,
+    PreflightError,
+    SwarmCommand,
+    TurnResult,
+)
+from .runtime import (
+    ApprovalDeniedError,
+    ApprovalGate,
+    CallableApprovalGate,
+    HttpApprovalGate,
+    ScopedToolManifest,
+    ToolPermissionError,
+    ToolRegistry,
+    ToolRuntimeError,
+    ToolSpec,
+    execute_scoped_tool,
+)
+
+__all__ = [
+    "AgentRole",
+    "AgentRoleSpec",
+    "ApprovalDeniedError",
+    "ApprovalGate",
+    "BlackboardError",
+    "BudgetSpec",
+    "CallableApprovalGate",
+    "ComplexityClass",
+    "DEFAULT_ROLE_SPECS",
+    "ExecutionMode",
+    "HandoffEnvelope",
+    "HandoffMode",
+    "HttpApprovalGate",
+    "MAX_HOPS_CIRCUIT_BREAKER",
+    "MAX_SAME_AGENT_LOOPS",
+    "PartitionWriteError",
+    "PreflightError",
+    "RESEARCH_SCOUT_CONCURRENCY_CAP",
+    "RoleBindingConfig",
+    "RoleBindingResolutionError",
+    "RoleModelBinding",
+    "SchemaValidationError",
+    "ScopedToolManifest",
+    "SessionBlackboard",
+    "SwarmCommand",
+    "SwarmConsoleBridge",
+    "ToolPermissionError",
+    "ToolRegistry",
+    "ToolRuntimeError",
+    "ToolSpec",
+    "TurnResult",
+    "VersionConflictError",
+    "execute_scoped_tool",
+    "infer_model_provider",
+    "validate_return_payload",
+]

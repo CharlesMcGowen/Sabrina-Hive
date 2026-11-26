@@ -1,0 +1,18 @@
+{
+  "session_id": "sabrina_desktop",
+  "state_version": 1,
+  "active_owner": "swarm_command",
+  "turn_metrics": {
+    "hop_count": 0,
+    "tokens_used": 0,
+    "budget_limit": 40000,
+    "loop_counts": {}
+  },
+  "goal_tree": {
+    "root_goal": "",
+    "tasks": []
+  },
+  "artifacts": {},
+  "side_effect_ledger": [],
+  "audit_trail": []
+}

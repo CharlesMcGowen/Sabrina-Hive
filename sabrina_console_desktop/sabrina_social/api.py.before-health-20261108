@@ -1,0 +1,235 @@
+"""Small standalone API/dashboard for Sabrina Social (default port 8087)."""
+from __future__ import annotations
+
+import argparse
+import os
+import time
+import urllib.request
+from typing import Any
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
+
+from .runtime import SocialRuntime
+from .scheduler import Scheduler
+from .mission import assemble_mission
+from tools.capability_registry import CapabilityRegistry
+from tools.kraken_objectives import run_objective as run_kraken_objective
+
+app = FastAPI(title="Sabrina Social", version="1.0.0")
+runtime = SocialRuntime()
+scheduler = Scheduler(adapters={
+    "kraken.inspect": run_kraken_objective,
+    "linkedin.browser": lambda payload: runtime.execute_live_action("engage_feed", payload),
+    "linkedin.replies": lambda payload: runtime.run_read("check_replies", payload),
+    "social.semantic_review": lambda payload: runtime.run_read("feed_suggestions", payload),
+})
+capability_registry = CapabilityRegistry()
+
+
+class ActionBody(BaseModel):
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DraftBody(BaseModel):
+    topic: str | None = None
+    content: str | None = None
+
+
+class ApprovalBody(BaseModel):
+    action: str
+    payload: dict[str, Any]
+
+
+class MissionBody(BaseModel):
+    objective: str
+
+
+@app.post("/api/mission/plan")
+def mission_plan(body: MissionBody):
+    if not body.objective.strip():
+        raise HTTPException(400, "objective is required")
+    return assemble_mission(body.objective, capability_registry, scheduler)
+
+
+@app.get("/health")
+def health():
+    value = runtime.health()
+    status_file = os.environ.get("SABRINA_SOCIAL_STATUS_FILE", "data/social/supervisor-status.json")
+    try:
+        import json
+        supervisor = json.loads(open(status_file, encoding="utf-8").read())
+        supervisor["age_seconds"] = max(0, time.time() - float(supervisor.get("updated", 0)))
+        supervisor["heartbeat_fresh"] = supervisor["age_seconds"] < 120
+        value["supervisor"] = supervisor
+    except Exception as exc:
+        value["supervisor"] = {"status": "unavailable", "error": str(exc)}
+    value["scheduler"] = {"queued": len(scheduler.store.list(status="queued")),
+                          "running": len(scheduler.store.list(status="running")),
+                          **scheduler.store.heartbeat_state()}
+    bridge_url = os.environ.get("SABRINA_BRIDGE_RECOVERY_URL", "http://127.0.0.1:19225")
+    try:
+        with urllib.request.urlopen(bridge_url.rstrip("/") + "/health", timeout=3) as response:
+            value["bridge"] = json.load(response)
+    except Exception as exc:
+        value["bridge"] = {"status": "unreachable", "error": str(exc)}
+    return value
+
+
+@app.get("/api/capabilities")
+def capabilities():
+    """Expose the same registered capability catalog used by the bridge watcher."""
+    from tools.capability_registry import CapabilityRegistry
+    return {"capabilities": CapabilityRegistry().discover()}
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard():
+    return """<!doctype html><html><head><meta charset='utf-8'><title>Sabrina Social</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:0 20px;background:#111827;color:#e5e7eb}
+button,input,textarea{font:inherit;margin:4px;padding:9px}textarea{width:95%;height:100px}pre{white-space:pre-wrap;background:#1f2937;padding:15px;border-radius:8px}.warn{color:#fbbf24}</style></head>
+<body><h1>Sabrina Social</h1><p>Isolated LinkedIn assistant Â· live actions require one-time approval.</p>
+<section id='meters' style='display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:18px 0'></section>
+<button onclick="call('/api/read/status',{})">Check LinkedIn</button>
+<button onclick="call('/api/read/inbox',{max_threads:5})">Triage inbox</button>
+<button onclick="call('/api/read/feed_suggestions',{max_posts:3})">Review feed</button>
+<h2>Draft a post</h2><input id='topic' placeholder='Topic'><br><textarea id='content' placeholder='Exact content (optional)'></textarea><br>
+<button onclick="draft()">Draft for review</button><h2 class='warn'>Pending approvals</h2>
+<button onclick="approvals()">Refresh approvals</button><div id='pending'></div>
+<h2>Scheduled operations</h2><button onclick="refreshJobs()">Refresh schedule</button><button onclick="scheduleFeed()">Schedule feed review</button><div id='jobList'></div><pre id='out'>Ready.</pre>
+<script>async function call(url,body,method='POST'){let o={method,headers:{'Content-Type':'application/json'}};if(body!==null)o.body=JSON.stringify({payload:body});let r=await fetch(url,o);out.textContent=JSON.stringify(await r.json(),null,2)}
+async function draft(){let body={topic:topic.value||null,content:content.value||null};let r=await fetch('/api/draft/post',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});out.textContent=JSON.stringify(await r.json(),null,2);await approvals()}
+async function decide(id,verb){let r=await fetch('/api/approvals/'+id+'/'+verb,{method:'POST'});out.textContent=JSON.stringify(await r.json(),null,2);await approvals()}
+async function approvals(){let r=await fetch('/api/approvals?status=pending'),j=await r.json();pending.innerHTML='';for(let a of j.approvals){let d=document.createElement('div');d.innerHTML='<p><b>'+a.action+'</b> '+JSON.stringify(a.payload)+' <button>Approve</button> <button>Reject</button></p>';let b=d.querySelectorAll('button');b[0].onclick=()=>decide(a.id,'approve');b[1].onclick=()=>decide(a.id,'reject');pending.appendChild(d)}}
+async function refreshJobs(){let r=await fetch('/api/schedule'),j=await r.json();jobList.innerHTML=j.jobs.map(x=>'<p><b>'+x.capability+'</b> '+x.status+' next='+new Date(x.next_run*1000).toLocaleString()+' <button onclick="jobAction(\''+x.id+'\',\'run-now\')">Run now</button> <button onclick="jobAction(\''+x.id+'\',\'pause\')">Pause</button></p>').join('')}
+async function jobAction(id,a){let r=await fetch('/api/schedule/'+id+'/'+a,{method:'POST'});let j=await r.json();out.textContent=JSON.stringify(j,null,2);if(!r.ok)throw new Error(j.detail||'schedule action failed');await refreshJobs()}
+async function scheduleFeed(){let r=await fetch('/api/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capability:'linkedin.browser',payload:{max_posts:4},interval_min:2700,interval_max:4500,max_attempts:3})});let j=await r.json();out.textContent=JSON.stringify(j,null,2);if(!r.ok)throw new Error(j.detail||'schedule create failed');await refreshJobs()}
+function meter(label,value,good){return '<div style="background:#1f2937;padding:12px;border-radius:8px"><small>'+label+'</small><div style="font-size:20px;color:'+(good?'#86efac':'#fbbf24')+'">'+value+'</div></div>}
+async function refreshHealth(){try{let r=await fetch('/health');let h=await r.json();let s=h.supervisor||{},q=h.scheduler||{},b=h.bridge||{};meters.innerHTML=meter('Supervisor',s.heartbeat_fresh?'ACTIVE':'STALE',s.heartbeat_fresh)+meter('Scheduler',q.active?'ACTIVE':'DOWN',q.active)+meter('Bridge',b.status||'unknown',b.status==='bridge_ready')+meter('Jobs',(q.running||0)+' running / '+(q.queued||0)+' queued',true);out.dataset.health=JSON.stringify(h)}catch(e){meters.innerHTML=meter('Dashboard','UNREACHABLE',false)}}
+approvals();refreshJobs();refreshHealth();setInterval(refreshHealth,10000);setInterval(refreshJobs,15000)</script></body></html>"""
+
+
+@app.post("/api/read/{action}")
+def read_action(action: str, body: ActionBody):
+    try:
+        return runtime.run_read(action, body.payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/draft/post")
+def draft_post(body: DraftBody):
+    if not body.topic and not body.content:
+        raise HTTPException(400, "topic or content is required")
+    try:
+        result = runtime.draft_post(body.topic, body.content)
+        response = {"draft": result, "approval": None}
+        content = result.get("post_content")
+        if result.get("status") == "drafted_for_review" and content:
+            response["approval"] = runtime.request_live_action("publish_post", {"content": content})
+        return response
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/approvals")
+def request_approval(body: ApprovalBody):
+    try:
+        return runtime.request_live_action(body.action, body.payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/approvals")
+def approvals(status: str | None = None):
+    return {"approvals": runtime.store.list(status=status)}
+
+
+@app.get("/api/operations")
+def operations(status: str | None = None, limit: int = 100):
+    return {"operations": runtime.store.operations(status=status, limit=limit)}
+
+
+@app.get("/api/operations/{operation_id}")
+def operation(operation_id: str):
+    value = runtime.store.operation(operation_id)
+    if not value:
+        raise HTTPException(404, "Operation not found")
+    return value
+
+
+class ScheduleBody(BaseModel):
+    capability: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    next_run: float | None = None
+    interval_min: int | None = None
+    interval_max: int | None = None
+    max_attempts: int = 3
+    draft: bool = False
+
+
+@app.get("/api/schedule")
+def schedule_list(status: str | None = None, limit: int = 100):
+    return {"jobs": scheduler.store.list(status=status, limit=limit)}
+
+
+@app.post("/api/schedule")
+def schedule_create(body: ScheduleBody):
+    try:
+        return scheduler.schedule(body.capability, body.payload, body.next_run,
+                                  body.interval_min, body.interval_max, body.max_attempts, body.draft)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/schedule/dispatch")
+def schedule_dispatch():
+    return {"job": scheduler.dispatch_once()}
+
+
+@app.post("/api/schedule/{job_id}/{action}")
+def schedule_action(job_id: str, action: str):
+    try:
+        if action == "cancel": return scheduler.cancel(job_id)
+        if action == "pause": return scheduler.pause(job_id)
+        if action == "resume": return scheduler.resume(job_id)
+        if action == "run-now":
+            return scheduler.run_now(job_id)
+        raise ValueError("unsupported schedule action")
+    except KeyError as exc:
+        raise HTTPException(404, "job not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/approvals/{request_id}/approve")
+def approve(request_id: str):
+    try:
+        return runtime.approve(request_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@app.post("/api/approvals/{request_id}/reject")
+def reject(request_id: str):
+    if not runtime.store.reject(request_id):
+        raise HTTPException(409, "Approval does not exist or is no longer pending")
+    return runtime.store.get(request_id)
+
+
+def main():
+    import uvicorn
+    parser = argparse.ArgumentParser(description="Sabrina Social service")
+    parser.add_argument("--host", default=os.environ.get("SABRINA_SOCIAL_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.environ.get("SABRINA_SOCIAL_PORT", "8087")))
+    args = parser.parse_args()
+    uvicorn.run("sabrina_social.api:app", host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()

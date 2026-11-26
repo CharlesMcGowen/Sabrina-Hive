@@ -1,0 +1,35 @@
+[
+  {
+    "name": "control_spike_5pct_3xvol",
+    "rationale": "Control: the spike entry already shown to lose. Included to check the scorer agrees.",
+    "all": [
+      {"feature": "ret", "n": 1, "op": ">=", "value": 0.05},
+      {"feature": "vol_ratio", "n": 96, "op": ">=", "value": 3.0}
+    ],
+    "barriers": {"up_pct": 10, "down_pct": 10, "max_hold_bars": 96},
+    "cooldown_bars": 96
+  },
+  {
+    "name": "format_example_pullback_in_uptrend",
+    "rationale": "Format example only, not a recommendation: up 10% over 24 h, now 5% or more off the 4-hour high.",
+    "all": [
+      {"feature": "ret", "n": 96, "op": ">=", "value": 0.10},
+      {"feature": "drawdown_from_high", "n": 16, "op": "<=", "value": -0.05},
+      {"feature": "usd_vol", "n": 96, "op": ">=", "value": 50000}
+    ],
+    "barriers": {"up_pct": 10, "down_pct": 5, "max_hold_bars": 96},
+    "cooldown_bars": 96
+  },
+  {
+    "name": "format_example_quiet_volume_build",
+    "rationale": "Format example only, not a recommendation: volume rising while price is still flat.",
+    "all": [
+      {"feature": "vol_ratio", "n": 96, "op": ">=", "value": 3.0},
+      {"feature": "ret", "n": 4, "op": "<=", "value": 0.02},
+      {"feature": "ret", "n": 4, "op": ">=", "value": -0.02},
+      {"feature": "usd_vol", "n": 96, "op": ">=", "value": 50000}
+    ],
+    "barriers": {"up_pct": 10, "down_pct": 5, "max_hold_bars": 96},
+    "cooldown_bars": 96
+  }
+]

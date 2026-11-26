@@ -1,0 +1,82 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C build artifacts
+*.o
+*.obj
+*.exe
+*.dll
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+freqtrade_pivot/.venv/
+
+# Secrets and Vaults (CRITICAL: Never commit credentials)
+*.env
+.env
+sabrina_console_desktop/data/control/provider_vault.json
+sabrina_console_desktop/data/control/recovery_workers/
+sabrina_console_desktop/data/control/*.key
+**/provider_vault.json
+**/*.dpapi.json
+**/secret*.json
+**/keys*.json
+
+# Local runtime databases & ephemeral SQLite stores
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.lock
+sabrina_console_desktop/data/*.sqlite3
+sabrina_console_desktop/data/social/availability-backups/
+sabrina_console_desktop/data/control/*.sqlite3
+
+# Runtime outputs & mission temp files
+.mission_*.tmp
+artifacts/
+outputs/
+.claude/
+candidate-instructions.md
+sabrina_desktop_ui.html.before*
+sabrina_desktop_ui.py.before*
+*.log
+
+# Proprietary Trading Tools & Financial Strategies (Exempt from public framework)
+*kraken*
+*gainer*
+*gainers*
+*trading*
+*polymarket*
+kraken_tooling/
+freqtrade_pivot/
+quant_tree_turnover.py
+test_quant_tree_turnover.py
+prediction_market_maker.py
+audit_viral_trading_claim.py
+Launch_Kraken_Monitor.bat
+h1-v2*
+h1_v2*
+replay_h1_v2*
+verify_h1_v2*
+SHA256SUMS.h1-v2.json
+forward_forward*
+hybrid_snntorch_ff.py
+snn_test.py
+test_snntorch.py
+ssm_decision/
+tests/test_h1_v2*
+
+# IDE & OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/

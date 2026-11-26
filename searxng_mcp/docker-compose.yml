@@ -1,0 +1,24 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: livingarchive-searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - /mnt/webapps-nvme/searxng/config:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+      - UWSGI_WORKERS=4
+      - UWSGI_THREADS=4
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

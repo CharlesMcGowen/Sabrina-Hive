@@ -1,0 +1,176 @@
+"""Anonymous Python declaration export. Never executes source or emits source text."""
+import argparse
+import ast
+from collections import Counter
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+import uuid
+import warnings
+
+from tools.lab_code_catalog import DEFAULT_DB, read_regular
+
+SUPPORTED = {'.py': 'python', '.go': 'go', '.js': 'javascript',
+             '.mjs': 'javascript', '.cjs': 'javascript', '.yaml': 'yaml', '.yml': 'yaml'}
+
+
+def structure(body):
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', SyntaxWarning)
+        tree = ast.parse(body)
+    nodes = []
+
+    def visit(node, parent=None, depth=0):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            ident = 'symbol_' + str(len(nodes) + 1)
+            item = {'id': ident, 'parent': parent, 'depth': depth,
+                    'kind': 'class' if isinstance(node, ast.ClassDef) else 'function'}
+            if isinstance(node, ast.ClassDef):
+                item['base_count'] = len(node.bases)
+            else:
+                args = node.args
+                kinds = (['positional_only'] * len(args.posonlyargs)
+                         + ['positional_or_keyword'] * len(args.args)
+                         + (['variadic_positional'] if args.vararg else [])
+                         + ['keyword_only'] * len(args.kwonlyargs)
+                         + (['variadic_keyword'] if args.kwarg else []))
+                item.update(async_function=isinstance(node, ast.AsyncFunctionDef),
+                            parameters=[{'id': 'parameter_' + str(i + 1), 'kind': k}
+                                        for i, k in enumerate(kinds)],
+                            positional_default_count=len(args.defaults),
+                            keyword_default_count=sum(x is not None for x in args.kw_defaults),
+                            return_annotation_present=node.returns is not None)
+            nodes.append(item)
+            parent = ident
+            depth += 1
+        for child in ast.iter_child_nodes(node):
+            visit(child, parent, depth)
+
+    visit(tree)
+    return {'schema_version': 1, 'language': 'python', 'symbols': nodes}
+
+
+class StreamParser:
+    def __init__(self, command):
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        text=True, encoding='utf-8')
+
+    def parse(self, source):
+        self.process.stdin.write(json.dumps({'source': source}) + '\n')
+        self.process.stdin.flush()
+        response = self.process.stdout.readline()
+        if not response:
+            raise RuntimeError('parser process ended')
+        value = json.loads(response)
+        if value.get('error'):
+            raise SyntaxError('parse failed')
+        return value
+
+    def close(self):
+        if self.process.poll() is None:
+            self.process.terminate()
+        self.process.wait(timeout=5)
+        self.process.stdin.close()
+        self.process.stdout.close()
+
+
+def yaml_structure(source):
+    import yaml
+    from yaml.nodes import MappingNode, ScalarNode, SequenceNode
+    output, ids, active = [], {}, set()
+
+    def visit(node, parent=None, depth=0):
+        if depth > 300 or len(output) >= 100000:
+            raise ValueError('YAML structure bound exceeded')
+        key = id(node)
+        if key in ids:
+            return {'ref': ids[key]}
+        ident = 'node_' + str(len(output) + 1)
+        ids[key] = ident
+        if isinstance(node, MappingNode):
+            item = {'id': ident, 'parent': parent, 'depth': depth, 'kind': 'mapping', 'children': []}
+            output.append(item)
+            for k, v in node.value:
+                item['children'].append(visit(v, ident, depth + 1))
+        elif isinstance(node, SequenceNode):
+            item = {'id': ident, 'parent': parent, 'depth': depth, 'kind': 'sequence', 'children': []}
+            output.append(item)
+            item['children'] = [visit(v, ident, depth + 1) for v in node.value]
+        elif isinstance(node, ScalarNode):
+            tag = node.tag.rsplit(':', 1)[-1]
+            scalar_type = tag if tag in {'str', 'int', 'float', 'bool', 'null', 'timestamp', 'binary'} else 'other'
+            output.append({'id': ident, 'parent': parent, 'depth': depth, 'kind': 'scalar', 'scalar_type': scalar_type})
+        else:
+            raise ValueError('unsupported YAML node')
+        return ident
+
+    docs = list(yaml.compose_all(source, Loader=yaml.SafeLoader))
+    roots = [visit(doc) for doc in docs if doc is not None]
+    return {'schema_version': 1, 'language': 'yaml', 'nodes': output, 'roots': roots}
+
+
+def export(catalog, destination):
+    # A new private directory per run prevents partial generations replacing good ones.
+    destination = Path(destination)
+    destination.mkdir(mode=0o700, parents=True, exist_ok=False)
+    counts = Counter()
+    db = sqlite3.connect(Path(catalog).absolute().as_uri() + '?mode=ro', uri=True)
+    go = js = None
+    try:
+        with (destination / 'structures.jsonl').open('x', encoding='utf-8') as public, (destination / 'private-provenance.jsonl').open('x', encoding='utf-8') as private:
+            for path, digest, status, size, mtime_ns, language in db.execute('SELECT path,sha256,status,size,mtime_ns,language FROM files ORDER BY path'):
+                counts['catalog_entries'] += 1
+                suffix = Path(path).suffix.lower()
+                target_language = SUPPORTED.get(suffix)
+                if target_language is None:
+                    counts['unsupported_' + (language.lstrip('.') or 'unknown')] += 1
+                    continue
+                try:
+                    body, st = read_regular(path, 512000)
+                    if body is None:
+                        counts['oversize_or_unreadable'] += 1
+                        continue
+                    current_hash = hashlib.sha256(body).hexdigest()
+                    if len(body) != size or st.st_mtime_ns != mtime_ns or (digest and current_hash != digest):
+                        counts['stale'] += 1
+                        continue
+                    if target_language == 'python':
+                        record = structure(body.decode('utf-8-sig'))
+                    elif target_language == 'yaml':
+                        record = yaml_structure(body.decode('utf-8-sig'))
+                    else:
+                        if target_language == 'go' and go is None:
+                            go = StreamParser(['go', 'run', str(Path(__file__).with_name('structural_go_parser.go'))])
+                        if target_language == 'javascript' and js is None:
+                            js = StreamParser(['node', str(Path(__file__).with_name('structural_js_parser.cjs'))])
+                        parser = go if target_language == 'go' else js
+                        record = parser.parse(body.decode('utf-8-sig'))
+                except (OSError, ValueError, SyntaxError, RecursionError):
+                    counts['unreadable_or_unparseable'] += 1
+                    continue
+                ident = uuid.uuid4().hex
+                record['id'] = ident
+                public.write(json.dumps(record, separators=(',', ':')) + '\n')
+                private.write(json.dumps({'id': ident, 'source_path': path, 'source_sha256': current_hash}) + '\n')
+                counts['exported'] += 1
+        (destination / 'summary.json').write_text(json.dumps(dict(counts), indent=2), encoding='utf-8')
+        if os.name != 'nt':
+            for p in destination.iterdir():
+                p.chmod(0o600)
+        return dict(counts)
+    finally:
+        db.close()
+        if go: go.close()
+        if js: js.close()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--catalog', default=str(DEFAULT_DB))
+    parser.add_argument('--destination', required=True)
+    args = parser.parse_args()
+    print(json.dumps(export(args.catalog, args.destination), indent=2))

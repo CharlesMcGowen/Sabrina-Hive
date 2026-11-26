@@ -1,0 +1,48 @@
+"""<One-line name>: <what this plugin does, in one sentence>.
+
+Purpose
+    <Who uses it and what question it answers.>
+
+Operations
+    status            Returns {"ok": true, "status": ...}. Read only.
+    <name>            <What it returns. List every operation the plugin accepts.>
+
+Access
+    read   This plugin only reads. It must not place, change, or cancel anything.
+           Use "write" only if an operation changes state, and say which one here.
+
+Permissions
+    <Files, network hosts, or remote hosts the plugin touches, and the credentials it
+    uses (by name only). Write "none" if there are none.>
+
+Copy this file to tools/custom/<name>_plugin.py, rename the TOOL_NAME, and delete
+these instructions. Keep the literal assignments at module level: the console reads
+them without importing the module.
+"""
+from __future__ import annotations
+
+TOOL_NAME = "sample_name"  # lowercase letters, digits, underscores; unique across plugins
+TOOL_PROMPT = (
+    "Operations: status | <name>. Fields: none. "
+    "Access: read. Returns: JSON object with ok."
+)
+PARALLEL_SAFE = True
+TOOL_ACCESS = "read"  # "read" or "write". Required when TOOL_TAB is declared.
+
+# Optional. Remove this block if the plugin has no console tab.
+# TOOL_TAB = {
+#     "title": "Sample",            # 1-40 characters, shown in the nav
+#     "icon": "🧩",                  # 1-4 characters
+#     "operation": "status",         # the only operation the tab calls
+#     "display": "json",             # "json" or "text"
+#     "refresh_seconds": 0,          # 0 = manual Refresh only, or 5-300
+# }
+
+
+def execute(action, loop=None):
+    """Validate the action, run one declared operation, and return a JSON-compatible dict."""
+    if not isinstance(action, dict):
+        return {"ok": False, "error": "object_required"}
+    if action == {"operation": "status"}:
+        return {"ok": True, "status": "ready"}
+    return {"ok": False, "error": "unsupported_operation_or_fields", "supported": ["status"]}

@@ -1,0 +1,92 @@
+"""Anonymous Python declaration export. Never executes source or emits source text."""
+import argparse
+import ast
+from collections import Counter
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import uuid
+import warnings
+
+from tools.lab_code_catalog import DEFAULT_DB, read_regular
+
+
+def structure(body):
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', SyntaxWarning)
+        tree = ast.parse(body)
+    nodes = []
+
+    def visit(node, parent=None):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            ident = 'symbol_' + str(len(nodes) + 1)
+            item = {'id': ident, 'parent': parent,
+                    'kind': 'class' if isinstance(node, ast.ClassDef) else 'function'}
+            if isinstance(node, ast.ClassDef):
+                item['base_count'] = len(node.bases)
+            else:
+                args = node.args
+                kinds = (['positional_only'] * len(args.posonlyargs)
+                         + ['positional_or_keyword'] * len(args.args)
+                         + (['variadic_positional'] if args.vararg else [])
+                         + ['keyword_only'] * len(args.kwonlyargs)
+                         + (['variadic_keyword'] if args.kwarg else []))
+                item.update(async_function=isinstance(node, ast.AsyncFunctionDef),
+                            parameters=[{'id': 'parameter_' + str(i + 1), 'kind': k}
+                                        for i, k in enumerate(kinds)],
+                            positional_default_count=len(args.defaults),
+                            keyword_default_count=sum(x is not None for x in args.kw_defaults),
+                            return_annotation_present=node.returns is not None)
+            nodes.append(item)
+            parent = ident
+        for child in ast.iter_child_nodes(node):
+            visit(child, parent)
+
+    visit(tree)
+    return {'schema_version': 1, 'language': 'python', 'symbols': nodes}
+
+
+def export(catalog, destination):
+    # A new private directory per run prevents partial generations replacing good ones.
+    destination = Path(destination)
+    destination.mkdir(mode=0o700, parents=True, exist_ok=False)
+    counts = Counter()
+    db = sqlite3.connect(Path(catalog).absolute().as_uri() + '?mode=ro', uri=True)
+    try:
+        with (destination / 'structures.jsonl').open('x', encoding='utf-8') as public, (destination / 'private-provenance.jsonl').open('x', encoding='utf-8') as private:
+            for path, digest, status in db.execute('SELECT path,sha256,status FROM files ORDER BY path'):
+                counts['catalog_entries'] += 1
+                if status != 'indexed' or not digest:
+                    counts['not_parsed_python'] += 1
+                    continue
+                try:
+                    body, _ = read_regular(path, 512000)
+                    if body is None or hashlib.sha256(body).hexdigest() != digest:
+                        counts['stale'] += 1
+                        continue
+                    record = structure(body)
+                except (OSError, ValueError, SyntaxError, RecursionError):
+                    counts['unreadable_or_unparseable'] += 1
+                    continue
+                ident = uuid.uuid4().hex
+                record['id'] = ident
+                public.write(json.dumps(record, separators=(',', ':')) + '\n')
+                private.write(json.dumps({'id': ident, 'source_path': path, 'source_sha256': digest}) + '\n')
+                counts['exported'] += 1
+        (destination / 'summary.json').write_text(json.dumps(dict(counts), indent=2), encoding='utf-8')
+        if os.name != 'nt':
+            for p in destination.iterdir():
+                p.chmod(0o600)
+        return dict(counts)
+    finally:
+        db.close()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--catalog', default=str(DEFAULT_DB))
+    parser.add_argument('--destination', required=True)
+    args = parser.parse_args()
+    print(json.dumps(export(args.catalog, args.destination), indent=2))

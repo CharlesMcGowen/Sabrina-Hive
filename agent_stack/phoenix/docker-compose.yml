@@ -1,0 +1,18 @@
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: livingarchive-phoenix
+    restart: unless-stopped
+    ports:
+      - "6006:6006"
+      - "4317:4317"
+    environment:
+      - PHOENIX_WORKING_DIR=/phoenix-data
+      - PHOENIX_ENABLE_AUTH=false
+    volumes:
+      - /mnt/webapps-nvme/agent_stack/phoenix/data:/phoenix-data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

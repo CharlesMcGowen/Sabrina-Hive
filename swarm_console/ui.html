@@ -1,0 +1,2057 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Swarm Research Console</title>
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --surface: #121722;
+      --surface-2: #181f2e;
+      --border: #263044;
+      --text: #e6ecf5;
+      --muted: #8b98b0;
+      --accent: #60a5fa;
+      --accent-soft: rgba(96, 165, 250, 0.14);
+      --green: #34d399;
+      --green-soft: rgba(52, 211, 153, 0.14);
+      --amber: #fbbf24;
+      --amber-soft: rgba(251, 191, 36, 0.14);
+      --red: #f87171;
+      --red-soft: rgba(248, 113, 113, 0.14);
+      --purple: #a78bfa;
+      --purple-soft: rgba(167, 139, 250, 0.14);
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .app {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 18px 22px 36px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    /* Header */
+    .header {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .header-left { flex: 1 1 520px; min-width: 260px; }
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .goal {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .header-badges {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .badge.safety-false {
+      background: var(--amber-soft);
+      border-color: rgba(251, 191, 36, 0.4);
+      color: var(--amber);
+      font-family: var(--mono);
+    }
+    .badge.safety-true {
+      background: var(--red-soft);
+      border-color: rgba(248, 113, 113, 0.4);
+      color: var(--red);
+      font-family: var(--mono);
+    }
+    .badge.phase {
+      background: var(--accent-soft);
+      border-color: rgba(96, 165, 250, 0.35);
+      color: var(--accent);
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      display: inline-block;
+    }
+    .dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.warn { background: var(--amber); }
+    .dot.err { background: var(--red); }
+
+    /* Sections */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .panel-title {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+
+    /* Overview & Threads */
+    .status-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .threads-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .thread-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .thread-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .thread-title { font-weight: 600; font-size: 14px; }
+    .thread-outcome {
+      font-size: 12px;
+      color: var(--accent);
+      font-family: var(--mono);
+    }
+    .thread-summary { font-size: 12.5px; color: var(--muted); margin: 0; }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+    /* State pills */
+    .state-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+    .state-working { background: var(--accent-soft); color: var(--accent); border-color: rgba(96, 165, 250, 0.35); }
+    .state-waiting { background: var(--purple-soft); color: var(--purple); border-color: rgba(167, 139, 250, 0.35); }
+    .state-done, .state-active { background: var(--green-soft); color: var(--green); border-color: rgba(52, 211, 153, 0.35); }
+    .state-blocked { background: var(--red-soft); color: var(--red); border-color: rgba(248, 113, 113, 0.35); }
+
+    /* Two-column lower grid */
+    .split-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 18px;
+      align-items: start;
+    }
+    @media (max-width: 980px) {
+      .split-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Roster & Lock Matrix */
+    .conflict-banner {
+      background: var(--red-soft);
+      border: 1px solid rgba(248, 113, 113, 0.45);
+      color: var(--red);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12.5px;
+    }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    tr.conflict-row { background: rgba(248, 113, 113, 0.08); }
+    .lock-chip {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 2px 6px;
+      margin: 2px 4px 2px 0;
+      border-radius: 5px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .lock-chip.conflict {
+      border-color: var(--red);
+      color: var(--red);
+      background: var(--red-soft);
+    }
+    .muted { color: var(--muted); font-size: 12px; }
+    .mono { font-family: var(--mono); }
+
+    /* Forms */
+    .inline-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+    input, select, button {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-family: var(--sans);
+      font-size: 12.5px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    button {
+      background: var(--accent-soft);
+      border-color: rgba(96, 165, 250, 0.4);
+      color: var(--accent);
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: rgba(96, 165, 250, 0.24); }
+    .form-feedback { font-size: 12px; color: var(--red); width: 100%; }
+    .form-feedback.ok { color: var(--green); }
+
+    /* Message Board */
+    .filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .tag-btn {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      cursor: pointer;
+    }
+    .tag-btn.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .feed {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 440px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .msg-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 11px;
+    }
+    .msg-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+    .msg-agent { font-weight: 600; color: var(--text); }
+    .msg-seq { font-family: var(--mono); color: var(--muted); font-size: 11px; }
+    .msg-text { font-size: 13px; word-break: break-word; }
+    .mention {
+      color: var(--accent);
+      font-family: var(--mono);
+      font-weight: 600;
+    }
+    .tag-badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 4px;
+    }
+    .tag-PASS { background: var(--green-soft); color: var(--green); }
+    .tag-BLOCK { background: var(--red-soft); color: var(--red); }
+    .tag-done { background: var(--purple-soft); color: var(--purple); }
+    .tag-other { background: var(--accent-soft); color: var(--accent); }
+
+    /* Avatars & Animated Topology */
+    .avatar-sm {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .avatar-md {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .worker-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .msg-author-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .topology-wrap {
+      width: 100%;
+      background: radial-gradient(circle at 50% 45%, rgba(56, 189, 248, 0.08), rgba(15, 23, 42, 0.9) 70%);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .topology-svg {
+      width: 100%;
+      height: 280px;
+      display: block;
+    }
+    .edge-idle {
+      stroke: #263044;
+      stroke-width: 1.5;
+      stroke-dasharray: 4 4;
+    }
+    .edge-active {
+      stroke: #38bdf8;
+      stroke-width: 2.2;
+      stroke-dasharray: 7 5;
+      animation: dash-flow 1.1s linear infinite;
+    }
+    .edge-done {
+      stroke: #34d399;
+      stroke-width: 1.8;
+      opacity: 0.75;
+    }
+    .node-pulse {
+      animation: pulse-ring 1.8s ease-out infinite;
+      transform-origin: center;
+    }
+    @keyframes dash-flow {
+      to { stroke-dashoffset: -24; }
+    }
+    @keyframes pulse-ring {
+      0% { opacity: 0.85; stroke-width: 2.5; }
+      70% { opacity: 0.25; stroke-width: 6; }
+      100% { opacity: 0.85; stroke-width: 2.5; }
+    }
+
+    /* Gemini Copilot */
+    .copilot-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .copilot-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
+    .copilot-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .copilot-card h3 {
+      margin: 0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+    .copilot-list {
+      margin: 0;
+      padding-left: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+    }
+    .health-healthy {
+      background: var(--green-soft);
+      border-color: rgba(52, 211, 153, 0.35);
+      color: var(--green);
+    }
+    .health-attention_needed {
+      background: var(--amber-soft);
+      border-color: rgba(251, 191, 36, 0.35);
+      color: var(--amber);
+    }
+    .health-blocked {
+      background: var(--red-soft);
+      border-color: rgba(248, 113, 113, 0.35);
+      color: var(--red);
+    }
+    .draft-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .btn-secondary {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn-secondary:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Unified Model Fleet & Separate Skill Registry */
+    .registry-tabs {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .add-model-box {
+      background: var(--surface-2);
+      border: 1px dashed rgba(96, 165, 250, 0.4);
+      border-radius: 9px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .tier-chip {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .tier-collective { background: rgba(167, 139, 250, 0.16); color: #c4b5fd; }
+    .tier-api { background: rgba(96, 165, 250, 0.16); color: #93c5fd; }
+    .tier-external { background: rgba(251, 191, 36, 0.16); color: #fcd34d; }
+    .tier-local { background: rgba(52, 211, 153, 0.16); color: #6ee7b7; }
+    .skill-detail-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      max-height: 320px;
+      overflow: auto;
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    .reg-tab-btn {
+      background: var(--surface-2);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .reg-tab-btn.active {
+      background: var(--accent-soft);
+      border-color: rgba(96, 165, 250, 0.45);
+      color: var(--accent);
+    }
+    .registry-list {
+      max-height: 320px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .registry-item {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 10px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .registry-item-main {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .registry-item-title {
+      font-weight: 600;
+      font-size: 13px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .registry-meta {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .cap-chip {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid rgba(96, 165, 250, 0.25);
+    }
+    .dep-chip {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: var(--red-soft);
+      color: var(--red);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+    }
+
+    /* UI Diagnostics / Debug Feed */
+    .debug-badge-btn {
+      cursor: pointer;
+    }
+    .debug-badge-btn:hover {
+      border-color: var(--accent);
+    }
+    .debug-summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .debug-summary::-webkit-details-marker { display: none; }
+    .debug-feed {
+      max-height: 240px;
+      overflow-y: auto;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .debug-row {
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+      border-bottom: 1px solid rgba(38, 48, 68, 0.45);
+      padding-bottom: 5px;
+      word-break: break-word;
+    }
+    .debug-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .debug-lvl {
+      font-weight: 700;
+      font-size: 11px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .debug-lvl-ERROR { background: var(--red-soft); color: var(--red); }
+    .debug-lvl-WARN { background: var(--amber-soft); color: var(--amber); }
+    .debug-lvl-INFO { background: var(--accent-soft); color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <div class="title-row">
+          <h1 id="swarm-title">Swarm Research Console</h1>
+          <span id="swarm-phase" class="badge phase">planning</span>
+        </div>
+        <p id="swarm-goal" class="goal">Loading swarm state...</p>
+      </div>
+      <div class="header-badges">
+        <span id="safety-badge" class="badge safety-false">execution_authorized: false</span>
+        <span class="badge"><span id="sse-dot" class="dot warn"></span><span id="sse-label">Connecting SSE...</span></span>
+        <button id="debug-badge" type="button" class="badge debug-badge-btn"><span id="debug-dot" class="dot live"></span><span id="debug-label">UI Debug: 0 issues</span></button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">Live Swarm Topology &amp; Click-to-Link A2A Workflow</h2>
+          <span class="muted">Click any node, then click a second node to define a Loop, Pass-Off, Critique Gate, or A2A communication.</span>
+        </div>
+        <div class="pill-row">
+          <span id="sc-a2a-count" class="badge">0 A2A links</span>
+          <button id="sc-a2a-cancel" type="button" class="btn-secondary" style="display:none; padding:4px 9px; font-size:11.5px;">✕ Cancel Selection</button>
+        </div>
+      </div>
+      <div id="sc-a2a-banner" class="muted" style="padding:7px 11px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); font-size:12px;">
+        🔗 Click any agent node on the topology below to select a source, then click another node (or the same node) to define an A2A workflow link.
+      </div>
+      <div class="topology-wrap">
+        <svg id="topology-svg" class="topology-svg" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div id="sc-a2a-composer" class="add-model-box" style="display:none;">
+        <div class="panel-header">
+          <span id="sc-a2a-pair" class="mono" style="font-weight:700; color:var(--accent);">Source ➔ Target</span>
+          <span id="sc-a2a-feedback" class="form-feedback" style="width:auto;"></span>
+        </div>
+        <div class="inline-form" style="border-top:none; padding-top:0;">
+          <select id="sc-a2a-comm">
+            <option value="pass_off">➔ Pass-Off / Direct Handoff</option>
+            <option value="loop">↻ Loop / Iterative Retry</option>
+            <option value="critique_gate">🛡 Critique / Verify Gate</option>
+            <option value="delegate_spawn">⑂ Delegate Sub-Task</option>
+            <option value="blackboard_sync">📡 Blackboard A2A Sync</option>
+            <option value="escalate_hitl">⚠ Escalate / HITL Gate</option>
+          </select>
+          <select id="sc-a2a-cond">
+            <option value="always">Always</option>
+            <option value="on_needs_work">On Needs Work / Revision</option>
+            <option value="on_pass">On Verification Pass</option>
+            <option value="on_low_confidence">On Low Confidence</option>
+            <option value="on_error">On Error</option>
+          </select>
+          <input id="sc-a2a-loops" type="number" min="1" max="25" value="3" title="Max Loop / Hop Count" style="width:72px;" />
+          <input id="sc-a2a-msg" type="text" placeholder="Handoff instruction / @mention note..." style="flex:2 1 190px;" />
+          <label class="muted" style="display:inline-flex; align-items:center; gap:4px; font-size:12px;">
+            <input id="sc-a2a-announce" type="checkbox" checked /> Post to Board
+          </label>
+          <button id="sc-a2a-apply" type="button">✓ Apply A2A Link</button>
+          <button id="sc-a2a-delete" type="button" class="btn-secondary" style="display:none; color:var(--red);">Remove</button>
+        </div>
+      </div>
+      <div id="sc-a2a-links-strip" class="pill-row"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2 class="panel-title">Overview &amp; Outcome Threads</h2>
+        <div id="worker-summary" class="status-strip"></div>
+      </div>
+      <div id="threads-grid" class="threads-grid"></div>
+    </section>
+
+    <div class="split-grid">
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Roster &amp; Disjoint Lock Matrix</h2>
+          <span id="lock-summary" class="muted">0 active locks</span>
+        </div>
+        <div id="conflict-banner" class="conflict-banner" style="display:none;"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Model</th>
+                <th>State</th>
+                <th>Exclusive Locks</th>
+              </tr>
+            </thead>
+            <tbody id="roster-body"></tbody>
+          </table>
+        </div>
+        <form id="worker-form" class="inline-form">
+          <input id="wf-name" type="text" placeholder="worker name" required style="flex:1 1 110px;" />
+          <select id="wf-state">
+            <option value="working">working</option>
+            <option value="waiting" selected>waiting</option>
+            <option value="done">done</option>
+            <option value="blocked">blocked</option>
+          </select>
+          <input id="wf-locks" type="text" placeholder="locks (comma-separated)" style="flex:2 1 160px;" />
+          <button type="submit">Update Worker</button>
+          <div id="wf-feedback" class="form-feedback"></div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2 class="panel-title">Live Message Board</h2>
+          <span id="board-count" class="muted">0 messages</span>
+        </div>
+        <div class="filter-bar">
+          <select id="filter-agent">
+            <option value="">All agents</option>
+          </select>
+          <button type="button" class="tag-btn active" data-tag="">All</button>
+          <button type="button" class="tag-btn" data-tag="PASS">PASS</button>
+          <button type="button" class="tag-btn" data-tag="BLOCK">BLOCK</button>
+          <button type="button" class="tag-btn" data-tag="done">done</button>
+        </div>
+        <div id="board-feed" class="feed"></div>
+        <form id="board-form" class="inline-form">
+          <input id="bf-agent" type="text" placeholder="agent (e.g. coordinator)" required style="flex:1 1 120px;" />
+          <input id="bf-text" type="text" placeholder="@worker message [PASS|BLOCK|done]" required style="flex:3 1 200px;" />
+          <button type="submit">Post</button>
+          <div id="bf-feedback" class="form-feedback"></div>
+        </form>
+      </section>
+    </div>
+
+    <section class="panel" id="fleet-panel">
+      <div class="panel-header">
+        <div class="title-row">
+          <h2 class="panel-title">Collective &amp; External Model Fleet</h2>
+          <span id="registry-count-badge" class="badge">Loading fleet...</span>
+        </div>
+        <div class="copilot-controls">
+          <button id="reg-refresh-btn" type="button" class="btn-secondary">Refresh Fleet</button>
+        </div>
+      </div>
+
+      <form id="add-model-form" class="add-model-box">
+        <div class="panel-header">
+          <span class="panel-title" style="color:var(--accent);">Add Model to Fleet</span>
+          <span id="add-model-feedback" class="form-feedback"></span>
+        </div>
+        <div class="inline-form">
+          <input id="add-model-id" type="text" placeholder="Model ID (e.g. openrouter/deepseek/deepseek-r1, openai/gpt-5, qwen2.5-coder:14b)" required style="flex:2 1 220px;" />
+          <input id="add-model-name" type="text" placeholder="Display name (optional)" style="flex:1 1 150px;" />
+          <select id="add-model-tier">
+            <option value="external">External Model</option>
+            <option value="api">API Model</option>
+            <option value="collective">Collective Member</option>
+            <option value="local">Local / Ollama</option>
+          </select>
+          <input id="add-model-provider" type="text" placeholder="Provider (auto)" style="flex:1 1 120px;" />
+          <input id="add-model-role" type="text" placeholder="Role / note (optional)" style="flex:1 1 150px;" />
+          <button type="submit">+ Add Model</button>
+        </div>
+      </form>
+
+      <div class="registry-tabs" id="fleet-tier-tabs">
+        <button type="button" class="reg-tab-btn active" data-tier="">All</button>
+        <button type="button" class="reg-tab-btn" data-tier="collective">Collective</button>
+        <button type="button" class="reg-tab-btn" data-tier="api">API Models</button>
+        <button type="button" class="reg-tab-btn" data-tier="external">External Models</button>
+        <button type="button" class="reg-tab-btn" data-tier="local">Local / Ollama</button>
+      </div>
+
+      <div class="filter-bar">
+        <input id="reg-search" type="text" placeholder="Search external, API, collective, or local models..." style="flex:2 1 240px;" />
+        <select id="reg-provider">
+          <option value="">All providers</option>
+        </select>
+        <select id="reg-capability">
+          <option value="">All capabilities</option>
+        </select>
+        <label class="muted" style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;">
+          <input id="reg-deprecated" type="checkbox" /> Show deprecated
+        </label>
+      </div>
+
+      <div id="registry-list" class="registry-list"></div>
+      <div class="panel-header">
+        <span id="registry-status-text" class="muted" style="font-size:12px;"></span>
+        <button id="reg-load-more" type="button" class="btn-secondary" style="display:none;">Load more</button>
+      </div>
+    </section>
+
+    <section class="panel" id="skills-panel">
+      <div class="panel-header">
+        <div class="title-row">
+          <h2 class="panel-title">Skill Registry</h2>
+          <span id="skills-count-badge" class="badge">Loading skills...</span>
+        </div>
+        <div class="copilot-controls">
+          <button id="skills-refresh-btn" type="button" class="btn-secondary">Refresh Skills</button>
+        </div>
+      </div>
+
+      <div class="filter-bar">
+        <input id="skills-search" type="text" placeholder="Search skills by name, source, or description..." style="flex:2 1 240px;" />
+        <select id="skills-source">
+          <option value="">All sources</option>
+        </select>
+      </div>
+
+      <div class="grid-main">
+        <div>
+          <div id="skills-list" class="registry-list"></div>
+          <div class="panel-header" style="margin-top:8px;">
+            <span id="skills-status-text" class="muted" style="font-size:12px;"></span>
+            <button id="skills-load-more" type="button" class="btn-secondary" style="display:none;">Load more</button>
+          </div>
+        </div>
+        <div>
+          <div class="panel-header" style="margin-bottom:6px;">
+            <span id="skill-detail-title" class="mono">Select a skill to inspect</span>
+            <span id="skill-detail-source" class="muted mono" style="font-size:11.5px;"></span>
+          </div>
+          <div id="skill-detail-body" class="skill-detail-box muted">Click a skill on the left to inspect its SKILL.md instructions.</div>
+        </div>
+      </div>
+    </section>
+
+    <details id="debug-panel" class="panel">
+      <summary class="debug-summary">
+        <div class="title-row">
+          <h2 class="panel-title">UI Diagnostics &amp; Debug Feed</h2>
+          <span id="debug-img-health" class="badge">Images: checking...</span>
+        </div>
+        <div class="copilot-controls">
+          <button id="debug-check-btn" type="button" class="btn-secondary">Run Health Check</button>
+          <button id="debug-copy-btn" type="button" class="btn-secondary">Copy Report</button>
+          <button id="debug-clear-btn" type="button" class="btn-secondary">Clear</button>
+        </div>
+      </summary>
+      <div id="debug-feed" class="debug-feed">
+        <div class="muted">No UI errors or warnings recorded.</div>
+      </div>
+    </details>
+  </div>
+
+  <script>
+    (function () {
+      let currentState = null;
+      let activeTag = "";
+
+      const debugEntries = [];
+      const MAX_DEBUG_ENTRIES = 120;
+      const missingIdsSeen = new Set();
+
+      function renderDebugFeed() {
+        const feed = document.getElementById("debug-feed");
+        const dot = document.getElementById("debug-dot");
+        const label = document.getElementById("debug-label");
+        const panel = document.getElementById("debug-panel");
+        const errCount = debugEntries.filter((e) => e.level === "ERROR").length;
+        const warnCount = debugEntries.filter((e) => e.level === "WARN").length;
+        const issueCount = errCount + warnCount;
+
+        if (dot && label) {
+          dot.className = "dot " + (errCount > 0 ? "err" : (warnCount > 0 ? "warn" : "live"));
+          label.textContent = issueCount === 0
+            ? "UI Debug: 0 issues"
+            : `UI Debug: ${errCount} err · ${warnCount} warn`;
+        }
+        if (errCount > 0 && panel && !panel.open) {
+          panel.open = true;
+        }
+        if (!feed) return;
+        if (!debugEntries.length) {
+          feed.innerHTML = '<div class="muted">No UI errors or warnings recorded.</div>';
+          return;
+        }
+        feed.innerHTML = debugEntries.slice().reverse().map((e) => `
+          <div class="debug-row">
+            <span class="debug-lvl debug-lvl-${escapeHtml(e.level)}">${escapeHtml(e.level)}</span>
+            <span class="muted">${escapeHtml(e.time)}</span>
+            <span><b>${escapeHtml(e.source)}</b>: ${escapeHtml(e.message)}</span>
+          </div>
+        `).join("");
+      }
+
+      function debugLog(level, source, message) {
+        const ts = new Date().toLocaleTimeString();
+        debugEntries.push({ level, source, message: String(message || ""), time: ts });
+        if (debugEntries.length > MAX_DEBUG_ENTRIES) debugEntries.shift();
+        renderDebugFeed();
+      }
+
+      const el = (id) => {
+        const node = document.getElementById(id);
+        if (!node && !missingIdsSeen.has(id)) {
+          missingIdsSeen.add(id);
+          debugLog("WARN", "DOM", `Missing element #${id}`);
+        }
+        return node;
+      };
+
+      // Capture uncaught JS runtime errors
+      window.addEventListener("error", (ev) => {
+        if (ev.target && ev.target !== window) return;
+        const loc = ev.filename ? ` (${ev.filename}:${ev.lineno}:${ev.colno})` : "";
+        debugLog("ERROR", "JS", `${ev.message || "Script error"}${loc}`);
+      });
+
+      // Capture unhandled promise rejections
+      window.addEventListener("unhandledrejection", (ev) => {
+        const reason = ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason || "Unknown rejection");
+        debugLog("ERROR", "Promise", reason);
+      });
+
+      // Capture broken <img>, SVG <image>, and resource load failures in capture phase
+      document.addEventListener("error", (ev) => {
+        const target = ev.target;
+        if (!target || target === window || !target.tagName) return;
+        const tag = target.tagName.toLowerCase();
+        if (tag === "img" || tag === "image" || tag === "script" || tag === "link") {
+          const rawSrc = target.getAttribute("src") || target.getAttribute("href") || target.getAttribute("xlink:href") || "";
+          const srcPreview = rawSrc.length > 80 ? rawSrc.slice(0, 80) + "..." : rawSrc;
+          const alt = target.getAttribute("alt") ? ` alt="${target.getAttribute("alt")}"` : "";
+          debugLog("ERROR", "Media", `<${tag}${alt}> failed to load (${srcPreview || "empty src"})`);
+          runUiHealthCheck(false);
+        }
+      }, true);
+
+      function runUiHealthCheck(logSummary = true) {
+        const htmlImgs = Array.from(document.querySelectorAll("img"));
+        const svgImgs = Array.from(document.querySelectorAll("svg image"));
+        let brokenImgs = 0;
+        htmlImgs.forEach((img) => {
+          if (img.complete && img.naturalWidth === 0) {
+            brokenImgs += 1;
+            const src = img.getAttribute("src") || "";
+            debugLog("ERROR", "HealthCheck", `Broken <img> (${img.alt || "unnamed"}): ${src.slice(0, 80)}`);
+          }
+        });
+        svgImgs.forEach((img) => {
+          const href = img.getAttribute("href") || img.getAttribute("xlink:href") || "";
+          if (!href) {
+            brokenImgs += 1;
+            debugLog("ERROR", "HealthCheck", "SVG <image> has empty href");
+          }
+        });
+        const totalImgs = htmlImgs.length + svgImgs.length;
+        const healthEl = document.getElementById("debug-img-health");
+        if (healthEl) {
+          healthEl.textContent = brokenImgs > 0
+            ? `Images: ${brokenImgs}/${totalImgs} broken`
+            : `Images: ${totalImgs} OK`;
+          healthEl.className = "badge " + (brokenImgs > 0 ? "health-blocked" : "health-healthy");
+        }
+        if (logSummary) {
+          debugLog(
+            brokenImgs > 0 ? "ERROR" : "INFO",
+            "HealthCheck",
+            `Checked ${totalImgs} images (${brokenImgs} broken), ${missingIdsSeen.size} missing DOM IDs.`
+          );
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function highlightMentions(text) {
+        return escapeHtml(text).replace(
+          /@([A-Za-z0-9][A-Za-z0-9_-]{0,63})/g,
+          '<span class="mention">@$1</span>'
+        );
+      }
+
+      const AVATARS = {"architect":"data:image/jpeg;base64,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","coordinator":"data:image/jpeg;base64,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","verifier":"data:image/jpeg;base64,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","worker":"data:image/jpeg;base64,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"};
+
+      function roleAvatar(name, role) {
+        const key = (String(name || "") + " " + String(role || "")).toLowerCase();
+        if (key.includes("coordinator") || key.includes("orchestrator") || key.includes("sabrina")) {
+          return AVATARS.coordinator;
+        }
+        if (key.includes("architect")) {
+          return AVATARS.architect;
+        }
+        if (key.includes("verif") || key.includes("critic") || key.includes("audit")) {
+          return AVATARS.verifier;
+        }
+        return AVATARS.worker;
+      }
+
+      function stateStrokeColor(st) {
+        if (st === "working") return "#38bdf8";
+        if (st === "done" || st === "active") return "#34d399";
+        if (st === "blocked") return "#f87171";
+        return "#a78bfa";
+      }
+
+      let scLinkSource = "";
+      let scPendingLink = null; // { from, to, id }
+      let scCachedLinks = [];
+
+      const SC_A2A_STYLES = {
+        pass_off: { label: "PASS-OFF", icon: "➔", color: "#38bdf8" },
+        loop: { label: "LOOP", icon: "↻", color: "#fbbf24" },
+        critique_gate: { label: "VERIFY", icon: "🛡", color: "#a78bfa" },
+        delegate_spawn: { label: "DELEGATE", icon: "⑂", color: "#34d399" },
+        blackboard_sync: { label: "BLACKBOARD", icon: "📡", color: "#60a5fa" },
+        escalate_hitl: { label: "ESCALATE", icon: "⚠", color: "#f87171" },
+      };
+
+      function updateScLinkBanner() {
+        const banner = el("sc-a2a-banner");
+        const cancelBtn = el("sc-a2a-cancel");
+        if (!banner) return;
+        if (scLinkSource) {
+          banner.innerHTML = `<b style="color:#fbbf24;">⚡ Source Selected: ${escapeHtml(scLinkSource)}</b> — Now click any target node (or click ${escapeHtml(scLinkSource)} again for a Self-Loop) to define a Loop, Pass-Off, or A2A link.`;
+          if (cancelBtn) cancelBtn.style.display = "inline-block";
+        } else if (scPendingLink) {
+          banner.innerHTML = `<b style="color:#60a5fa;">🛠 Defining A2A Link:</b> ${escapeHtml(scPendingLink.from)} ➔ ${escapeHtml(scPendingLink.to)} — Pick communication type below and click <b>✓ Apply A2A Link</b>.`;
+          if (cancelBtn) cancelBtn.style.display = "inline-block";
+        } else {
+          banner.textContent = "🔗 Click any agent node on the topology below to select a source, then click another node (or the same node) to define an A2A workflow link.";
+          if (cancelBtn) cancelBtn.style.display = "none";
+        }
+      }
+
+      function openScLinkComposer(fromNode, toNode, existingId = "") {
+        const existing = existingId
+          ? scCachedLinks.find((x) => x.id === existingId)
+          : scCachedLinks.find((x) => x.from === fromNode && x.to === toNode);
+        const isSelf = fromNode === toNode;
+        const isVerifierTarget = /verif|critic|audit/i.test(toNode);
+        const comm = existing ? existing.comm_type : (isSelf ? "loop" : (isVerifierTarget ? "critique_gate" : "pass_off"));
+        const cond = existing ? existing.condition : (comm === "loop" ? "on_needs_work" : "always");
+
+        scLinkSource = "";
+        scPendingLink = { from: fromNode, to: toNode, id: existing ? existing.id : "" };
+        el("sc-a2a-composer").style.display = "flex";
+        el("sc-a2a-pair").textContent = `${fromNode} ➔ ${toNode}`;
+        el("sc-a2a-comm").value = comm;
+        el("sc-a2a-cond").value = cond;
+        el("sc-a2a-loops").value = String(existing ? (existing.max_loops || 3) : 3);
+        el("sc-a2a-msg").value = existing ? (existing.message_template || "") : "";
+        el("sc-a2a-delete").style.display = existing ? "inline-block" : "none";
+        el("sc-a2a-feedback").textContent = "";
+        updateScLinkBanner();
+        if (currentState) renderTopology((currentState.roster && currentState.roster.workers) || {});
+      }
+
+      function cancelScLinkComposer() {
+        scLinkSource = "";
+        scPendingLink = null;
+        el("sc-a2a-composer").style.display = "none";
+        updateScLinkBanner();
+        if (currentState) renderTopology((currentState.roster && currentState.roster.workers) || {});
+      }
+
+      window.__scClickTopoNode = (nodeName) => {
+        const clean = String(nodeName || "").trim();
+        if (!clean) {
+          cancelScLinkComposer();
+          return;
+        }
+        if (!scLinkSource) {
+          scPendingLink = null;
+          el("sc-a2a-composer").style.display = "none";
+          scLinkSource = clean;
+          updateScLinkBanner();
+          if (currentState) renderTopology((currentState.roster && currentState.roster.workers) || {});
+          return;
+        }
+        openScLinkComposer(scLinkSource, clean);
+      };
+
+      window.__scClickTopoEdge = (edgeId) => {
+        const found = scCachedLinks.find((x) => x.id === edgeId);
+        if (found) openScLinkComposer(found.from, found.to, found.id);
+      };
+
+      el("sc-a2a-cancel").addEventListener("click", cancelScLinkComposer);
+      el("sc-a2a-comm").addEventListener("change", () => {
+        if (el("sc-a2a-comm").value === "loop" && el("sc-a2a-cond").value === "always") {
+          el("sc-a2a-cond").value = "on_needs_work";
+        }
+        if (currentState) renderTopology((currentState.roster && currentState.roster.workers) || {});
+      });
+
+      el("sc-a2a-apply").addEventListener("click", async () => {
+        if (!scPendingLink) return;
+        const fb = el("sc-a2a-feedback");
+        const payload = {
+          id: scPendingLink.id || undefined,
+          from: scPendingLink.from,
+          to: scPendingLink.to,
+          comm_type: el("sc-a2a-comm").value,
+          condition: el("sc-a2a-cond").value,
+          max_loops: Number(el("sc-a2a-loops").value || 3),
+          message_template: el("sc-a2a-msg").value.trim(),
+          announce: Boolean(el("sc-a2a-announce").checked),
+        };
+        try {
+          const r = await fetch("/api/a2a-links", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await r.json();
+          if (!r.ok || !data.ok) {
+            fb.textContent = data.message || "Failed saving link";
+            return;
+          }
+          scCachedLinks = data.a2a_links || [];
+          cancelScLinkComposer();
+          fetchState();
+        } catch (err) {
+          fb.textContent = String(err);
+        }
+      });
+
+      el("sc-a2a-delete").addEventListener("click", async () => {
+        if (!scPendingLink || !scPendingLink.id) return;
+        try {
+          const r = await fetch("/api/a2a-links/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: scPendingLink.id }),
+          });
+          if (r.ok) {
+            cancelScLinkComposer();
+            fetchState();
+          }
+        } catch (_) {}
+      });
+
+      function renderTopology(roster) {
+        const svg = el("topology-svg");
+        if (!svg) return;
+        const cx = 450, cy = 150;
+        const workers = Object.entries(roster || {}).filter(([name]) => name !== "coordinator");
+        const coords = new Map([["coordinator", { x: cx, y: cy, r: 30 }]]);
+        workers.forEach(([name], idx) => {
+          const angle = (2 * Math.PI * idx) / Math.max(1, workers.length) - Math.PI / 2;
+          const x = cx + 310 * Math.cos(angle);
+          const y = cy + 100 * Math.sin(angle);
+          coords.set(name, { x, y, r: 24 });
+        });
+
+        const defs = `
+          <defs>
+            <marker id="sc-arr-pass_off" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8"/></marker>
+            <marker id="sc-arr-loop" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#fbbf24"/></marker>
+            <marker id="sc-arr-critique_gate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#a78bfa"/></marker>
+            <marker id="sc-arr-delegate_spawn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#34d399"/></marker>
+            <marker id="sc-arr-blackboard_sync" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#60a5fa"/></marker>
+            <marker id="sc-arr-escalate_hitl" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 1 L 10 5 L 0 9 z" fill="#f87171"/></marker>
+            <clipPath id="clip-center"><circle cx="${cx}" cy="${cy}" r="28"/></clipPath>
+            ${workers.map(([name], idx) => {
+              const pt = coords.get(name);
+              return `<clipPath id="clip-w-${idx}"><circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="22"/></clipPath>`;
+            }).join("")}
+          </defs>
+        `;
+
+        const bgRect = `<rect x="0" y="0" width="900" height="300" fill="transparent" onclick="window.__scClickTopoNode('')" />`;
+
+        const edges = workers.map(([name, info]) => {
+          const pt = coords.get(name);
+          const st = (info && info.state) || "waiting";
+          const cls = st === "working" ? "edge-active" : (st === "done" ? "edge-done" : "edge-idle");
+          return `<line x1="${cx}" y1="${cy}" x2="${pt.x.toFixed(1)}" y2="${pt.y.toFixed(1)}" class="${cls}" />`;
+        }).join("");
+
+        const previewList = scCachedLinks.slice();
+        if (scPendingLink && !scPendingLink.id && coords.has(scPendingLink.from) && coords.has(scPendingLink.to)) {
+          previewList.push({
+            id: "__preview__",
+            from: scPendingLink.from,
+            to: scPendingLink.to,
+            comm_type: el("sc-a2a-comm").value || "pass_off",
+            condition: el("sc-a2a-cond").value || "always",
+            max_loops: Number(el("sc-a2a-loops").value || 3),
+            isPreview: true,
+          });
+        }
+
+        const a2aSvg = previewList.map((lk, idx) => {
+          const p = coords.get(lk.from);
+          const c = coords.get(lk.to);
+          if (!p || !c) return "";
+          const sty = SC_A2A_STYLES[lk.comm_type] || SC_A2A_STYLES.pass_off;
+          let pathD = "";
+          let mx = 0, my = 0;
+          if (lk.from === lk.to) {
+            pathD = `M ${(p.x - 16).toFixed(1)} ${(p.y - p.r).toFixed(1)} C ${(p.x - 42).toFixed(1)} ${(p.y - p.r - 48).toFixed(1)}, ${(p.x + 42).toFixed(1)} ${(p.y - p.r - 48).toFixed(1)}, ${(p.x + 16).toFixed(1)} ${(p.y - p.r).toFixed(1)}`;
+            mx = p.x;
+            my = p.y - p.r - 36;
+          } else {
+            const dx = c.x - p.x;
+            const dy = c.y - p.y;
+            const len = Math.max(1, Math.hypot(dx, dy));
+            const nx = -dy / len;
+            const ny = dx / len;
+            const bend = lk.comm_type === "loop" ? 44 : 26;
+            const sx = p.x + (dx / len) * (p.r + 3);
+            const sy = p.y + (dy / len) * (p.r + 3);
+            const ex = c.x - (dx / len) * (c.r + 5);
+            const ey = c.y - (dy / len) * (c.r + 5);
+            const qx = (sx + ex) / 2 + nx * bend;
+            const qy = (sy + ey) / 2 + ny * bend;
+            pathD = `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${qx.toFixed(1)} ${qy.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`;
+            mx = 0.25 * sx + 0.5 * qx + 0.25 * ex;
+            my = 0.25 * sy + 0.5 * qy + 0.25 * ey;
+          }
+          const lbl = `${sty.icon} ${sty.label}${lk.comm_type === "loop" ? " ×" + (lk.max_loops || 3) : ""}`;
+          const bw = Math.max(76, Math.round(lbl.length * 6.2 + 12));
+          const dash = (lk.comm_type === "loop" || lk.isPreview) ? 'stroke-dasharray="6 4"' : "";
+          const clickAttr = lk.isPreview ? "" : `style="cursor:pointer;" onclick="window.__scClickTopoEdge('${escapeHtml(lk.id)}')"`;
+          return `<g ${clickAttr}>
+            <path d="${pathD}" fill="none" stroke="${sty.color}" stroke-width="2.2" ${dash} marker-end="url(#sc-arr-${escapeHtml(lk.comm_type in SC_A2A_STYLES ? lk.comm_type : "pass_off")})" />
+            <rect x="${(mx - bw / 2).toFixed(1)}" y="${(my - 9).toFixed(1)}" width="${bw}" height="18" rx="5" fill="#0b0e14" stroke="${sty.color}" stroke-width="1" />
+            <text x="${mx.toFixed(1)}" y="${(my + 3.2).toFixed(1)}" text-anchor="middle" fill="${sty.color}" font-size="8.8" font-family="ui-monospace, monospace" font-weight="700">${escapeHtml(lbl)}</text>
+          </g>`;
+        }).join("");
+
+        const isCoordSrc = scLinkSource === "coordinator" || (scPendingLink && scPendingLink.from === "coordinator");
+        const centerNode = `
+          <g style="cursor:pointer;" onclick="window.__scClickTopoNode('coordinator')">
+            ${isCoordSrc ? `<circle cx="${cx}" cy="${cy}" r="38" fill="none" stroke="#fbbf24" stroke-dasharray="5 3" stroke-width="2.2" />` : ""}
+            <circle cx="${cx}" cy="${cy}" r="33" fill="#0f172a" stroke="${isCoordSrc ? "#fbbf24" : "#38bdf8"}" stroke-width="2.5" class="node-pulse" />
+            <image href="${AVATARS.coordinator}" xlink:href="${AVATARS.coordinator}" x="${cx - 28}" y="${cy - 28}" width="56" height="56" clip-path="url(#clip-center)" preserveAspectRatio="xMidYMid slice" />
+            <text x="${cx}" y="${cy + 48}" text-anchor="middle" fill="#e6ecf5" font-size="12" font-weight="600">Sabrina Controller</text>
+          </g>
+        `;
+
+        const workerNodes = workers.map(([name, info], idx) => {
+          const pt = coords.get(name);
+          const st = (info && info.state) || "waiting";
+          const isSrc = scLinkSource === name || (scPendingLink && scPendingLink.from === name);
+          const isDst = scPendingLink && scPendingLink.to === name;
+          const stroke = isSrc ? "#fbbf24" : (isDst ? "#38bdf8" : stateStrokeColor(st));
+          const pulse = st === "working" ? 'class="node-pulse"' : "";
+          const avatar = roleAvatar(name, info && info.role);
+          return `
+            <g style="cursor:pointer;" onclick="window.__scClickTopoNode('${escapeHtml(name)}')">
+              ${(isSrc || isDst) ? `<circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="30" fill="none" stroke="${stroke}" stroke-dasharray="4 3" stroke-width="2" />` : ""}
+              <circle cx="${pt.x.toFixed(1)}" cy="${pt.y.toFixed(1)}" r="25" fill="#0f172a" stroke="${stroke}" stroke-width="2.2" ${pulse} />
+              <image href="${avatar}" xlink:href="${avatar}" x="${(pt.x - 22).toFixed(1)}" y="${(pt.y - 22).toFixed(1)}" width="44" height="44" clip-path="url(#clip-w-${idx})" preserveAspectRatio="xMidYMid slice" />
+              <text x="${pt.x.toFixed(1)}" y="${(pt.y + 38).toFixed(1)}" text-anchor="middle" fill="#e6ecf5" font-size="11.5" font-weight="600">${escapeHtml(name)}</text>
+              <text x="${pt.x.toFixed(1)}" y="${(pt.y + 52).toFixed(1)}" text-anchor="middle" fill="${stroke}" font-size="10">${escapeHtml(isSrc ? "SOURCE" : (scLinkSource ? "⊕ LINK TO" : st))}</text>
+            </g>
+          `;
+        }).join("");
+
+        svg.innerHTML = defs + bgRect + edges + a2aSvg + centerNode + workerNodes;
+      }
+
+      function renderState(state) {
+        currentState = state;
+        const plan = state.plan || {};
+        const safety = state.safety || {};
+        const roster = (state.roster && state.roster.workers) || {};
+        const lockMatrix = state.lock_matrix || {};
+        const board = state.board || [];
+        scCachedLinks = Array.isArray(state.a2a_links) ? state.a2a_links : (Array.isArray(plan.a2a_links) ? plan.a2a_links : []);
+        el("sc-a2a-count").textContent = `${scCachedLinks.length} A2A link${scCachedLinks.length === 1 ? "" : "s"}`;
+        el("sc-a2a-links-strip").innerHTML = scCachedLinks.map((lk) => {
+          const sty = SC_A2A_STYLES[lk.comm_type] || SC_A2A_STYLES.pass_off;
+          return `<span class="lock-chip" style="cursor:pointer; border-color:${sty.color}; color:${sty.color};" onclick="window.__scClickTopoEdge('${escapeHtml(lk.id)}')">${escapeHtml(lk.from)} ${sty.icon} ${escapeHtml(lk.to)} [${escapeHtml(sty.label)}]</span>`;
+        }).join("");
+
+        el("swarm-title").textContent = plan.title || "Swarm Research Console";
+        el("swarm-goal").textContent = plan.goal || "No swarm goal set.";
+        el("swarm-phase").textContent = plan.phase || "planning";
+
+        const auth = Boolean(safety.execution_authorized);
+        const safetyBadge = el("safety-badge");
+        safetyBadge.textContent = "execution_authorized: " + (auth ? "true" : "false");
+        safetyBadge.className = "badge " + (auth ? "safety-true" : "safety-false");
+
+        // Worker status counts + Topology
+        renderTopology(roster);
+        const counts = { working: 0, waiting: 0, done: 0, blocked: 0 };
+        Object.values(roster).forEach((w) => {
+          const st = w.state || "waiting";
+          counts[st] = (counts[st] || 0) + 1;
+        });
+        el("worker-summary").innerHTML = Object.entries(counts)
+          .map(([st, count]) => `<span class="state-pill state-${escapeHtml(st)}">${escapeHtml(st)}: ${count}</span>`)
+          .join("");
+
+        // Threads
+        const threads = plan.threads || [];
+        el("threads-grid").innerHTML = threads.length
+          ? threads.map((t) => `
+              <div class="thread-card">
+                <div class="thread-top">
+                  <div class="thread-title">${escapeHtml(t.title || t.id)}</div>
+                  <span class="state-pill state-${escapeHtml(t.status || "waiting")}">${escapeHtml(t.status || "active")}</span>
+                </div>
+                <div class="thread-outcome">${escapeHtml(t.outcome || "")}</div>
+                <p class="thread-summary">${escapeHtml(t.summary || "")}</p>
+                <div class="pill-row">
+                  ${(t.workers || []).map((w) => `<span class="lock-chip">${escapeHtml(w)}</span>`).join("")}
+                </div>
+              </div>
+            `).join("")
+          : '<div class="muted">No outcome threads registered in plan.json.</div>';
+
+        // Conflicts
+        const conflicts = lockMatrix.conflicts || [];
+        const conflictingKeys = new Set();
+        const conflictingWorkers = new Set();
+        conflicts.forEach((c) => {
+          conflictingWorkers.add(c.worker);
+          conflictingWorkers.add(c.held_by);
+          conflictingKeys.add(c.worker + "::" + c.requested_lock);
+          conflictingKeys.add(c.held_by + "::" + c.existing_lock);
+        });
+
+        const banner = el("conflict-banner");
+        if (conflicts.length > 0) {
+          banner.style.display = "block";
+          banner.innerHTML = conflicts
+            .map((c) => `Lock conflict: <b>${escapeHtml(c.worker)}</b> (${escapeHtml(c.requested_lock)}) overlaps <b>${escapeHtml(c.held_by)}</b> (${escapeHtml(c.existing_lock)})`)
+            .join("<br/>");
+        } else {
+          banner.style.display = "none";
+          banner.innerHTML = "";
+        }
+
+        const entries = lockMatrix.entries || [];
+        const totalLocks = entries.reduce((acc, e) => acc + (e.locks ? e.locks.length : 0), 0);
+        el("lock-summary").textContent = `${entries.length} workers Â· ${totalLocks} locks`;
+
+        el("roster-body").innerHTML = entries.length
+          ? entries.map((e) => {
+              const info = roster[e.worker] || {};
+              const rowClass = conflictingWorkers.has(e.worker) ? "conflict-row" : "";
+              const lockHtml = (e.locks || []).length
+                ? e.locks.map((l) => {
+                    const cls = conflictingKeys.has(e.worker + "::" + l) ? "lock-chip conflict" : "lock-chip";
+                    return `<span class="${cls}">${escapeHtml(l)}</span>`;
+                  }).join("")
+                : '<span class="muted">none</span>';
+              return `
+                <tr class="${rowClass}">
+                  <td>
+                    <div class="worker-cell">
+                      <img class="avatar-md" src="${roleAvatar(e.worker, e.role)}" alt="${escapeHtml(e.role || 'worker')}" />
+                      <div>
+                        <div><b>${escapeHtml(e.worker)}</b></div>
+                        <div class="muted">${escapeHtml(e.role || "worker")}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="mono muted">${escapeHtml(e.model || "default")}</td>
+                  <td>
+                    <span class="state-pill state-${escapeHtml(e.state)}">${escapeHtml(e.state)}</span>
+                    ${info.note ? `<div class="muted" style="margin-top:4px;">${escapeHtml(info.note)}</div>` : ""}
+                  </td>
+                  <td>${lockHtml}</td>
+                </tr>
+              `;
+            }).join("")
+          : '<tr><td colspan="4" class="muted">No workers registered.</td></tr>';
+
+        // Agent filter options
+        const agentSelect = el("filter-agent");
+        const prevAgent = agentSelect.value;
+        const agents = Array.from(new Set(board.map((m) => m.agent))).sort();
+        agentSelect.innerHTML = '<option value="">All agents</option>' +
+          agents.map((a) => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join("");
+        agentSelect.value = agents.includes(prevAgent) ? prevAgent : "";
+
+        renderBoard();
+      }
+
+      function renderBoard() {
+        if (!currentState) return;
+        const board = currentState.board || [];
+        const roster = (currentState.roster && currentState.roster.workers) || {};
+        const selectedAgent = el("filter-agent").value;
+        const filtered = board.filter((m) => {
+          if (selectedAgent && m.agent !== selectedAgent) return false;
+          if (activeTag && !(m.tags || []).includes(activeTag)) return false;
+          return true;
+        });
+
+        el("board-count").textContent = `${filtered.length} / ${board.length} messages`;
+        const feed = el("board-feed");
+        feed.innerHTML = filtered.length
+          ? filtered.slice().reverse().map((m) => {
+              const tagsHtml = (m.tags || []).map((t) => {
+                const cls = ["PASS", "BLOCK", "done"].includes(t) ? `tag-${t}` : "tag-other";
+                return `<span class="tag-badge ${cls}">${escapeHtml(t)}</span>`;
+              }).join("");
+              const avatar = roleAvatar(m.agent, (roster[m.agent] && roster[m.agent].role) || "");
+              return `
+                <div class="msg-card">
+                  <div class="msg-meta">
+                    <span class="msg-author-wrap">
+                      <img class="avatar-sm" src="${avatar}" alt="${escapeHtml(m.agent)}" />
+                      <span class="msg-agent">${escapeHtml(m.agent)}</span>${tagsHtml}
+                    </span>
+                    <span class="msg-seq">#${escapeHtml(m.seq)} Â· ${escapeHtml(m.time || "")}</span>
+                  </div>
+                  <div class="msg-text">${highlightMentions(m.text)}</div>
+                </div>
+              `;
+            }).join("")
+          : '<div class="muted">No matching board messages.</div>';
+      }
+
+      // Filters
+      el("filter-agent").addEventListener("change", renderBoard);
+      document.querySelectorAll(".tag-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          document.querySelectorAll(".tag-btn").forEach((b) => b.classList.remove("active"));
+          btn.classList.add("active");
+          activeTag = btn.dataset.tag || "";
+          renderBoard();
+        });
+      });
+
+      // Worker update form
+      el("worker-form").addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const fb = el("wf-feedback");
+        fb.textContent = "";
+        fb.className = "form-feedback";
+        const locksRaw = el("wf-locks").value.trim();
+        const body = {
+          name: el("wf-name").value.trim(),
+          state: el("wf-state").value,
+        };
+        if (locksRaw) {
+          body.locks = locksRaw.split(",").map((s) => s.trim()).filter(Boolean);
+        }
+        try {
+          const res = await fetch("/api/worker", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            fb.textContent = data.message || "Worker update rejected.";
+            return;
+          }
+          fb.className = "form-feedback ok";
+          fb.textContent = `Updated ${data.worker.name} (${data.worker.state}).`;
+          fetchState();
+        } catch (err) {
+          fb.textContent = "Request failed: " + err;
+        }
+      });
+
+      // Board composer form
+      el("board-form").addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const fb = el("bf-feedback");
+        fb.textContent = "";
+        fb.className = "form-feedback";
+        try {
+          const res = await fetch("/api/board", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              agent: el("bf-agent").value.trim(),
+              text: el("bf-text").value.trim(),
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            fb.textContent = data.message || "Failed to post message.";
+            return;
+          }
+          el("bf-text").value = "";
+          fb.className = "form-feedback ok";
+          fb.textContent = `Posted #${data.message.seq}.`;
+          fetchState();
+        } catch (err) {
+          fb.textContent = "Request failed: " + err;
+        }
+      });
+
+      async function fetchState() {
+        try {
+          const res = await fetch("/api/state");
+          if (res.ok) {
+            const data = await res.json();
+            renderState(data);
+            setTimeout(() => runUiHealthCheck(false), 250);
+          } else {
+            debugLog("ERROR", "HTTP", `GET /api/state returned ${res.status}`);
+          }
+        } catch (err) {
+          debugLog("ERROR", "HTTP", `GET /api/state failed: ${err}`);
+        }
+      }
+
+      function connectSSE() {
+        const dot = el("sse-dot");
+        const label = el("sse-label");
+        const source = new EventSource("/events");
+        source.addEventListener("open", () => {
+          dot.className = "dot live";
+          label.textContent = "SSE Connected";
+        });
+        source.addEventListener("state", (ev) => {
+          dot.className = "dot live";
+          label.textContent = "SSE Connected";
+          try {
+            renderState(JSON.parse(ev.data));
+            setTimeout(() => runUiHealthCheck(false), 250);
+          } catch (err) {
+            debugLog("ERROR", "SSE", `Failed to parse/render state event: ${err}`);
+          }
+        });
+        source.addEventListener("error", () => {
+          dot.className = "dot err";
+          label.textContent = "Reconnecting SSE...";
+          debugLog("WARN", "SSE", "EventSource connection interrupted; reconnecting...");
+        });
+      }
+
+      let fleetTier = "";
+      let regOffset = 0;
+      const REG_LIMIT = 50;
+      let regItems = [];
+      let regTotal = 0;
+      let regSearchTimer = null;
+
+      let skillsOffset = 0;
+      let skillsItems = [];
+      let skillsTotal = 0;
+      let skillsSearchTimer = null;
+      let selectedSkillId = "";
+
+      function formatCtx(ctx) {
+        if (ctx === null || ctx === undefined) return "ctx: n/a";
+        if (ctx >= 1000000) return `ctx: ${(ctx / 1000000).toFixed(1)}M`;
+        if (ctx >= 1000) return `ctx: ${Math.round(ctx / 1000)}k`;
+        return `ctx: ${ctx}`;
+      }
+
+      function formatPricing(pricing) {
+        if (!pricing) return "";
+        const inP = pricing.input_per_1m;
+        const outP = pricing.output_per_1m;
+        if (inP === null && outP === null) return "";
+        return `$${inP ?? "?"}/$${outP ?? "?"} per 1M`;
+      }
+
+      function inferTierClient(m) {
+        if (m.tier && ["collective", "api", "external", "local"].includes(m.tier)) return m.tier;
+        const prov = String(m.provider || "").toLowerCase();
+        if (prov.includes("ollama") || prov === "local") return "local";
+        if (["gemini", "google", "gemma", "openai", "anthropic", "xai", "deepseek", "groq", "mistral", "together"].includes(prov)) return "api";
+        return "external";
+      }
+
+      function renderRegistryList() {
+        const list = el("registry-list");
+        const loadMore = el("reg-load-more");
+        const statusText = el("registry-status-text");
+        if (!regItems.length) {
+          list.innerHTML = '<div class="muted">No matching models in fleet.</div>';
+          loadMore.style.display = "none";
+          statusText.textContent = "0 results";
+          return;
+        }
+        list.innerHTML = regItems.map((m) => {
+          const tier = inferTierClient(m);
+          const tierLabel = tier === "local" ? "LOCAL · OLLAMA" : tier.toUpperCase();
+          const tierHtml = `<span class="tier-chip tier-${escapeHtml(tier)}">${escapeHtml(tierLabel)}</span>`;
+          const capsHtml = (m.capabilities || [])
+            .map((c) => `<span class="cap-chip">${escapeHtml(c)}</span>`)
+            .join("");
+          const depHtml = m.deprecated
+            ? `<span class="dep-chip">deprecated${m.retiring_at ? " · " + escapeHtml(m.retiring_at) : ""}</span>`
+            : "";
+          const priceStr = formatPricing(m.pricing);
+          const actionBtns = [];
+          actionBtns.push(`<button type="button" class="btn-secondary reg-pick-model" data-id="${escapeHtml(m.id)}">Mention</button>`);
+          if (m.custom) {
+            actionBtns.push(`<button type="button" class="btn-secondary reg-remove-model" data-id="${escapeHtml(m.id)}">Remove</button>`);
+          }
+          return `
+            <div class="registry-item">
+              <div class="registry-item-main">
+                <div class="registry-item-title">
+                  <span class="mono">${escapeHtml(m.id)}</span>
+                  ${tierHtml}
+                  ${capsHtml}
+                  ${depHtml}
+                </div>
+                <div class="registry-meta">
+                  <span>${escapeHtml(m.name)}</span>
+                  <span>provider: <b>${escapeHtml(m.provider)}</b></span>
+                  ${m.role ? `<span>role: ${escapeHtml(m.role)}</span>` : ""}
+                  ${m.size_gb ? `<span>size: ${escapeHtml(m.size_gb)}</span>` : ""}
+                  ${m.residency ? `<span>residency: ${escapeHtml(m.residency)}</span>` : ""}
+                  <span>${escapeHtml(formatCtx(m.context_window))}</span>
+                  ${priceStr ? `<span>${escapeHtml(priceStr)}</span>` : ""}
+                </div>
+              </div>
+              <div class="copilot-controls">${actionBtns.join("")}</div>
+            </div>
+          `;
+        }).join("");
+
+        list.querySelectorAll(".reg-pick-model").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const id = btn.dataset.id || "";
+            const bfText = el("bf-text");
+            bfText.value = (bfText.value ? bfText.value + " " : "") + `[model: ${id}]`;
+            bfText.focus();
+          });
+        });
+        list.querySelectorAll(".reg-remove-model").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const id = btn.dataset.id || "";
+            if (!id) return;
+            try {
+              const r = await fetch("/api/registry/models/remove", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id }),
+              });
+              if (r.ok) fetchRegistry({ append: false, refresh: true });
+            } catch (_) {}
+          });
+        });
+
+        statusText.textContent = `Showing ${regItems.length} of ${regTotal} matching models`;
+        loadMore.style.display = regItems.length < regTotal ? "inline-block" : "none";
+      }
+
+      let clientFallbackModels = null;
+      const FALLBACK_SKILLS = [
+        { id: "gemini-api-dev", name: "gemini-api-dev", source: "gemini-api", description: "Gemini Interactions API development for Gemini 4, TTS, Nano Banana 2.1, Omni 1.2 Flash, Genie 4, and Decisions." },
+        { id: "gemini-live-api-dev", name: "gemini-live-api-dev", source: "gemini-api", description: "Real-time bidirectional streaming with Gemini 3.8 Live API." },
+        { id: "gemini-omni-flash-api", name: "gemini-omni-flash-api", source: "gemini-api", description: "Generative video editing and creation with Gemini Omni 1.2 Flash." },
+        { id: "genie-4-live-world", name: "genie-4-live-world", source: "gemini-api", description: "Real-time interactive 16:9 world generation with Genie 4." },
+        { id: "gemini-api-cli", name: "gemini-api-cli", source: "gemini-api", description: "Call the Gemini API from the shell for media, transcription, and Deep Research." },
+        { id: "swarm", name: "swarm", source: "builtin", description: "Run a multi-agent swarm collaborating through a shared message board." },
+        { id: "run-workflow", name: "run-workflow", source: "builtin", description: "Write and run dynamic Python workflow scripts that orchestrate parallel agents." }
+      ];
+
+      async function loadClientFallbackModels(force = false) {
+        if (clientFallbackModels && !force) return clientFallbackModels;
+        const builtins = [
+          { id: "gemini-4-carbon", name: "Gemini 4 Carbon", provider: "gemini", tier: "api", capabilities: ["chat", "reasoning", "image", "audio", "video"], context_window: 1000000, deprecated: false },
+          { id: "gemini-4-neon", name: "Gemini 4 Neon", provider: "gemini", tier: "api", capabilities: ["chat", "reasoning", "image", "audio", "video"], context_window: 1000000, deprecated: false },
+          { id: "gemini-4-argon", name: "Gemini 4 Argon", provider: "gemini", tier: "api", capabilities: ["chat", "reasoning", "image", "audio", "video"], context_window: 1000000, deprecated: false },
+          { id: "gemini-4-hydrogen", name: "Gemini 4 Hydrogen", provider: "gemini", tier: "api", capabilities: ["chat", "reasoning", "image", "audio", "video"], context_window: 1000000, deprecated: false },
+          { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash-Lite", provider: "gemini", tier: "api", capabilities: ["chat", "image", "audio", "video"], context_window: 1000000, deprecated: false }
+        ];
+        try {
+          const r = await fetch("https://openrouter.ai/api/v1/models");
+          if (r.ok) {
+            const payload = await r.json();
+            const items = (payload.data || []).map((item) => {
+              const id = String(item.id || "");
+              const prov = id.includes("/") ? "openrouter:" + id.split("/")[0] : "openrouter";
+              const arch = item.architecture || {};
+              const mods = [].concat(arch.input_modalities || [], arch.output_modalities || []);
+              const caps = new Set(["chat"]);
+              mods.forEach((m) => { if (["image", "audio", "video", "embedding"].includes(m)) caps.add(m); });
+              if (/reason|thinking|r1|o1|o3|o4/i.test(id + " " + (item.name || ""))) caps.add("reasoning");
+              const pr = item.pricing || {};
+              const inP = pr.prompt ? Math.round(parseFloat(pr.prompt) * 1e6 * 1000) / 1000 : null;
+              const outP = pr.completion ? Math.round(parseFloat(pr.completion) * 1e6 * 1000) / 1000 : null;
+              return {
+                id: "openrouter/" + id,
+                name: item.name || id,
+                provider: prov,
+                tier: "external",
+                capabilities: Array.from(caps),
+                context_window: item.context_length || null,
+                pricing: (inP !== null || outP !== null) ? { input_per_1m: inP, output_per_1m: outP } : null,
+                deprecated: Boolean(item.deprecated)
+              };
+            });
+            clientFallbackModels = builtins.concat(items);
+            return clientFallbackModels;
+          }
+        } catch (_) {}
+        clientFallbackModels = builtins;
+        return clientFallbackModels;
+      }
+
+      async function fetchRegistry({ append = false, refresh = false } = {}) {
+        if (!append) {
+          regOffset = 0;
+          regItems = [];
+        }
+        const rawQ = el("reg-search").value.trim();
+        const q = encodeURIComponent(rawQ);
+        const prov = encodeURIComponent(el("reg-provider").value);
+        const cap = encodeURIComponent(el("reg-capability").value);
+        const tierParam = encodeURIComponent(fleetTier);
+        const dep = el("reg-deprecated").checked ? "1" : "0";
+        const refreshParam = refresh ? "&refresh=1" : "";
+        const url = `/api/registry/models?q=${q}&provider=${prov}&capability=${cap}&tier=${tierParam}&include_deprecated=${dep}&limit=${REG_LIMIT}&offset=${regOffset}${refreshParam}`;
+        try {
+          const res = await fetch(url);
+          let data;
+          if (!res.ok) {
+            const terms = rawQ.toLowerCase().split(/\s+/).filter(Boolean);
+            const allModels = await loadClientFallbackModels(refresh);
+            const provVal = el("reg-provider").value;
+            const capVal = el("reg-capability").value;
+            const incDep = el("reg-deprecated").checked;
+            const provSet = new Set();
+            const capSet = new Set();
+            const matched = allModels.filter((m) => {
+              provSet.add(m.provider);
+              (m.capabilities || []).forEach((c) => capSet.add(c));
+              if (!incDep && m.deprecated) return false;
+              const mt = inferTierClient(m);
+              if (fleetTier && mt !== fleetTier) return false;
+              if (provVal && m.provider !== provVal) return false;
+              if (capVal && !(m.capabilities || []).includes(capVal)) return false;
+              const blob = `${m.id} ${m.name} ${m.provider} ${mt} ${(m.capabilities || []).join(" ")}`.toLowerCase();
+              return terms.every((t) => blob.includes(t));
+            });
+            data = {
+              items: matched.slice(regOffset, regOffset + REG_LIMIT),
+              total: matched.length,
+              catalog_total: allModels.length,
+              providers: Array.from(provSet).sort(),
+              capabilities: Array.from(capSet).sort()
+            };
+          } else {
+            data = await res.json();
+          }
+          regTotal = data.total || 0;
+          const incoming = data.items || [];
+          regItems = append ? regItems.concat(incoming) : incoming;
+          el("registry-count-badge").textContent = `${data.catalog_total ?? regTotal} models`;
+
+          if (!append) {
+            const provSel = el("reg-provider");
+            const prevProv = provSel.value;
+            const providers = data.providers || [];
+            provSel.innerHTML = '<option value="">All providers</option>' +
+              providers.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+            provSel.value = providers.includes(prevProv) ? prevProv : "";
+
+            const capSel = el("reg-capability");
+            const prevCap = capSel.value;
+            const caps = data.capabilities || [];
+            capSel.innerHTML = '<option value="">All capabilities</option>' +
+              caps.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+            capSel.value = caps.includes(prevCap) ? prevCap : "";
+          }
+          renderRegistryList();
+        } catch (err) {
+          debugLog("ERROR", "Fleet", `Failed loading models: ${err}`);
+        }
+      }
+
+      el("add-model-form").addEventListener("submit", async (ev) => {
+        ev.preventDefault();
+        const fb = el("add-model-feedback");
+        const id = el("add-model-id").value.trim();
+        const name = el("add-model-name").value.trim();
+        const tier = el("add-model-tier").value;
+        const provider = el("add-model-provider").value.trim();
+        const role = el("add-model-role").value.trim();
+        if (!id) return;
+        fb.className = "form-feedback";
+        fb.textContent = "Adding model...";
+        try {
+          const res = await fetch("/api/registry/models/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id, name, tier, provider, role }),
+          });
+          const data = await res.json();
+          if (!res.ok || !data.ok) {
+            fb.textContent = data.message || data.error || "Failed to add model.";
+            return;
+          }
+          el("add-model-id").value = "";
+          el("add-model-name").value = "";
+          el("add-model-provider").value = "";
+          el("add-model-role").value = "";
+          fb.className = "form-feedback ok";
+          fb.textContent = `Added ${data.model ? data.model.id : id}`;
+          fetchRegistry({ append: false, refresh: true });
+        } catch (err) {
+          fb.textContent = `Error: ${err}`;
+        }
+      });
+
+      document.querySelectorAll("#fleet-tier-tabs .reg-tab-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          fleetTier = btn.dataset.tier || "";
+          document.querySelectorAll("#fleet-tier-tabs .reg-tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+          fetchRegistry({ append: false });
+        });
+      });
+      el("reg-search").addEventListener("input", () => {
+        clearTimeout(regSearchTimer);
+        regSearchTimer = setTimeout(() => fetchRegistry({ append: false }), 150);
+      });
+      el("reg-provider").addEventListener("change", () => fetchRegistry({ append: false }));
+      el("reg-capability").addEventListener("change", () => fetchRegistry({ append: false }));
+      el("reg-deprecated").addEventListener("change", () => fetchRegistry({ append: false }));
+      el("reg-refresh-btn").addEventListener("click", () => fetchRegistry({ append: false, refresh: true }));
+      el("reg-load-more").addEventListener("click", () => {
+        regOffset += REG_LIMIT;
+        fetchRegistry({ append: true });
+      });
+
+      // SEPARATE SKILL REGISTRY
+      function renderSkillsList() {
+        const list = el("skills-list");
+        const loadMore = el("skills-load-more");
+        const statusText = el("skills-status-text");
+        if (!skillsItems.length) {
+          list.innerHTML = '<div class="muted">No matching skills found.</div>';
+          loadMore.style.display = "none";
+          statusText.textContent = "0 skills";
+          return;
+        }
+        list.innerHTML = skillsItems.map((s) => `
+          <div class="registry-item" style="cursor:pointer;" data-skill-id="${escapeHtml(s.id)}">
+            <div class="registry-item-main">
+              <div class="registry-item-title">
+                <span>${escapeHtml(s.name)}</span>
+                <span class="cap-chip">${escapeHtml(s.source || "local")}</span>
+              </div>
+              <div class="registry-meta">
+                <span>${escapeHtml(s.description || "No description.")}</span>
+              </div>
+            </div>
+            <button type="button" class="btn-secondary skill-inspect-btn" data-id="${escapeHtml(s.id)}">Inspect</button>
+          </div>
+        `).join("");
+        list.querySelectorAll("[data-skill-id]").forEach((row) => {
+          row.addEventListener("click", () => inspectSkill(row.dataset.skillId || ""));
+        });
+        statusText.textContent = `Showing ${skillsItems.length} of ${skillsTotal} skills`;
+        loadMore.style.display = skillsItems.length < skillsTotal ? "inline-block" : "none";
+      }
+
+      async function inspectSkill(skillId) {
+        if (!skillId) return;
+        selectedSkillId = skillId;
+        const titleEl = el("skill-detail-title");
+        const srcEl = el("skill-detail-source");
+        const bodyEl = el("skill-detail-body");
+        titleEl.textContent = skillId;
+        bodyEl.textContent = "Loading SKILL.md...";
+        try {
+          const r = await fetch(`/api/registry/skills?id=${encodeURIComponent(skillId)}`);
+          if (r.ok) {
+            const data = await r.json();
+            if (data.skill) {
+              titleEl.textContent = data.skill.name || skillId;
+              srcEl.textContent = data.skill.source ? `[${data.skill.source}]` : "";
+              bodyEl.classList.remove("muted");
+              bodyEl.textContent = data.skill.content || data.skill.description || "(Empty SKILL.md)";
+              return;
+            }
+          }
+          const fb = FALLBACK_SKILLS.find((x) => x.id === skillId);
+          bodyEl.textContent = fb ? fb.description : "Skill detail unavailable.";
+        } catch (err) {
+          bodyEl.textContent = `Failed loading skill: ${err}`;
+        }
+      }
+
+      async function fetchSkills({ append = false, refresh = false } = {}) {
+        if (!append) {
+          skillsOffset = 0;
+          skillsItems = [];
+        }
+        const rawQ = el("skills-search").value.trim();
+        const q = encodeURIComponent(rawQ);
+        const src = encodeURIComponent(el("skills-source").value);
+        const refreshParam = refresh ? "&refresh=1" : "";
+        const url = `/api/registry/skills?q=${q}&source=${src}&limit=${REG_LIMIT}&offset=${skillsOffset}${refreshParam}`;
+        try {
+          const res = await fetch(url);
+          let data;
+          if (!res.ok) {
+            const terms = rawQ.toLowerCase().split(/\s+/).filter(Boolean);
+            const srcVal = el("skills-source").value;
+            const matched = FALLBACK_SKILLS.filter((s) => {
+              if (srcVal && s.source !== srcVal) return false;
+              const blob = `${s.id} ${s.name} ${s.description} ${s.source}`.toLowerCase();
+              return terms.every((t) => blob.includes(t));
+            });
+            data = {
+              items: matched.slice(skillsOffset, skillsOffset + REG_LIMIT),
+              total: matched.length,
+              catalog_total: FALLBACK_SKILLS.length,
+              sources: Array.from(new Set(FALLBACK_SKILLS.map((s) => s.source))).sort()
+            };
+          } else {
+            data = await res.json();
+          }
+          skillsTotal = data.total || 0;
+          skillsItems = append ? skillsItems.concat(data.items || []) : (data.items || []);
+          el("skills-count-badge").textContent = `${data.catalog_total ?? skillsTotal} skills`;
+          if (!append && Array.isArray(data.sources)) {
+            const srcSel = el("skills-source");
+            const prevSrc = srcSel.value;
+            srcSel.innerHTML = '<option value="">All sources</option>' +
+              data.sources.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
+            srcSel.value = data.sources.includes(prevSrc) ? prevSrc : "";
+          }
+          renderSkillsList();
+          if (!selectedSkillId && skillsItems.length) {
+            inspectSkill(skillsItems[0].id);
+          }
+        } catch (err) {
+          debugLog("ERROR", "Skills", `Failed loading skills: ${err}`);
+        }
+      }
+
+      el("skills-search").addEventListener("input", () => {
+        clearTimeout(skillsSearchTimer);
+        skillsSearchTimer = setTimeout(() => fetchSkills({ append: false }), 150);
+      });
+      el("skills-source").addEventListener("change", () => fetchSkills({ append: false }));
+      el("skills-refresh-btn").addEventListener("click", () => fetchSkills({ append: false, refresh: true }));
+      el("skills-load-more").addEventListener("click", () => {
+        skillsOffset += REG_LIMIT;
+        fetchSkills({ append: true });
+      });
+
+      el("debug-badge").addEventListener("click", () => {
+        const panel = el("debug-panel");
+        if (panel) {
+          panel.open = true;
+          panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      });
+      el("debug-check-btn").addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        runUiHealthCheck(true);
+      });
+      el("debug-clear-btn").addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        debugEntries.length = 0;
+        renderDebugFeed();
+      });
+      el("debug-copy-btn").addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const report = JSON.stringify(
+          {
+            timestamp: new Date().toISOString(),
+            url: location.href,
+            missing_dom_ids: Array.from(missingIdsSeen),
+            entries: debugEntries,
+          },
+          null,
+          2
+        );
+        try {
+          await navigator.clipboard.writeText(report);
+          debugLog("INFO", "Debug", "Copied diagnostic JSON report to clipboard.");
+        } catch (err) {
+          debugLog("WARN", "Debug", `Clipboard copy unavailable: ${err}`);
+        }
+      });
+
+      fetchState();
+      fetchRegistry({ append: false });
+      fetchSkills({ append: false });
+      connectSSE();
+      setTimeout(() => runUiHealthCheck(false), 600);
+    })();
+  </script>
+</body>
+</html>

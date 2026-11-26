@@ -1,0 +1,29 @@
+services:
+  hitl-gate:
+    image: python:3.11-slim
+    container_name: livingarchive-hitl-gate
+    restart: unless-stopped
+    command: ["python3", "/app/hitl_server.py"]
+    ports:
+      - "8890:8890"
+    environment:
+      - HITL_HOST=0.0.0.0
+      - HITL_PORT=8890
+      - HITL_DB_PATH=/data/approvals.db
+      - HITL_PUBLIC_URL=http://192.168.1.133:8890
+      - HITL_WEBHOOK_URL=${HITL_WEBHOOK_URL:-}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./hitl_server.py:/app/hitl_server.py:ro
+      - ./data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8890/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

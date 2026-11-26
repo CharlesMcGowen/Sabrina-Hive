@@ -1,0 +1,273 @@
+"""Bounded, observable social-media pulse worker."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import random
+import signal
+import time
+from typing import Callable
+
+from .runtime import SocialRuntime
+
+
+DEFAULT_INTERESTS = [
+    "AI engineering", "application security", "cybersecurity research",
+    "software architecture", "responsible AI", "technical recruiting",
+]
+
+ROUND_ROBIN_TASKS = [
+    "engage_feed",
+    "x_creator_pulse",
+    "jobs_apply",
+    "x_creator_pulse",
+    "cybersecurity_scout",
+    "x_creator_pulse",
+    "triage_inbox",
+    "x_creator_pulse",
+    "ai_eval_scout",
+    "x_creator_pulse",
+    "jobs_apply",
+    "x_creator_pulse",
+    "jobs_discover",
+    "create_post",
+]
+
+
+class SocialPulseWorker:
+    def __init__(self, runtime: SocialRuntime, live: bool = False,
+                 interests: list[str] | None = None, max_posts: int = 4,
+                 emit: Callable[[dict], None] | None = None, account_url: str | None = None):
+        self.runtime = runtime
+        self.live = bool(live)
+        self.interests = interests or DEFAULT_INTERESTS
+        self.max_posts = max(1, min(int(max_posts), 5))
+        self.emit = emit or (lambda value: print(json.dumps(value, ensure_ascii=False), flush=True))
+        self.account_url = account_url or os.environ.get("SABRINA_LINKEDIN_ACCOUNT_URL")
+        self.stop_requested = False
+
+    def stop(self, *_):
+        self.stop_requested = True
+
+    def pulse(self) -> dict:
+        # Hold the shared coordinator reservation across auth, reply reads and feed
+        # actions, including model latency. The client heartbeats this lease.
+        from tools.control_client import resource_lease
+        from tools.worker_identity import operation_identity
+        import uuid
+        with operation_identity(os.environ.get('SABRINA_SOCIAL_OCCURRENCE') or uuid.uuid4().hex), resource_lease(os.environ.get('SABRINA_BROWSER_RESOURCE', 'browser:linkedin-primary')):
+            return self._pulse_owned()
+
+    def _pulse_owned(self) -> dict:
+        store = self.runtime.store
+        lease_owner = store.claim_lease("social-pulse-browser", 900)
+        if not lease_owner:
+            return {"status": "skipped", "reason": "another social pulse owns the browser lease"}
+        operation = store.begin_operation("social_pulse", {
+            "live": self.live, "max_posts": self.max_posts, "interests": self.interests,
+        })
+        operation_id = operation["id"]
+        try:
+            if self.live and not self.account_url:
+                result = {"status": "blocked", "reason": "Live pulses require SABRINA_LINKEDIN_ACCOUNT_URL"}
+                store.finish_operation(operation_id, "failed", result=result)
+                return {**result, "operation_id": operation_id}
+            if self.account_url:
+                os.environ["SABRINA_LINKEDIN_ACCOUNT_URL"] = self.account_url
+            store.operation_event(operation_id, "authentication_check_starting", {})
+            auth = self.runtime.connection_status()
+            store.operation_event(operation_id, "authentication_checked", {
+                "browser_connected": auth.get("browser_connected"),
+                "linkedin_authenticated": auth.get("linkedin_authenticated"),
+                "auth_detail": auth.get("auth_detail"),
+            })
+            if not auth.get("linkedin_authenticated"):
+                result = {"status": "blocked", "reason": "LinkedIn is not authenticated", "auth": auth}
+                store.finish_operation(operation_id, "failed", result=result)
+                return {**result, "operation_id": operation_id}
+
+            # Reply checks are suggestion-only. They must not block the live
+            # feed engagement phase when a stale conversation/tab hangs.
+            replies = {"status": "deferred", "reason": "feed_phase_priority"}
+            if not self.live or os.environ.get("SABRINA_SOCIAL_CHECK_REPLIES_FIRST") == "1":
+                store.operation_event(operation_id, "reply_check_starting", {"publish": False})
+                replies = self.runtime.manager.check_replies(max_threads=3, publish=False, max_replies=1)
+                store.operation_event(operation_id, "reply_check_completed", {
+                    "status": replies.get("status"), "candidate_count": len(replies.get("replies", [])),
+                })
+            else:
+                store.operation_event(operation_id, "reply_check_deferred", {"reason": "feed_phase_priority"})
+            if self.stop_requested:
+                result = {"status": "interrupted", "replies": replies}
+                store.finish_operation(operation_id, "interrupted", result=result)
+                return {**result, "operation_id": operation_id}
+
+            payload = {"keywords": self.interests, "max_posts": self.max_posts,
+                       "max_engagements": 1}
+            rot_state = store.get_rotation_state(ROUND_ROBIN_TASKS) if hasattr(store, "get_rotation_state") else {"next_task": "engage_feed", "cursor_index": 0}
+            selected_task = rot_state.get("next_task") or "engage_feed"
+            store.operation_event(operation_id, "round_robin_task_selected", {
+                "task": selected_task, "cursor_index": rot_state.get("cursor_index", 0), "live": self.live,
+            })
+
+            task_detail = {}
+            feed = {"status": "interrupted", "task": selected_task}
+            next_rot = {"next_task": "engage_feed", "cursor_index": 0}
+            try:
+                if selected_task == "engage_feed":
+                    store.operation_event(operation_id, "feed_scan_starting", {"live": self.live})
+                    if self.live:
+                        feed = self.runtime.execute_live_action("engage_feed", payload)
+                    else:
+                        feed = self.runtime.run_read("feed_suggestions", payload)
+                    store.operation_event(operation_id, "feed_scan_completed", {
+                        "status": feed.get("status"), "posts_scanned": feed.get("posts_scanned", 0),
+                        "actions_attempted": feed.get("actions_attempted", 0),
+                        "decisions": feed.get("decisions", []),
+                    })
+                    task_detail = feed
+                elif selected_task == "x_creator_pulse":
+                    store.operation_event(operation_id, "x_creator_pulse_starting", {"live": self.live})
+                    x_res = self.runtime.run_read("x_creator_pulse", {"auto_publish": self.live})
+                    feed = {"status": x_res.get("status", "success"), "task": "x_creator_pulse", **x_res}
+                    task_detail = feed
+                    store.operation_event(operation_id, "x_creator_pulse_completed", {
+                        "status": feed.get("status"),
+                        "reply_status": (x_res.get("reply") or {}).get("status"),
+                        "post_status": (x_res.get("post") or {}).get("status"),
+                    })
+                elif selected_task == "cybersecurity_scout":
+                    store.operation_event(operation_id, "cybersecurity_scout_starting", {"live": self.live})
+                    scout_res = self.runtime.run_read("cybersecurity_scout", {
+                        "max_posts": self.max_posts, "dry_run": not self.live, "auto_approve": self.live,
+                    })
+                    feed = {"status": scout_res.get("status", "success"), "task": "cybersecurity_scout", **scout_res}
+                    task_detail = feed
+                    store.operation_event(operation_id, "cybersecurity_scout_completed", {"status": feed.get("status")})
+                elif selected_task == "triage_inbox":
+                    store.operation_event(operation_id, "inbox_triage_starting", {"live": self.live})
+                    inbox_res = self.runtime.run_read("inbox", {"max_threads": 2})
+                    feed = {"status": inbox_res.get("status", "success"), "task": "triage_inbox", "inbox": inbox_res}
+                    task_detail = feed
+                    store.operation_event(operation_id, "inbox_triage_completed", {"status": feed.get("status")})
+                elif selected_task == "ai_eval_scout":
+                    store.operation_event(operation_id, "ai_eval_scout_starting", {"live": self.live})
+                    eval_res = self.runtime.run_read("ai_eval_scout", {"include_linkedin": True})
+                    feed = {"status": eval_res.get("status", "success"), "task": "ai_eval_scout", **eval_res}
+                    task_detail = feed
+                    store.operation_event(operation_id, "ai_eval_scout_completed", {
+                        "status": feed.get("status"),
+                        "direct_staged": (eval_res.get("direct_platforms") or {}).get("roles_staged", 0),
+                    })
+                elif selected_task == "jobs_discover":
+                    store.operation_event(operation_id, "jobs_discover_starting", {"live": self.live})
+                    jobs_res = self.runtime.run_read("jobs_discover", {"max_jobs": 6, "easy_apply_only": False})
+                    feed = {"status": jobs_res.get("status", "success"), "task": "jobs_discover", **jobs_res}
+                    task_detail = feed
+                    store.operation_event(operation_id, "jobs_discover_completed", {
+                        "status": feed.get("status"), "jobs_discovered": jobs_res.get("jobs_discovered", 0),
+                        "jobs_staged": jobs_res.get("jobs_staged", 0),
+                    })
+                elif selected_task == "jobs_apply":
+                    store.operation_event(operation_id, "jobs_apply_starting", {"live": self.live})
+                    apply_res = self.runtime.run_read("jobs_apply", {}) if self.live else {"status": "skipped", "reason": "observation_mode"}
+                    feed = {"status": apply_res.get("status", "success"), "task": "jobs_apply", **apply_res}
+                    task_detail = feed
+                    store.operation_event(operation_id, "jobs_apply_completed", {"status": feed.get("status"), "job_id": apply_res.get("job_id")})
+                elif selected_task == "create_post":
+                    topic = random.choice(self.interests)
+                    store.operation_event(operation_id, "create_post_starting", {"topic": topic, "live": self.live})
+                    from tools.social_post_swarm import recent_post_cooldown_active
+                    cooldown = recent_post_cooldown_active(social_db_path=getattr(store, "path", None), cooldown_seconds=43200)
+                    if cooldown:
+                        draft_res = {
+                            "status": "completed",
+                            "skipped": True,
+                            "reason": f"Post draft cooldown active ({cooldown['operation_id']})",
+                        }
+                    elif hasattr(self.runtime, "draft_post"):
+                        draft_res = self.runtime.draft_post(topic=topic)
+                    else:
+                        draft_res = self.runtime.run_read("feed_suggestions", payload)
+                    feed = {"status": draft_res.get("status", "success"), "task": "create_post", "draft": draft_res}
+                    task_detail = feed
+                    store.operation_event(operation_id, "create_post_completed", {"status": feed.get("status"), "topic": topic})
+                else:
+                    feed = self.runtime.run_read("feed_suggestions", payload)
+                    task_detail = feed
+            finally:
+                # Always advance the round-robin cursor even on timeout/interruption so a stuck task never loops forever.
+                reason = str(task_detail.get("reason") or task_detail.get("error") or "")
+                next_rot = (
+                    store.advance_rotation_state(ROUND_ROBIN_TASKS, selected_task, str(feed.get("status", "unknown")), reason)
+                    if hasattr(store, "advance_rotation_state")
+                    else {"next_task": "engage_feed", "cursor_index": 0}
+                )
+            rsi_reflection = None
+            if next_rot.get("cursor_index") == 0 or selected_task in ("jobs_apply", "create_post"):
+                try:
+                    rsi_reflection = self.runtime.run_read("rsi_reflect", {"rounds": 1})
+                    store.operation_event(operation_id, "rsi_reflection_completed", {
+                        "generation": rsi_reflection.get("generation"),
+                        "current_fitness": rsi_reflection.get("current_fitness"),
+                        "verdict": rsi_reflection.get("verdict"),
+                    })
+                except Exception as rsi_exc:
+                    rsi_reflection = {"status": "skipped", "reason": str(rsi_exc)}
+
+            result = {
+                "status": "completed",
+                "live": self.live,
+                "replies": replies,
+                "feed": feed,
+                "round_robin": {
+                    "executed_task": selected_task,
+                    "next_task": next_rot.get("next_task"),
+                    "cursor_index": next_rot.get("cursor_index"),
+                },
+                "rsi_reflection": rsi_reflection,
+            }
+            status = "completed" if feed.get("status") in ("success", "drafted_for_review", "completed") else "unverified"
+            store.finish_operation(operation_id, status, result=result)
+            return {**result, "operation_id": operation_id}
+        except BaseException as exc:
+            store.finish_operation(operation_id, "interrupted", error=str(exc))
+            raise
+        finally:
+            store.release_lease("social-pulse-browser", lease_owner)
+            self.runtime.disconnect_browser()
+
+    def run(self, max_pulses: int = 1, interval_min: int = 600, interval_max: int = 1200):
+        low, high = sorted((max(30, interval_min), max(30, interval_max)))
+        completed = 0
+        while not self.stop_requested and (max_pulses <= 0 or completed < max_pulses):
+            result = self.pulse()
+            self.emit(result)
+            completed += 1
+            if self.stop_requested or (max_pulses > 0 and completed >= max_pulses):
+                break
+            delay = random.randint(low, high)
+            self.emit({"status": "sleeping", "seconds": delay})
+            end = time.time() + delay
+            while not self.stop_requested and time.time() < end:
+                time.sleep(min(5, end - time.time()))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run bounded Sabrina Social pulses")
+    parser.add_argument("--live", action="store_true", help="Allow at most one recorded feed interaction per pulse")
+    parser.add_argument("--max-pulses", type=int, default=1, help="0 runs until stopped")
+    parser.add_argument("--max-posts", type=int, default=4, choices=range(1, 6))
+    parser.add_argument("--interval-min", type=int, default=600)
+    parser.add_argument("--interval-max", type=int, default=1200)
+    args = parser.parse_args()
+    worker = SocialPulseWorker(SocialRuntime(), live=args.live, max_posts=args.max_posts)
+    signal.signal(signal.SIGINT, worker.stop)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, worker.stop)
+    worker.run(args.max_pulses, args.interval_min, args.interval_max)
+
+
+if __name__ == "__main__":
+    main()

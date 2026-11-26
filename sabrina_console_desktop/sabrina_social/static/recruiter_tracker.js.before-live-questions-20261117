@@ -1,0 +1,129 @@
+'use strict';
+let tracker={contacts:[]};
+const el=id=>document.getElementById(id);
+const labels={authorized:'Queued',awaiting_reply:'Earlier introduction verified',reply_received:'Reply received',
+  needs_review:'Needs review',uncertain:'Delivery unconfirmed',covered_in_another_thread:'Outreach in another thread',
+  review_only:'Reviewing conversations. Sending is paused.',paused:'Outreach paused',
+  reader:'Reader working',drafter:'Drafter working',critic:'Independent reviewer working',prepared:'Review queued',
+  model_review_complete:'Fresh source check pending',draft_ready:'Draft ready for your review',
+  no_reply:'No reply due',needs_input:'Needs your information',blocked:'Review could not be accepted',
+  stale:'Conversation changed; review again',unavailable:'Review evidence unavailable'};
+const label=s=>labels[s]||String(s||'').replaceAll('_',' ');
+const node=(tag,text)=>{const n=document.createElement(tag);n.textContent=text||'';return n};
+const detail=(title,content)=>{const d=document.createElement('details');d.append(node('summary',title));d.append(content);return d};
+const date=s=>s?new Date(s).toLocaleString():'unknown';
+function safeLink(text,url){
+  let a=node('a',text);
+  if(url&&/^https:\/\/www\.linkedin\.com\/messaging\/thread\//.test(url)){a.href=url;a.target='_blank';a.rel='noopener noreferrer'}
+  return a;
+}
+function reason(text){
+  if(/No new own message ID|verification timeout/.test(text||''))return 'LinkedIn did not confirm delivery. Verify this conversation before another send.';
+  return text||'';
+}
+function transcript(messages){
+  let wrap=document.createElement('div');
+  for(const m of messages||[]){
+    let card=node('div','');card.className='source-message';
+    card.append(node('b',(m.ownership==='self'?'You':m.author||'Contact')+' · '+[m.date_text,m.timestamp_text].filter(Boolean).join(' ')));
+    card.append(node('pre',m.text));
+    card.append(detail('Source message reference',node('small',m.id)));
+    wrap.append(card);
+  }
+  return wrap;
+}
+function modelEvidence(review){
+  const wrap=document.createElement('div');
+  if(!review){wrap.append(node('p','No model has reviewed this captured conversation yet.'));return wrap}
+  wrap.append(node('b',label(review.status)));
+  if(review.error)wrap.append(node('p',review.error));
+  const artifacts=review.artifacts||[];
+  const reader=[...artifacts].reverse().find(a=>a.role==='reader'&&a.parsed&&!a.validation_error)?.parsed;
+  const critic=[...artifacts].reverse().find(a=>a.role==='critic'&&a.parsed&&!a.validation_error)?.parsed;
+  if(reader){
+    wrap.append(node('p','What they asked: '+reader.latest_request));
+    wrap.append(node('p',reader.summary));
+    wrap.append(node('p','Who owes the next response: '+reader.response_owner));
+    for(const f of reader.known_role_facts||[])wrap.append(node('p',f.field.replaceAll('_',' ')+': '+f.value+' · Source: “'+f.quote+'”'));
+    for(const c of reader.user_commitments||[])wrap.append(node('p','Existing promise: '+c.text+' · “'+c.quote+'”'));
+    if(reader.missing_user_information?.length)wrap.append(node('p','Needed from you: '+reader.missing_user_information.join(', ')));
+  }
+  if(review.decision){
+    wrap.append(node('p','Recommended action: '+label(review.decision.action)));
+    wrap.append(node('p',review.decision.reason));
+    if(review.decision.draft)wrap.append(detail('Proposed reply for review',node('pre',review.decision.draft)));
+  }
+  if(critic)wrap.append(node('p','Independent check: '+critic.verdict+' · '+critic.reason));
+  const profile=review.packet?.approved_profile;
+  if(profile){
+    const p=node('div','');p.append(node('p','Profile version '+profile.version+' supplied to every model'));
+    for(const f of profile.facts||[])p.append(node('p',f.text));
+    p.append(node('p','Preferences supplied: '+JSON.stringify(profile.preferences||{})));
+    wrap.append(detail('The user information the models received',p));
+  }
+  if(review.packet?.thread)wrap.append(detail('The exact captured chat supplied to every model',transcript(review.packet.thread.messages)));
+  const provenance=node('div','');
+  for(const a of artifacts){
+    const entry=node('div','');entry.append(node('b',a.role+' · '+a.family+' · '+a.model));
+    if(a.validation_error)entry.append(node('p','Rejected: '+a.validation_error));
+    else if(a.parsed)entry.append(node('p','Model response recorded and source checks passed'));
+    else entry.append(node('p','Model request recorded; awaiting its response'));
+    if(a.raw_output)entry.append(detail('Verbatim model response',node('pre',a.raw_output)));
+    if(a.request_id)entry.append(detail('Lab request receipt',node('small',a.request_id)));
+    provenance.append(entry);
+  }
+  wrap.append(detail('Which models ran and what each actually returned',provenance));
+  return wrap;
+}
+function render(){
+  el('rows').replaceChildren();
+  const q=el('search').value.toLowerCase(),filter=el('filter').value;
+  for(const c of tracker.contacts||[]){
+    if(filter&&c.status!==filter&&c.model_review?.status!==filter)continue;
+    if(q&&!(c.name+' '+c.latest_message+' '+(c.model_review?.decision?.reason||'')).toLowerCase().includes(q))continue;
+    const tr=document.createElement('tr'),who=document.createElement('td');
+    who.append(safeLink(c.name,c.url));who.append(node('p',c.message_count+' captured messages'));
+    who.append(node('small',c.context_complete?'Capture completeness checks passed':'History incomplete; no sendable draft'));
+    tr.append(who);
+    const delivery=node('td',label(c.status));
+    if(c.reason)delivery.append(node('p',reason(c.reason)));
+    if(c.outreach_text){let d=node('div','');d.append(node('pre',c.outreach_text));d.append(node('small',c.receipt?.message_id?'LinkedIn delivery receipt recorded':'Delivery has not been confirmed'));delivery.append(detail('Earlier outreach record',d))}
+    tr.append(delivery);
+    const messages=node('td','');messages.className='message';
+    messages.append(detail((c.latest_owner==='self'?'You: ':'Contact: ')+c.latest_message.slice(0,150),node('pre',c.latest_message)));
+    messages.append(detail('Read the captured conversation',transcript(c.source_messages)));
+    tr.append(messages);
+    const evidence=node('td','');
+    if(c.model_review){
+      evidence.append(node('b',label(c.model_review.status)));
+      if(c.model_review.decision)evidence.append(node('p',c.model_review.decision.reason));
+      evidence.append(detail('Why, sources, and model responses',modelEvidence(c.model_review)));
+    }else evidence.append(node('p','Not reviewed by a model yet'));
+    tr.append(evidence);
+    const next=node('td',c.next_action);next.append(node('small','Sending remains paused. Model reviews do not approve a send.'));tr.append(next);
+    el('rows').append(tr);
+  }
+}
+async function refresh(){
+  try{
+    const r=await fetch('/api/recruiters');if(!r.ok)throw Error('Tracker unavailable');tracker=await r.json();
+    const worker=tracker.worker||{};
+    const workerHeading=worker.outbound_paused||worker.state==='paused'
+      ?'Recruiter replies are paused'
+      :worker.state==='waiting_for_operating_hours'
+        ?'Recruiter replies resume at 8:00 a.m. Central'
+        :'Recruiter reply status: '+label(worker.state||'unknown');
+    el('health').replaceChildren(node('b',workerHeading));
+    el('health').append(node('p',tracker.worker?.detail||'Conversation evidence is loading.'));
+    el('health').append(node('small','Last sync: '+date(tracker.updated)+' · '+(tracker.source_host||'Windows desktop')));
+    el('profile').replaceChildren(node('b','Saved profile version '+(tracker.profile?.version||0)));
+    for(const f of tracker.profile?.facts||[])el('profile').append(node('p',f.text));
+    el('profile').append(node('p','Unprovided resume, experience, pay preferences, work location and interview availability remain unknown.'));
+    el('counts').replaceChildren(node('p',(tracker.total_recruiters||0)+' identified recruiters · '+(tracker.total_conversations||0)+' captured conversations'));
+    for(const [status,count]of Object.entries(tracker.counts||{})){let pill=node('span',count+' '+label(status));pill.className='pill';el('counts').append(pill)}
+    el('counts').append(node('p','Discovery: '+(tracker.worker?.coverage||'Coverage has not been established')));
+    render();
+  }catch(error){el('health').textContent=error.message}
+}
+el('refresh').onclick=refresh;el('search').oninput=render;el('filter').onchange=render;
+refresh();setInterval(refresh,30000);

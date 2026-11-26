@@ -1,0 +1,13 @@
+[package]
+name = "sabrina-h1-v2-kernel"
+version = "2.1.0"
+edition = "2021"
+description = "Standalone deterministic Rust kernel and C99 FFI parity suite for Sabrina Track B H1-v2-PDLR"
+
+[lib]
+name = "sabrina_h1_v2_kernel"
+path = "src/lib.rs"
+
+[features]
+default = []
+c_ffi = []

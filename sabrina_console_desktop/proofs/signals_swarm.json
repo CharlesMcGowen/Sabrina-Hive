@@ -1,0 +1,61 @@
+[
+  {
+    "name": "swarm1_high_volume_breakout",
+    "rationale": "Hive Council signal 1. Repaired: usd_vol(60) < 0.1 replaced by >= 50000; drawdown < 0.98 read as close/high, i.e. <= -0.02; barriers 0.05/0.01 read as 5%/1%.",
+    "all": [
+      {"feature": "usd_vol", "n": 60, "op": ">=", "value": 50000},
+      {"feature": "range_pos", "n": 30, "op": ">=", "value": 0.75},
+      {"feature": "drawdown_from_high", "n": 240, "op": "<", "value": -0.02},
+      {"feature": "btc_ret", "n": 60, "op": ">=", "value": 0.01}
+    ],
+    "barriers": {"up_pct": 5, "down_pct": 1, "max_hold_bars": 324},
+    "cooldown_bars": 0
+  },
+  {
+    "name": "swarm2_range_bounded_volatility",
+    "rationale": "Hive Council signal 2. Repaired: drawdown sign; barriers 0.02/0.01 read as 2%/1%; liquidity floor added (the council omitted it). volatility >= 0.15 kept as written.",
+    "all": [
+      {"feature": "volatility", "n": 30, "op": ">=", "value": 0.15},
+      {"feature": "range_pos", "n": 60, "op": ">=", "value": 0.75},
+      {"feature": "drawdown_from_high", "n": 240, "op": "<", "value": -0.02},
+      {"feature": "usd_vol", "n": 96, "op": ">=", "value": 50000}
+    ],
+    "barriers": {"up_pct": 2, "down_pct": 1, "max_hold_bars": 324},
+    "cooldown_bars": 0
+  },
+  {
+    "name": "swarm3_breadth_accumulation",
+    "rationale": "Hive Council signal 3. Repaired: drawdown sign; barriers 0.03/0.01 read as 3%/1%; liquidity floor added (the council omitted it).",
+    "all": [
+      {"feature": "breadth", "n": 30, "op": ">=", "value": 0.9},
+      {"feature": "range_pos", "n": 60, "op": ">=", "value": 0.75},
+      {"feature": "drawdown_from_high", "n": 240, "op": "<", "value": -0.02},
+      {"feature": "usd_vol", "n": 96, "op": ">=", "value": 50000}
+    ],
+    "barriers": {"up_pct": 3, "down_pct": 1, "max_hold_bars": 324},
+    "cooldown_bars": 0
+  },
+  {
+    "name": "swarm4_btc_correlated_liquidity",
+    "rationale": "Hive Council signal 4. Repaired: usd_vol(60) >= 1.5 replaced by >= 50000; barriers 0.04/0.02 read as 4%/2%. volatility >= 0.1 kept as written.",
+    "all": [
+      {"feature": "usd_vol", "n": 60, "op": ">=", "value": 50000},
+      {"feature": "btc_ret", "n": 60, "op": ">=", "value": 0.02},
+      {"feature": "volatility", "n": 30, "op": ">=", "value": 0.1}
+    ],
+    "barriers": {"up_pct": 4, "down_pct": 2, "max_hold_bars": 252},
+    "cooldown_bars": 12
+  },
+  {
+    "name": "swarm5_drawdown_range_expansion",
+    "rationale": "Hive Council signal 5. Repaired: drawdown < 0.95 read as <= -0.05; barriers 0.05/0.01 read as 5%/1%; liquidity floor added (the council omitted it).",
+    "all": [
+      {"feature": "drawdown_from_high", "n": 240, "op": "<", "value": -0.05},
+      {"feature": "range_pos", "n": 60, "op": ">=", "value": 0.8},
+      {"feature": "vol_ratio", "n": 30, "op": ">=", "value": 2.0},
+      {"feature": "usd_vol", "n": 96, "op": ">=", "value": 50000}
+    ],
+    "barriers": {"up_pct": 5, "down_pct": 1, "max_hold_bars": 672},
+    "cooldown_bars": 24
+  }
+]

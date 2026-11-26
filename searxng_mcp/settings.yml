@@ -1,0 +1,116 @@
+# SearXNG configuration for Living Archive local research agents & OpenWebUI
+# Enables JSON API alongside HTML and prioritizes developer, security, and scientific engines.
+
+use_default_settings: true
+
+general:
+  instance_name: "Living Archive Local Search"
+  debug: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "REPLACE_WITH_RANDOM_HEX_KEY"
+  limiter: false
+  image_proxy: false
+  method: "GET"
+
+engines:
+  # General web & privacy-friendly fallbacks
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+  - name: brave
+    engine: brave
+    shortcut: br
+    disabled: false
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+  - name: mojeek
+    engine: mojeek
+    shortcut: mjk
+    disabled: false
+  - name: qwant
+    engine: qwant
+    shortcut: qw
+    disabled: false
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+
+  # Developer & code documentation engines
+  - name: github
+    engine: github
+    shortcut: gh
+    categories: [it]
+    disabled: false
+  - name: stackoverflow
+    engine: stackexchange
+    shortcut: so
+    site: stackoverflow.com
+    categories: [it]
+    disabled: false
+  - name: mdn
+    engine: mdn
+    shortcut: mdn
+    categories: [it]
+    disabled: false
+  - name: pypi
+    engine: pypi
+    shortcut: pypi
+    categories: [it]
+    disabled: false
+  - name: crates.io
+    engine: crates
+    shortcut: cr
+    categories: [it]
+    disabled: false
+  - name: docker hub
+    engine: docker_hub
+    shortcut: dh
+    categories: [it]
+    disabled: false
+  - name: huggingface
+    engine: huggingface
+    shortcut: hf
+    categories: [it, science]
+    disabled: false
+  - name: hackernews
+    engine: hackernews
+    shortcut: hn
+    categories: [it, news]
+    disabled: false
+  - name: arch linux wiki
+    engine: archlinux
+    shortcut: al
+    categories: [it]
+    disabled: false
+
+  # Scientific & paper engines
+  - name: arxiv
+    engine: arxiv
+    shortcut: arx
+    categories: [science, general]
+    disabled: false
+  - name: semantic scholar
+    engine: semantic_scholar
+    shortcut: se
+    categories: [science]
+    disabled: false
+  - name: crossref
+    engine: crossref
+    shortcut: crf
+    categories: [science]
+    disabled: false
