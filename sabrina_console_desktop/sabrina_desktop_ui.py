@@ -493,8 +493,10 @@ def _call_gemini_interactions(
     attachments: list[Path] | None = None,
     tools: list[dict[str, Any]] | None = None,
     usage_out: dict[str, Any] | None = None,
+    max_output_tokens: int | None = None,
 ) -> str:
-    """Invoke Gemini via Interactions API (SDK -> HTTP) with single generateContent fallback for non-Interactions models."""
+    """Invoke Gemini via Interactions API (SDK -> HTTP) with single generateContent fallback for non-Interactions models.
+    When usage_out is given, its "finish_reason" is set to the provider status: "incomplete" means cut off."""
     clean_key = str(api_key or "").strip().strip("'\"")
     bare_model = str(model_id or "").strip()
     for prefix in ("gemini/", "models/"):
@@ -557,7 +559,11 @@ def _call_gemini_interactions(
                 sdk_kwargs["system_instruction"] = system_prompt
             if tools:
                 sdk_kwargs["tools"] = tools
+            if max_output_tokens:
+                sdk_kwargs["generation_config"] = {"max_output_tokens": int(max_output_tokens)}
             interaction = client.interactions.create(**sdk_kwargs)
+            if usage_out is not None:
+                usage_out["finish_reason"] = str(getattr(interaction, "status", "") or "")
             text = _extract_gemini_interactions_text(interaction)
             if text:
                 usage = getattr(interaction, "usage", None)
@@ -585,6 +591,8 @@ def _call_gemini_interactions(
         payload["system_instruction"] = system_prompt
     if tools:
         payload["tools"] = tools
+    if max_output_tokens:
+        payload["generation_config"] = {"max_output_tokens": int(max_output_tokens)}
     try:
         data = _http_json(
             "https://generativelanguage.googleapis.com/v1beta/interactions",
@@ -595,6 +603,7 @@ def _call_gemini_interactions(
         )
         if usage_out is not None:
             usage_out.update(data.get("usage") or {})
+            usage_out["finish_reason"] = str(data.get("status") or "")
         return _extract_gemini_interactions_text(data)
     except RuntimeError as exc:
         err_msg = str(exc)
@@ -617,6 +626,7 @@ def _call_gemini_interactions(
         )
         candidates = gc_data.get("candidates") or []
         if usage_out is not None:
+            usage_out["finish_reason"] = str((candidates[0] if candidates else {}).get("finishReason") or "")
             usage = gc_data.get("usageMetadata") or {}
             usage_out.update(
                 total_input_tokens=usage.get("promptTokenCount"),
@@ -638,6 +648,10 @@ def _data_uri(path: Path) -> str:
         return ""
     raw = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:image/jpeg;base64,{raw}"
+
+
+# Output ceiling for provider calls that do not pass a coordinator-set budget. It is a ceiling, not a target.
+SWARM_DEFAULT_REPLY_TOKENS = 8192
 
 
 class SabrinaDesktopBridge:
@@ -3221,6 +3235,7 @@ class SabrinaDesktopBridge:
         local_timeout: float = 90.0,
         local_reply_tokens: int | None = None,
         attachments: list[Path] | None = None,
+        max_reply_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Direct non-chat LLM inference call for Swarm workers (never writes to operator chat_log)."""
         t0 = time.monotonic()
@@ -3336,6 +3351,7 @@ class SabrinaDesktopBridge:
 
         try:
             provider_usage: dict[str, Any] = {}
+            finish_reason = ""  # provider stop reason; "" = not exposed by this path
             if prov == "gemini":
                 reply = _call_gemini_interactions(
                     bare_model,
@@ -3344,14 +3360,18 @@ class SabrinaDesktopBridge:
                     system_prompt=system_prompt,
                     attachments=attachments,
                     usage_out=provider_usage,
+                    max_output_tokens=int(max_reply_tokens or SWARM_DEFAULT_REPLY_TOKENS),
                 )
+                raw_finish = str(provider_usage.get("finish_reason") or "")
+                finish_reason = "max_tokens" if raw_finish in {"incomplete", "MAX_TOKENS"} else raw_finish
             elif prov == "anthropic":
                 data = _http_json(
                     "https://api.anthropic.com/v1/messages",
                     method="POST",
                     payload={
                         "model": bare_model,
-                        "max_tokens": 1200,
+                        # A max_tokens value is a ceiling, not a target: the model stops when it is done.
+                        "max_tokens": int(max_reply_tokens or SWARM_DEFAULT_REPLY_TOKENS),
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": user_prompt}],
                     },
@@ -3360,6 +3380,7 @@ class SabrinaDesktopBridge:
                 )
                 blocks = data.get("content") or []
                 reply = "".join(str(b.get("text") or "") for b in blocks if isinstance(b, dict)).strip()
+                finish_reason = str(data.get("stop_reason") or "")
             else:
                 lm_base = os.environ.get("SABRINA_LOCAL_OPENAI_URL", "http://127.0.0.1:1234/v1").rstrip("/")
                 endpoints = {
@@ -3402,6 +3423,7 @@ class SabrinaDesktopBridge:
                 )
                 choices = data.get("choices") or []
                 reply = str(((choices[0].get("message") or {}).get("content") or "") if choices else "").strip()
+                finish_reason = str((choices[0].get("finish_reason") if choices else "") or "")
 
             if not reply:
                 disp_m = model_id if str(model_id).lower().startswith(f"{prov}/") else f"{prov}/{model_id}"
@@ -3420,6 +3442,9 @@ class SabrinaDesktopBridge:
                 "model": model_id,
                 "provider": prov,
                 "tokens_used": c_tok,
+                # True when the provider stopped at the output-token limit, so the reply is incomplete.
+                "finish_reason": finish_reason,
+                "truncated": finish_reason in {"max_tokens", "length"},
                 "token_usage": {
                     "input": usage_obj.get("total_input_tokens", usage_obj.get("prompt_tokens", usage_obj.get("input_tokens"))),
                     "output": usage_obj.get("total_output_tokens", usage_obj.get("completion_tokens", usage_obj.get("output_tokens"))),
@@ -3470,6 +3495,7 @@ class SabrinaDesktopBridge:
         attachments: list[Path] | None = None,
         local_only: bool = False,
         interface_fields: dict[str, Any] | None = None,
+        max_reply_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Run one swarm LLM call and append its token usage to the usage ledger."""
         result = self._call_swarm_llm_inner(
@@ -3481,6 +3507,7 @@ class SabrinaDesktopBridge:
             attachments=attachments,
             local_only=local_only,
             interface_fields=interface_fields,
+            max_reply_tokens=max_reply_tokens,
         )
         if not readiness_only:
             usage_ledger.record(role, result)
@@ -3497,6 +3524,7 @@ class SabrinaDesktopBridge:
         attachments: list[Path] | None = None,
         local_only: bool = False,
         interface_fields: dict[str, Any] | None = None,
+        max_reply_tokens: int | None = None,
     ) -> dict[str, Any]:
         """Resolve an unlocked model for `role` and execute a real LLM inference call with fallback."""
         unlocked = set(self._unlocked_providers())
@@ -3735,6 +3763,8 @@ class SabrinaDesktopBridge:
                     api_key = None
             attempts += 1
             extra_inv_kw: dict[str, Any] = {"attachments": attachments} if attachments else {}
+            if max_reply_tokens:
+                extra_inv_kw["max_reply_tokens"] = int(max_reply_tokens)
             if interface_fields is not None and prov != "ollama":
                 with self._remote_lock:
                     self._interface_dispatches.insert(0, {

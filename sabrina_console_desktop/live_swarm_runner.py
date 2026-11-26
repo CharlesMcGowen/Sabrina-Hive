@@ -80,6 +80,7 @@ from swarm_command.router import SwarmCommand
 from swarm_command.runtime import ScopedToolManifest, ToolRegistry
 from swarm_console.harness_collective import HarnessEvent, HarnessRegistry
 from swarm_console.protocol import PathIsolationError, guard_safe_path
+from sabrina_console_desktop.join_cut_swarm import M as JOIN_CUT_M, ROOT as JOIN_CUT_ROOT, DeduplicationRegistry
 
 DEFAULT_ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts" / "missions"
 
@@ -441,6 +442,42 @@ _KRAKEN_ENTRY_PLUGIN_GUIDANCE = (
 )
 
 
+_HANDOFF_TRUNCATIONS: list[dict[str, int]] = []
+
+# Error text that marks an infrastructure failure. Such failures are released for retry, not tombstoned.
+_INFRA_FAILURE_MARKERS = (
+    "429", "rate limit", "rate-limit", "timeout", "timed out", "500", "502", "503", "504",
+    "overload", "unavailable", "connection", "temporar", "credit balance", "quota", "no unlocked",
+)
+
+
+def _settle_outcome(rec: dict[str, Any], *, cancelled: bool) -> str:
+    """Map a finished sub-agent record to a join-cut settle outcome.
+
+    Tombstoning is reserved for semantic failures: the worker ran and failed with an error that is not
+    infrastructure. A failure with no error text is treated as transient, so the task stays retryable.
+    """
+    if cancelled:
+        return "cancelled"
+    if str(rec.get("status") or "").upper() != "FAILED":
+        return "completed"
+    err = str(rec.get("llm_error") or "").lower()
+    if not err or any(marker in err for marker in _INFRA_FAILURE_MARKERS):
+        return "transient_failure"
+    return "semantic_failure"
+
+
+def _clip_prompt(text: Any, limit: int) -> str:
+    """Cap text passed from one stage to the next. Omitted text is marked in the prompt and logged,
+    so a model never mistakes a cut-off stage output for the complete one."""
+    s = "" if text is None else str(text)
+    if len(s) <= limit:
+        return s
+    omitted = len(s) - limit
+    _HANDOFF_TRUNCATIONS.append({"limit": limit, "omitted": omitted})
+    del _HANDOFF_TRUNCATIONS[:-200]
+    return f"{s[:limit]}\n[... {omitted} chars omitted at handoff limit {limit} ...]"
+
 class LiveSwarmRunner:
     """Thread-safe live mission execution engine with dynamic child worker lifecycle.
 
@@ -532,6 +569,11 @@ class LiveSwarmRunner:
         self.subagent_excerpt_chars: int = 3200
         self.executor_excerpt_chars: int = 3200
         self._rejected_adaptations: list[dict[str, Any]] = []
+        # Join-cut dedup for dynamic sub-agents (see join_cut_swarm.py). Fails open on registry errors.
+        self.join_cut_enabled: bool = True
+        self._join_cut_registries: dict[str, DeduplicationRegistry] = {}
+        self._join_cut_nodes: dict[str, str] = {}
+        self._join_cut_lock = threading.Lock()
         self._adaptation_history: list[dict[str, Any]] = []
         self._a2a_links: list[dict[str, Any]] = []
         self.workspace_tracker: WorkspaceActivityTracker = WorkspaceActivityTracker(self.workspace_root)
@@ -1352,7 +1394,7 @@ class LiveSwarmRunner:
                     )
                     outputs.append(
                         f"=== TOOL run_qa({qa_target}) status={qa_res.get('status')} score={qa_res.get('score')} ===\n"
-                        f"{qa_res.get('markdown', '')[:3200]}"
+                        f"{_clip_prompt(qa_res.get('markdown', ''), 3200)}"
                     )
                 except Exception as exc:
                     outputs.append(f"=== TOOL run_qa({qa_target}) ===\nERROR: {exc}")
@@ -1452,11 +1494,11 @@ class LiveSwarmRunner:
                         ):
                             verified_sources.append({
                                 "url": str(w_res["source_url"]),
-                                "text": str(w_res["text"])[:2200],
+                                "text": _clip_prompt(str(w_res["text"]), 2200),
                             })
                         outputs.append(
                             f"=== TOOL {kind}({q_line[:120]!r}) source={w_res.get('source', 'web')} ===\n"
-                            f"{str(w_res.get('text') or '')[:3000]}"
+                            f"{_clip_prompt(str(w_res.get('text') or ''), 3000)}"
                         )
                     else:
                         outputs.append(f"=== TOOL {kind}({q_line[:120]!r}) status=ERROR ===\n{str((w_res or {}).get('error') or 'failed')}")
@@ -2381,8 +2423,7 @@ class LiveSwarmRunner:
             self._record_feed_locked("WORKER_VALIDATING", worker_id, f"[{mission_id}] Preparing a {fault} worker refactor.", mission_id)
 
         reference = compact_source(fault)
-        author_policy = replace(policy, timeout_seconds=min(25, policy.timeout_seconds),
-                                max_reply_tokens=min(512, policy.max_reply_tokens))
+        author_policy = replace(policy, timeout_seconds=min(25, policy.timeout_seconds))
         try:
             proposal = caller(
                 author_policy,
@@ -2638,6 +2679,74 @@ class LiveSwarmRunner:
             requires_approval=False,
         )
         return registry
+
+    # ---------------------------------------------------------------- join-cut dedup (I1-I4)
+
+    def _join_cut_registry(self, mission_id: str) -> DeduplicationRegistry:
+        """One registry per mission: the root can take at most M children, so missions must not share one."""
+        with self._join_cut_lock:
+            reg = self._join_cut_registries.get(mission_id)
+            if reg is None:
+                safe = re.sub(r"[^A-Za-z0-9_.-]", "_", mission_id)[:80] or "mission"
+                reg = DeduplicationRegistry(self.artifacts_dir / "join_cut" / f"{safe}.sqlite3")
+                self._join_cut_registries[mission_id] = reg
+            return reg
+
+    def _join_cut_claim(self, mission_id: str, ws: dict[str, Any], sub_wid: str) -> tuple[bool, str]:
+        """Reserve a dynamic sub-agent's node before it is created. Returns (allowed, reason).
+
+        Fails open: a registry error is returned as a reason and the sub-agent still runs.
+        """
+        if not self.join_cut_enabled:
+            return True, "disabled"
+        try:
+            reg = self._join_cut_registry(mission_id)
+            payload = {"mission": mission_id, "role": ws.get("role"), "task": ws.get("title")}
+            attempt = f"{sub_wid}#{uuid.uuid4().hex}"  # unique per attempt, so a retry is never a stale replay
+            # Leaves live under structural branch nodes that never run work. Each branch takes up to M
+            # leaves and the root takes up to M branches, so a mission can hold M * M leaves. A leaf's
+            # failure therefore never prunes a sibling sub-agent.
+            for branch in [p for p in reg.open_parent_paths() if p.count(".") == 1]:
+                res = reg.cut_branch(branch, [payload], request_id=attempt)
+                if res.ok:
+                    return self._record_spawn(sub_wid, res.results[0])
+            branch_index = reg.child_count(JOIN_CUT_ROOT)
+            if branch_index < JOIN_CUT_M:
+                made = reg.cut_branch(JOIN_CUT_ROOT, [{"mission": mission_id, "branch": branch_index}],
+                                      request_id=f"{attempt}:branch")
+                if made.ok and made.results and made.results[0].created:
+                    res = reg.cut_branch(made.results[0].cantor_path, [payload], request_id=attempt)
+                    if res.ok:
+                        return self._record_spawn(sub_wid, res.results[0])
+            return False, "capacity: mission has used every branch and leaf slot"
+        except Exception as exc:  # noqa: BLE001 - fail open by design
+            return True, f"registry_error: {exc}"
+
+    def _record_spawn(self, sub_wid: str, spawn: Any) -> tuple[bool, str]:
+        if spawn.created and spawn.cantor_path:
+            self._join_cut_nodes[sub_wid] = spawn.cantor_path
+        return spawn.created, spawn.reason
+
+    def _join_cut_settle(self, mission_id: str, sub_wid: str, *, outcome: str) -> None:
+        """Settle a sub-agent's leaf by outcome. Never raises: a missing node is a no-op (fail open).
+
+        completed        -> finalize (tombstone: the work is done and must not repeat)
+        semantic_failure -> join (tombstone: the task itself is bad, so retrying is pointless)
+        transient_failure, cancelled -> release (free the task so a retry can spawn it)
+        """
+        path = self._join_cut_nodes.pop(sub_wid, None)
+        if path is None:
+            return
+        try:
+            reg = self._join_cut_registry(mission_id)
+            if outcome == "completed":
+                reg.finalize_node(path)
+            elif outcome == "semantic_failure":
+                reg.join_branch(path, reason="semantic_failure")
+            else:
+                reg.release_leaf(path, reason=outcome)
+        except Exception:  # noqa: BLE001 - settling must never break the mission
+            return
 
     def _run_mission_pipeline(
         self,
@@ -3177,7 +3286,7 @@ class LiveSwarmRunner:
                         AgentRole.RESEARCH_SCOUT.value,
                         scout_model,
                         scout_sys,
-                        f"{scout_prompt}\n\nExternal Grounding Output:\n{s_tool_out[:3500]}\n\nSynthesize your final Scout findings now with NO ```tool:...``` blocks.",
+                        f"{scout_prompt}\n\nExternal Grounding Output:\n{_clip_prompt(s_tool_out, 3500)}\n\nSynthesize your final Scout findings now with NO ```tool:...``` blocks.",
                     )
             scout_result_id = scout_llm.get("recovery_worker_id", scout_id)
             _set_worker_milestone(
@@ -3329,13 +3438,13 @@ class LiveSwarmRunner:
                 f"Verified fetch {source['url']}\n{source['text']}" for source in verified_sources[:3]
             )
             verified_scout_context = (
-                f"Workspace scan: {workspace_info.get('scanned_files', 0)} files.\n{excerpts_blob[:2000]}\n\n"
+                f"Workspace scan: {workspace_info.get('scanned_files', 0)} files.\n{_clip_prompt(excerpts_blob, 2000)}\n\n"
                 + (source_excerpts or "No verified external source was retrieved. Treat hosted service choices as undecided.")
             )
-            scout_context = verified_scout_context if scout_web_hint or offline_checkout else (
+            scout_context = _clip_prompt(verified_scout_context if scout_web_hint or offline_checkout else (
                 f"Scout status: {scout_result.get('status', 'unknown')}\n"
                 f"{scout_result.get('llm_output') or scout_result.get('summary') or ''}"
-            )[:5200]
+            ), 5200)
             should_run_carbon = (
                 max_fanout > 0
                 and self.llm_caller is not None
@@ -3364,8 +3473,8 @@ class LiveSwarmRunner:
                     + offline_instruction
                 )
                 carbon_user = (
-                    f"Mission Goal:\n{goal[:1000]}\n\n"
-                    f"Planner Plan:\n{str(subtask_results['planner'].get('llm_output') or '')[:800]}\n\n"
+                    f"Mission Goal:\n{_clip_prompt(goal, 1000)}\n\n"
+                    f"Planner Plan:\n{_clip_prompt(str(subtask_results['planner'].get('llm_output') or ''), 800)}\n\n"
                     f"Research Scout Findings:\n{verified_scout_context}\n\n"
                     f"Budget: max_subagents={max_fanout}, coordinators={eff_c}, workers_per_coord={eff_w}."
                 )
@@ -3501,6 +3610,17 @@ class LiveSwarmRunner:
                     theta_sq = carbon_theta ** 2
                     for idx_ws, ws in enumerate(dynamic_workstreams):
                         sub_wid = f"{mission_id}-{ws['key']}"
+                        allowed, jc_reason = self._join_cut_claim(mission_id, ws, sub_wid)
+                        if not allowed:
+                            self._record_deliberation_locked(
+                                from_agent="Join-Cut Registry",
+                                to_agent=ws["key"],
+                                stage="JOIN_CUT_DEDUP",
+                                summary=f"[{mission_id}] Skipped sub-agent '{ws['title'][:48]}' ({jc_reason}).",
+                                detail="Task-hash dedup (I2) or the per-parent child cap (I3) refused this spawn.",
+                                mission_id=mission_id,
+                            )
+                            continue
                         sub_model = self._resolve_model_for_role(ws["role"])
                         worker_ids[ws["key"]] = sub_wid
                         dynamic_subagent_keys.append(ws["key"])
@@ -3638,7 +3758,7 @@ class LiveSwarmRunner:
                     dependencies = ws.get("depends_on") or []
                     dependency_context = "".join(
                         f"\n\nCompleted prerequisite {key}:\n"
-                        f"{(subtask_results[key].get('llm_output') or subtask_results[key]['summary'])[:2500]}"
+                        f"{_clip_prompt((subtask_results[key].get('llm_output') or subtask_results[key]['summary']), 2500)}"
                         for key in dependencies
                     )
                     with sub_queue_lock:
@@ -3689,8 +3809,8 @@ class LiveSwarmRunner:
                             f"Assigned Workstream:\n{ws['title']}\n"
                             f"{target_scope_note}"
                             f"Mission Mode: {planner_mission_mode} · Distribution Algorithm: {carbon_algo}\n"
-                            f"Overall Mission Goal:\n{goal[:1200]}\n\n"
-                            f"Planner Context:\n{(subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary'])[:900]}\n\n"
+                            f"Overall Mission Goal:\n{_clip_prompt(goal, 1200)}\n\n"
+                            f"Planner Context:\n{_clip_prompt((subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary']), 900)}\n\n"
                             f"Research Scout Findings:\n{scout_context}{dependency_context}"
                             f"{peer_comm_blob}"
                             f"{excerpt_section}\n\n"
@@ -3709,8 +3829,8 @@ class LiveSwarmRunner:
                         sub_user_prompt = (
                             f"Assigned Workstream:\n{ws['title']}\n\n"
                             f"Distribution Algorithm: {carbon_algo} (protocol={carbon_proto})\n"
-                            f"Overall Mission Goal:\n{goal[:1200]}\n\n"
-                            f"Planner Context:\n{(subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary'])[:600]}\n\n"
+                            f"Overall Mission Goal:\n{_clip_prompt(goal, 1200)}\n\n"
+                            f"Planner Context:\n{_clip_prompt((subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary']), 600)}\n\n"
                             f"Research Scout Findings:\n{scout_context}{dependency_context}"
                             f"{peer_comm_blob}"
                             f"{excerpt_section}\n\n"
@@ -3774,7 +3894,7 @@ class LiveSwarmRunner:
                                 ws["role"],
                                 sub_model,
                                 "You are a focused Sabrina sub-agent. Synthesize your workstream deliverable from the real tool output below with NO ```tool:...``` blocks.",
-                                f"Assigned Workstream:\n{ws['title']}\n\nTool Output:\n{sub_tool_out[:3500]}\n\nSynthesize your final workstream output now with NO ```tool:...``` blocks.",
+                                f"Assigned Workstream:\n{ws['title']}\n\nTool Output:\n{_clip_prompt(sub_tool_out, 3500)}\n\nSynthesize your final workstream output now with NO ```tool:...``` blocks.",
                             )
                             if ws_can_write and sub_llm.get("ok") and sub_llm.get("text"):
                                 for wf_extra in self._apply_workspace_writes(
@@ -3913,6 +4033,12 @@ class LiveSwarmRunner:
                         with self._lock:
                             if self._workers.get(sub_wid, {}).get("status") == "FAILED":
                                 break
+                    with self._lock:
+                        final_rec = dict(self._workers.get(sub_wid) or {})
+                    self._join_cut_settle(
+                        mission_id, sub_wid,
+                        outcome=_settle_outcome(final_rec, cancelled=cancel_event.is_set()),
+                    )
 
                 pool_cap = min(len(spawned_subs), self.max_concurrency) if self.max_concurrency else len(spawned_subs)
                 with ThreadPoolExecutor(max_workers=max(1, pool_cap)) as sub_pool:
@@ -4079,7 +4205,7 @@ class LiveSwarmRunner:
                     _extract_keywords(goal)[0] if _extract_keywords(goal) else "."
                 )
                 qa_stage_report = run_product_qa(self.workspace_root, target=qa_focus, run_tests=True)
-                qa_stage_blob = f"\n\nDETERMINISTIC PRODUCT QA & GUI SMOKE RECEIPT:\n{qa_stage_report.get('markdown', '')[:2600]}"
+                qa_stage_blob = f"\n\nDETERMINISTIC PRODUCT QA & GUI SMOKE RECEIPT:\n{_clip_prompt(qa_stage_report.get('markdown', ''), 2600)}"
                 with self._lock:
                     self._record_feed_locked(
                         badge="QA_AUDIT",
@@ -4117,8 +4243,8 @@ class LiveSwarmRunner:
             )
             exec_prompt = (
                 f"Mission Goal:\n{goal}\n\n"
-                f"Planner Output:\n{planner_notes[:1400]}\n\n"
-                f"Research Scout Findings:\n{scout_context}{subagents_blob[:1600]}{subagent_files_note}{exec_excerpts_blob}{qa_stage_blob}{matched_skills_blob}\n\n"
+                f"Planner Output:\n{_clip_prompt(planner_notes, 1400)}\n\n"
+                f"Research Scout Findings:\n{scout_context}{_clip_prompt(subagents_blob, 1600)}{subagent_files_note}{exec_excerpts_blob}{qa_stage_blob}{matched_skills_blob}\n\n"
                 f"{write_instruction}{ide_tools_instruction}{offline_instruction}"
             )
             written_files: list[str] = list(subagent_written_files)
@@ -4142,7 +4268,7 @@ class LiveSwarmRunner:
             elif live_contract:
                 evidence = (
                     f"Read-only workspace evidence:\n{exec_file_excerpts[:self.executor_excerpt_chars]}\n\n"
-                    f"Earlier planning notes:\n{planner_notes[:800]}\n\nEarlier scout notes:\n{scout_notes[:800]}"
+                    f"Earlier planning notes:\n{_clip_prompt(planner_notes, 800)}\n\nEarlier scout notes:\n{_clip_prompt(scout_notes, 800)}"
                 )
                 contract_run = self._run_contract_stages(mission_id, worker_ids, cancel_event, evidence, _record_llm_outcome)
                 if contract_run is None:
@@ -4185,7 +4311,7 @@ class LiveSwarmRunner:
                     with subtask_lock:
                         _record_llm_outcome(exec_llm)
                     exec_prompt = (
-                        f"{exec_prompt}\n\nPrevious Tool Output:\n{tool_results[:4500]}\n\n"
+                        f"{exec_prompt}\n\nPrevious Tool Output:\n{_clip_prompt(tool_results, 4500)}\n\n"
                         "Now continue using the real tool output above. Either request another tool block or provide your final deliverable (including any remaining `write_file:` blocks)."
                     )
                     exec_llm = invoke_stage(AgentRole.EXECUTION_SPECIALIST.value, exec_model, exec_sys_prompt, exec_prompt)
@@ -4223,7 +4349,7 @@ class LiveSwarmRunner:
                         with subtask_lock:
                             _record_llm_outcome(exec_llm)
                         exec_prompt = (
-                            f"{exec_prompt}\n\nFinal Tool Output:\n{last_tool_out[:4500]}\n\n"
+                            f"{exec_prompt}\n\nFinal Tool Output:\n{_clip_prompt(last_tool_out, 4500)}\n\n"
                             "Tool budget is now complete. Synthesize your complete, final deliverable (and any final `write_file:` blocks) now with NO ```tool:...``` blocks."
                         )
                         exec_llm = invoke_stage(AgentRole.EXECUTION_SPECIALIST.value, exec_model, exec_sys_prompt, exec_prompt)
@@ -4340,7 +4466,7 @@ class LiveSwarmRunner:
                         f"Mission Goal:\n{goal}\n\n"
                         f"Current Workspace Files Written:\n{', '.join(written_files) or '(none)'}\n\n"
                         f"Deterministic Harness Diagnostic Errors (MUST FIX ALL):\n" + "\n".join(f"- {e}" for e in harness_diag_errors[:12]) + "\n\n"
-                        f"Previous Deliverable:\n{str(exec_llm.get('text') or '')[:2200]}\n\n"
+                        f"Previous Deliverable:\n{_clip_prompt(str(exec_llm.get('text') or ''), 2200)}\n\n"
                         f"{write_instruction}\n"
                         "Fix every error above (use `tool:generate_image` or `.svg` for images, and output corrected `write_file:` blocks)."
                     )
@@ -4379,7 +4505,7 @@ class LiveSwarmRunner:
                                 AgentRole.EXECUTION_SPECIALIST.value,
                                 exec_model,
                                 exec_sys_prompt,
-                                f"{repair_prompt}\n\nTool Output:\n{rep_tool_out[:3500]}\n\nNow emit any updated `write_file:` blocks and final summary with NO `tool:` blocks.",
+                                f"{repair_prompt}\n\nTool Output:\n{_clip_prompt(rep_tool_out, 3500)}\n\nNow emit any updated `write_file:` blocks and final summary with NO `tool:` blocks.",
                             )
                             with subtask_lock:
                                 _record_llm_outcome(repair_llm)
@@ -4554,7 +4680,7 @@ class LiveSwarmRunner:
                         "You are Sabrina's independent Critic Verifier. Start your reply with `PASS:` if the Execution Specialist's output and verified disk files genuinely satisfy the goal safely (creative defaults are welcome when user details were open-ended), or `REVIEW:` if broken assets, missing files, or defects remain, followed by 2-4 crisp bullet points. Finally, on its own last line, write `RECOMMENDED_NEXT_GOAL: <single concise follow-up mission prompt for the swarm's next iteration>`.",
                         (
                             f"Mission Goal:\n{goal}\n\n"
-                            f"Execution Specialist Deliverable:\n{exec_llm['text'][:2400]}"
+                            f"Execution Specialist Deliverable:\n{_clip_prompt(exec_llm['text'], 2400)}"
                             f"{disk_audit_section}\n"
                             "Verify accuracy, completeness, asset integrity, and safety (execution_authorized=False), then end with `RECOMMENDED_NEXT_GOAL: ...`."
                         ),
@@ -4652,7 +4778,7 @@ class LiveSwarmRunner:
 
                 # Critic returned REVIEW/FAIL with refinement budget remaining -> feed Critic feedback back to Execution Specialist!
                 refinement_rounds_used += 1
-                critic_feedback = str(critic_llm.get("text") or "").strip()[:1800]
+                critic_feedback = _clip_prompt(str(critic_llm.get("text") or "").strip(), 1800)
                 with self._lock:
                     self._record_feed_locked(
                         badge="REPAIR",
@@ -4683,7 +4809,7 @@ class LiveSwarmRunner:
                         if not harness_diag_passed
                         else ""
                     )
-                    + f"Your Previous Deliverable:\n{str(exec_llm.get('text') or '')[:2000]}\n\n"
+                    + f"Your Previous Deliverable:\n{_clip_prompt(str(exec_llm.get('text') or ''), 2000)}\n\n"
                     + ("Offline checkout violations:\n" + "\n".join(offline_issues) + "\n" if offline_issues else "")
                     + f"{write_instruction}{ide_tools_instruction}{offline_instruction}\n"
                     "Emit any `tool:generate_image` / `write_file:` updates needed to resolve every Critic bullet point and achieve `PASS:`."
@@ -4728,7 +4854,7 @@ class LiveSwarmRunner:
                         AgentRole.EXECUTION_SPECIALIST.value,
                         exec_model,
                         exec_sys_prompt,
-                        f"{refine_prompt}\n\nTool Output:\n{ref_t_out[:3500]}\n\nNow output your updated `write_file:` blocks and final summary with NO `tool:` blocks.",
+                        f"{refine_prompt}\n\nTool Output:\n{_clip_prompt(ref_t_out, 3500)}\n\nNow output your updated `write_file:` blocks and final summary with NO `tool:` blocks.",
                     )
                 with subtask_lock:
                     _record_llm_outcome(refined_llm)
@@ -6148,8 +6274,8 @@ class LiveSwarmRunner:
             exec_prompt = (
                 f"Mission Goal:\n{goal}\n\n"
                 f"Playbook: {playbook}\nStop Condition: {blueprint.stop_condition}\n"
-                + (f"\nPlanner Output:\n{planner_notes[:1000]}\n" if planner_notes else "")
-                + (f"\nResearch Scout Findings:\n{scout_notes[:1200]}\n" if scout_notes else "")
+                + (f"\nPlanner Output:\n{_clip_prompt(planner_notes, 1000)}\n" if planner_notes else "")
+                + (f"\nResearch Scout Findings:\n{_clip_prompt(scout_notes, 1200)}\n" if scout_notes else "")
                 + f"\nWorkspace Excerpts:\n{exec_file_excerpts[:self.executor_excerpt_chars]}\n"
                 + write_instruction
                 + tool_instructions
@@ -7991,9 +8117,9 @@ class LiveSwarmRunner:
             issues_txt = "; ".join(issues[:4]) if issues else "Continue refining and verifying deliverables"
             extra = f" Operator note: {note}" if note else ""
             if norm_choice == "continue_loop":
-                new_goal = f"[Audit Loop from {mission_id}] Address audit findings ({issues_txt}) for goal: {orig_goal[:600]}{extra}"
+                new_goal = f"[Audit Loop from {mission_id}] Address audit findings ({issues_txt}) for goal: {_clip_prompt(orig_goal, 600)}{extra}"
             else:
-                new_goal = f"[New Branch from {mission_id}] Branch to handle remaining/next-phase work ({issues_txt}) for: {orig_goal[:600]}{extra}"
+                new_goal = f"[New Branch from {mission_id}] Branch to handle remaining/next-phase work ({issues_txt}) for: {_clip_prompt(orig_goal, 600)}{extra}"
             launched = self.launch_mission(
                 new_goal,
                 mode=orig_mode,
