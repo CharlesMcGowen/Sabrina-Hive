@@ -1,62 +1,64 @@
 {
   "schema_version": "2.1.0-collective",
-  "swarm_name": "Crypto Market Strategy Research Swarm (Quant Turnover Pipeline)",
+  "swarm_name": "m-Eulerian RSI Join-Cut Swarm (Planar Genus-0 Topology)",
   "execution_authorized": false,
   "topology": {
-    "max_spawn_depth": 6,
+    "max_spawn_depth": 5,
     "max_concurrency": 8,
     "max_total_agents": 16,
     "confidence_gate_threshold": -0.25,
     "confidence_gate_probability": 0.779,
-    "blackboard_bus": "dnd_rsi_blackboard.sqlite3"
+    "blackboard_bus": "dnd_rsi_blackboard.sqlite3",
+    "m_eulerian": {
+      "m_order": 2,
+      "genus": 0,
+      "macro_cycles": 2,
+      "topological_invariants": {
+        "crossing_free_planar": true,
+        "euler_characteristic_c_alpha": "(m-1)n - l(alpha) + 2",
+        "isolated_genus_0_sub_spheres": true
+      }
+    }
   },
   "deterministic_spawning_rules": [
     {
-      "rule_id": "CR1_HYPOTHESIS_GEN",
+      "rule_id": "MR1_MACRO_CYCLE_INIT",
       "parent_role": "coordinator",
-      "child_role": "hypothesis_generator",
+      "child_role": "planner_architect",
       "min_logprob": -0.22,
-      "trigger": "market_research_start && depth < 6",
+      "trigger": "macro_cycle_init && depth < 5",
       "transition": "SPAWNING -> ACTIVE -> VALIDATING"
     },
     {
-      "rule_id": "CR2_DATA_SCOUTS",
-      "parent_role": "hypothesis_generator",
-      "child_role": "data_scout",
+      "rule_id": "MR2_LOCAL_QUORUM_ROLLOUTS",
+      "parent_role": "planner_architect",
+      "child_role": "research_scout",
       "min_logprob": -0.25,
-      "trigger": "hypothesis_formulated && concurrency <= 8",
+      "trigger": "hub_grafted && speculative_rollouts_m <= 8",
       "transition": "SPAWNING -> ACTIVE -> VALIDATING"
     },
     {
-      "rule_id": "CR3_BACKTEST_RUNNER",
-      "parent_role": "data_scout",
-      "child_role": "backtest_executor",
+      "rule_id": "MR3_SPECULATIVE_EXEC",
+      "parent_role": "research_scout",
+      "child_role": "execution_specialist",
       "min_logprob": -0.25,
-      "trigger": "market_data_fetched && mean_logprob >= -0.25",
+      "trigger": "evidence_collected && log_da_feedback_active",
       "transition": "SPAWNING -> ACTIVE -> VALIDATING"
     },
     {
-      "rule_id": "CR4_VELOCITY_RANK",
-      "parent_role": "backtest_executor",
-      "child_role": "velocity_ranker",
-      "min_logprob": -0.22,
-      "trigger": "backtest_complete && pnl_distribution_valid",
-      "transition": "SPAWNING -> ACTIVE -> VALIDATING"
-    },
-    {
-      "rule_id": "CR5_RISK_GATE",
-      "parent_role": "velocity_ranker",
-      "child_role": "risk_critic",
+      "rule_id": "MR4_LOG_FIN_PROMOTION",
+      "parent_role": "execution_specialist",
+      "child_role": "critic_verifier",
       "min_logprob": -0.18,
-      "trigger": "velocity_ranked && drawdown_calculated",
+      "trigger": "deliverable_ready && outer_face_ports_open",
       "transition": "SPAWNING -> ACTIVE -> VALIDATING"
     },
     {
-      "rule_id": "CR6_SEAL_SPINDOWN",
-      "parent_role": "risk_critic",
+      "rule_id": "MR5_JOIN_CUT_SPINDOWN",
+      "parent_role": "critic_verifier",
       "child_role": "fast_worker",
       "min_logprob": -0.25,
-      "trigger": "risk_gate_pass && execution_authorized == false",
+      "trigger": "log_fin_verified && execution_authorized == false",
       "transition": "VALIDATING -> PASS -> SPINDOWN"
     }
   ],
@@ -69,57 +71,47 @@
       "status": "ACTIVE",
       "max_children": 2,
       "enabled": true,
-      "task": "Lead Research Coordinator (Gemini Neo)"
+      "task": "Topological Lead Coordinator & Genus-0 Root Sphere"
     },
     {
-      "id": "quant-hypothesis-lead",
-      "role": "hypothesis_generator",
+      "id": "eulerian-eval-hub",
+      "role": "planner_architect",
       "model": "gemini-4-neon",
       "provider": "gemini",
       "status": "ACTIVE",
       "max_children": 2,
       "enabled": true,
-      "task": "Alpha Signal & Microstructure Hypothesis Generator"
+      "task": "White Evaluation Hub (i=1) & Macro-Cycle Expansion Controller"
     },
     {
-      "id": "kraken-polymarket-scout",
-      "role": "data_scout",
+      "id": "quorum-speculative-scout",
+      "role": "research_scout",
       "model": "gemini-4-hydrogen",
       "provider": "gemini",
       "status": "ACTIVE",
       "max_children": 2,
       "enabled": true,
-      "task": "Kraken & Polymarket CLOB/Order Book Data Scout"
+      "task": "Local Quorum Arbiter (m-1 speculative LOG_da rollouts)"
     },
     {
-      "id": "vector-backtest-worker",
-      "role": "backtest_executor",
+      "id": "join-cut-bridge-worker",
+      "role": "execution_specialist",
       "model": "gemini-4-argon",
       "provider": "gemini",
       "status": "ACTIVE",
       "max_children": 2,
       "enabled": true,
-      "task": "High-Frequency Vectorized Backtest Executor"
+      "task": "Black Inner-Degree-2 Join-Cut Bridge & Synthesis Specialist"
     },
     {
-      "id": "capital-velocity-engine",
-      "role": "velocity_ranker",
-      "model": "openai/gpt-5-mini",
-      "provider": "openai",
-      "status": "ACTIVE",
-      "max_children": 2,
-      "enabled": true,
-      "task": "Score_s Capital Velocity & Lockup Turnover Engine"
-    },
-    {
-      "id": "var-drawdown-critic",
-      "role": "risk_critic",
+      "id": "outer-port-verifier",
+      "role": "critic_verifier",
       "model": "anthropic/claude-sonnet-4-5",
       "provider": "anthropic",
       "status": "VALIDATING",
       "max_children": 1,
       "enabled": true,
-      "task": "Formal VaR, Liquidity & Execution Risk Gate"
+      "task": "Planar Map Closer & LOG_fin Port Invariant Gate"
     },
     {
       "id": "gate-lease-guard",
@@ -134,9 +126,9 @@
   ],
   "objectives": [
     {
-      "id": "obj-crypto-strategy",
+      "id": "obj-m-eulerian-rsi",
       "state": "ACTIVE",
-      "goal": "Hypothesis -> Data Fetching -> Backtesting -> Capital Velocity Ranking -> Risk Gate"
+      "goal": "Execute m-Eulerian RSI Join-Cut Macro-Cycle on Genus-0 Planar Topology"
     }
   ]
 }

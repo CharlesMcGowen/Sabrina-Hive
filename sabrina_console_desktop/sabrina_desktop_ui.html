@@ -5,6 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sabrina Operator Console</title>
   <style>
+    .swarm-overview-bar { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin:0; }
+    .swarm-overview-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); align-items:start; gap:8px; margin-bottom:0; }
+    .swarm-overview-grid details.panel { display:block; min-width:0; margin:0; padding:8px 10px; border-radius:9px; }
+    .swarm-monitor-summary { display:flex; align-items:center; gap:6px; min-height:22px; cursor:pointer; list-style:none; }
+    .swarm-monitor-summary::-webkit-details-marker { display:none; }
+    .swarm-monitor-summary::before { content:'▸'; color:var(--cyan); flex:none; }
+    details[open] > .swarm-monitor-summary::before { content:'▾'; }
+    .swarm-monitor-summary .panel-title { flex:1; min-width:0; }
+    .swarm-monitor-count { color:var(--muted); font-size:11px; white-space:nowrap; }
+    .swarm-monitor-count.has-attention { color:var(--amber); font-weight:700; }
+    .swarm-automation-footer { display:flex; align-items:center; justify-content:space-between; gap:6px; border-top:1px solid var(--border); margin-top:5px; padding-top:7px; font-size:11px; }
+    .swarm-automation-footer button { flex:none; padding:4px 7px; font-size:11px; }
+    .swarm-monitor-list { list-style:none; padding:0; margin:0; }
+    .swarm-monitor-card[open] .swarm-monitor-list { max-height:170px; overflow:auto; margin-top:6px; }
+    .swarm-monitor-list li { padding:6px 0; border-top:1px solid var(--border); overflow-wrap:anywhere; }
+    .swarm-monitor-list li:first-child { border-top:0; }
+    .swarm-monitor-item { display:flex; gap:8px; align-items:flex-start; justify-content:space-between; }
+    .swarm-monitor-item button { flex:none; }
+    .swarm-monitor-list .muted { display:block; margin-top:3px; }
+    @media (max-width:700px) { .swarm-overview-grid { grid-template-columns:1fr; } }
     :root {
       --bg: #0b0e14;
       --sidebar: #0f141e;
@@ -952,12 +972,13 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-left">
-          <h1 id="view-title" class="topbar-title">Swarm Command Center</h1>
+          <h1 id="view-title" class="topbar-title">Swarm Monitor</h1>
           <span id="top-tunnel-badge" class="badge">:8087 / :8095 API</span>
           <button id="btn-top-workspace" class="badge mono" type="button" style="cursor:pointer; max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Active Workspace Directory — click to open Workspace selector">📁 Set Workspace</button>
         </div>
         <div class="topbar-right">
-          <span id="ui-live-badge" class="badge" title="UI Hot Reload active"><span id="ui-live-dot" class="dot ok"></span><span id="ui-live-label">UI Live</span></span>
+          <span id="deploy-health-badge" class="badge" title="Active Python Modules &amp; Deployment Health"><span id="deploy-health-dot" class="dot ok"></span><span id="deploy-health-label">Modules: --</span></span>
+          <span id="ui-live-badge" class="badge" title="Reload UI applies a changed frontend without restarting the coordinator"><span id="ui-live-dot" class="dot ok"></span><span id="ui-live-label">UI Ready</span></span>
           <button id="btn-reload-ui" class="btn-ghost" type="button" title="Hot-reload HTML/CSS/JS without restarting Python">Reload UI</button>
           <button id="btn-debug-pill" class="badge" type="button" style="cursor:pointer;"><span id="debug-dot" class="dot ok"></span><span id="debug-label">UI Debug: 0 issues</span></button>
           <button id="btn-refresh" class="btn-ghost" type="button">Refresh Now</button>
@@ -967,6 +988,27 @@
       <div class="content">
         <!-- VIEW 1: SWARM COMMAND (MONITORING) -->
         <section id="view-swarm" class="view active">
+          <div class="swarm-overview-bar">
+            <span id="swarm-monitor-connection" class="muted" role="status">Connecting to the coordinator…</span>
+            <button id="btn-monitor-new-mission" class="btn-ok" type="button">New mission</button>
+          </div>
+          <div class="swarm-overview-grid">
+            <details id="monitor-running-card" class="panel swarm-monitor-card" aria-labelledby="monitor-running-title" open>
+              <summary class="swarm-monitor-summary"><span id="monitor-running-title" class="panel-title">Running</span><span id="monitor-running-count" class="swarm-monitor-count">—</span></summary>
+              <ul id="monitor-running" class="swarm-monitor-list"><li class="muted">Loading current runs…</li></ul>
+              <div class="swarm-automation-footer"><span id="monitor-automation-summary" class="muted" title="Enabled automations can be idle. Scheduled automations have a next run time.">Checking automations…</span><button type="button" class="btn-ghost" data-monitor-automation="loops" aria-label="View automations">View</button></div>
+            </details>
+            <details id="monitor-attention-card" class="panel swarm-monitor-card" aria-labelledby="monitor-attention-title">
+              <summary class="swarm-monitor-summary"><span id="monitor-attention-title" class="panel-title">Needs Attention</span><span id="monitor-attention-count" class="swarm-monitor-count">—</span></summary>
+              <ul id="monitor-attention" class="swarm-monitor-list"><li class="muted">Loading checks…</li></ul>
+            </details>
+            <details id="monitor-recent-card" class="panel swarm-monitor-card" aria-labelledby="monitor-recent-title">
+              <summary class="swarm-monitor-summary"><span id="monitor-recent-title" class="panel-title">Recent Runs</span><span id="monitor-recent-count" class="swarm-monitor-count">—</span></summary>
+              <ul id="monitor-recent" class="swarm-monitor-list"><li class="muted">Loading saved runs…</li></ul>
+            </details>
+          </div>
+          <details id="swarm-monitor-detail" class="panel-collapse">
+            <summary>Topology, controls, and run details</summary>
           <div class="panel">
             <div class="panel-head">
               <div class="row">
@@ -980,38 +1022,48 @@
                 <button id="btn-goto-launch" class="btn-ghost" type="button" onclick="window.__openView && window.__openView('chat')">Advanced Chat →</button>
               </div>
             </div>
-            <div class="row" style="margin-bottom:10px; gap:8px; padding:8px 12px; background:rgba(15,23,42,0.65); border:1px solid var(--border); border-radius:8px;">
-              <input id="quick-mission-goal" type="text" style="flex:1 1 380px;" placeholder="Enter a mission goal for the swarm..." value="" />
-              <select id="quick-browser-backend" aria-label="Mission browser or desktop" title="Choose a browser or desktop window for this mission">
-                <option value="">No interactive tool</option>
-                <option value="agent-desktop">Vercel desktop</option>
-                <option value="visible-edge">Your Microsoft Edge</option>
-                <option value="visible-chrome">Your Google Chrome</option>
-                <option value="ego-fleet">Ego browser fleet (temporary)</option>
-                <option value="agent-browser">Vercel agent-browser</option>
-                <option value="playwright-cli">Microsoft Playwright CLI</option>
-              </select>
-              <input id="quick-browser-url" type="url" aria-label="Browser start page" placeholder="https://example.com/" hidden />
-              <select id="quick-desktop-window" aria-label="Desktop window" hidden><option value="">Choose a window</option></select>
-              <button id="btn-refresh-desktop" class="btn-ghost" type="button" hidden>Refresh windows</button>
-              <label id="desktop-headed-label" hidden style="font-size:11.5px; white-space:nowrap;"><input id="desktop-headed" type="checkbox" /> Use mouse and keyboard</label>
-              <button id="btn-browser-settings" class="btn-ghost" type="button" hidden>Set up browser</button>
-              <label id="browser-manual-start-label" hidden style="font-size:11.5px; white-space:nowrap;"><input id="browser-manual-start" type="checkbox" /> Let me act first</label>
-              <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap; cursor:pointer;" title="Allow Execution Specialist to write ```write_file:...``` deliverables into the active workspace"><input id="quick-allow-writes" type="checkbox" checked /><span>Allow Writes</span></label>
-              <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap;" title="Allow the coordinator to grant public market data requests for this mission. Automatic follow-up missions do not inherit these permissions."><input id="quick-market-plugins" type="checkbox" /><span>Allow market plugins</span></label>
-              <label class="row" style="gap:5px; font-size:11.5px;" title="The worker model provider can receive Kraken account details. Balances and orders require a dedicated read-only key. Permission applies to this mission only."><input id="quick-kraken-account" type="checkbox" /><span>Allow Kraken account reads (shared with worker model)</span></label>
-              <label class="row" style="gap:5px; font-size:11.5px;"><input id="quick-kraken-entry" type="checkbox" /><span>Allow the coordinator to approve Kraken spot buys on Ego (requires an enabled order relay)</span></label>
-              <input id="quick-plugin-capabilities" type="text" aria-label="Additional plugin capabilities" placeholder="Additional plugin.operation, …" title="Comma-separated capabilities from the coordinator plugin policy. Automatic follow-up missions do not inherit these permissions." />
-              <select id="quick-auto-loop-count" style="font-size:11.5px; padding:5px 7px;" title="Finale Self-Loop Mode: put the Finale Recommended Next Step into the input field, and optionally auto-loop additional cycles">
-                <option value="0" selected>↻ Finale ➔ Input</option>
-                <option value="1">↻ Loop +1×</option>
-                <option value="2">↻ Loop +2×</option>
-                <option value="3">↻ Loop +3×</option>
-              </select>
-              <button id="btn-quick-suggest-next" class="btn-ghost" type="button" style="white-space:nowrap;" title="Choose a completed run and draft its follow-up">✨ Next Step</button>
-              <button id="btn-quick-launch" class="btn-ok" type="button" style="white-space:nowrap;">▶ Launch Mission</button>
-              <button id="btn-quick-stop" class="btn-err" type="button">■ Stop All</button>
-              <span id="quick-swarm-feedback" class="feedback" style="font-size:12px;"></span>
+            <div style="margin-bottom:10px; padding:10px 12px; background:rgba(15,23,42,0.65); border:1px solid var(--border); border-radius:8px;">
+              <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+                <input id="quick-mission-goal" type="text" style="flex:1 1 420px;" placeholder="Enter a mission goal for the swarm..." value="" />
+                <button id="btn-quick-launch" class="btn-ok" type="button" style="white-space:nowrap;">▶ Launch Mission</button>
+                <button id="btn-quick-stop" class="btn-err" type="button" style="white-space:nowrap;">■ Stop All</button>
+                <button id="btn-quick-options-toggle" class="btn-ghost" type="button" aria-expanded="false" style="white-space:nowrap; font-size:11.5px;" title="Show or hide manual tool, permission, and follow-up controls">⚙ Options</button>
+              </div>
+              <div id="quick-prompt-intent-bar" class="row" style="margin-top:6px; gap:6px; align-items:center; flex-wrap:wrap; min-height:20px;">
+                <span class="muted" style="font-size:11px;">✦ Prompt detection active — type naturally; writes, browser, market data &amp; follow-ups auto-configure.</span>
+              </div>
+              <div id="quick-advanced-options" hidden style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(148,163,184,0.18);">
+                <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
+                  <select id="quick-browser-backend" aria-label="Mission browser or desktop" title="Choose a browser or desktop window for this mission">
+                    <option value="">No interactive tool</option>
+                    <option value="agent-desktop">Vercel desktop</option>
+                    <option value="visible-edge">Your Microsoft Edge</option>
+                    <option value="visible-chrome">Your Google Chrome</option>
+                    <option value="ego-fleet">Ego browser fleet (temporary)</option>
+                    <option value="agent-browser">Vercel agent-browser</option>
+                    <option value="playwright-cli">Microsoft Playwright CLI</option>
+                  </select>
+                  <input id="quick-browser-url" type="url" aria-label="Browser start page" placeholder="https://example.com/" hidden />
+                  <select id="quick-desktop-window" aria-label="Desktop window" hidden><option value="">Choose a window</option></select>
+                  <button id="btn-refresh-desktop" class="btn-ghost" type="button" hidden>Refresh windows</button>
+                  <label id="desktop-headed-label" hidden style="font-size:11.5px; white-space:nowrap;"><input id="desktop-headed" type="checkbox" /> Use mouse and keyboard</label>
+                  <button id="btn-browser-settings" class="btn-ghost" type="button" hidden>Set up browser</button>
+                  <label id="browser-manual-start-label" hidden style="font-size:11.5px; white-space:nowrap;"><input id="browser-manual-start" type="checkbox" /> Let me act first</label>
+                  <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap; cursor:pointer;" title="Allow Execution Specialist to write ```write_file:...``` deliverables into the active workspace"><input id="quick-allow-writes" type="checkbox" checked /><span>Allow Writes</span></label>
+                  <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap;" title="Allow the coordinator to grant public market data requests for this mission. Automatic follow-up missions do not inherit these permissions."><input id="quick-market-plugins" type="checkbox" /><span>Allow market plugins</span></label>
+                  <label class="row" style="gap:5px; font-size:11.5px;" title="The worker model provider can receive Kraken account details. Balances and orders require a dedicated read-only key. Permission applies to this mission only."><input id="quick-kraken-account" type="checkbox" /><span>Allow Kraken account reads (shared with worker model)</span></label>
+                  <label class="row" style="gap:5px; font-size:11.5px;"><input id="quick-kraken-entry" type="checkbox" /><span>Allow the coordinator to approve Kraken spot buys on Ego (requires an enabled order relay)</span></label>
+                  <input id="quick-plugin-capabilities" type="text" aria-label="Additional plugin capabilities" placeholder="Additional plugin.operation, …" title="Comma-separated capabilities from the coordinator plugin policy. Automatic follow-up missions do not inherit these permissions." />
+                  <select id="quick-auto-loop-count" aria-label="Background follow-ups" style="font-size:11.5px; padding:5px 7px;" title="A background coordinator runs approved follow-ups after a passed verification. Follow-ups have read-only workspace access.">
+                    <option value="0" selected>Draft next step only</option>
+                    <option value="1">1 background follow-up</option>
+                    <option value="2">2 background follow-ups</option>
+                    <option value="3">3 background follow-ups</option>
+                  </select>
+                  <button id="btn-quick-suggest-next" class="btn-ghost" type="button" style="white-space:nowrap;" title="Choose a completed run and draft its follow-up">✨ Next Step</button>
+                </div>
+              </div>
+              <span id="quick-swarm-feedback" class="feedback" style="font-size:12px; display:block; margin-top:4px;"></span>
             </div>
             <section id="browser-handoff" hidden style="margin-bottom:10px; padding:10px; border:1px solid var(--border); border-radius:8px;">
               <div class="row">
@@ -1110,12 +1162,15 @@
               </div>
               <div class="row" style="gap:6px;">
                 <span id="swarm-a2a-count-pill" class="badge mono">0 A2A links</span>
-                <button id="btn-swarm-a2a-clear" class="btn-ghost" type="button" style="padding:3px 8px; font-size:11px;">Clear Links</button>
+                <button id="btn-swarm-a2a-edit-mode" class="btn-ghost" type="button" aria-pressed="false">Edit workflow</button>
+                <button id="btn-swarm-a2a-clear" class="btn-ghost" type="button" hidden style="padding:3px 8px; font-size:11px;">Clear Links</button>
                 <button id="btn-swarm-a2a-cancel" class="btn-ghost" type="button" style="display:none; padding:3px 8px; font-size:11px;">✕ Cancel</button>
               </div>
             </div>
             <div class="topo-wrap">
-              <div class="topo-appearance" role="group" aria-label="Swarm graph appearance">
+              <details class="panel-collapse" style="margin-bottom:6px;">
+                <summary style="font-size:11px; padding:4px 8px;">🎨 Graph Display &amp; Theme</summary>
+                <div class="topo-appearance" role="group" aria-label="Swarm graph appearance">
                 <div class="topo-appearance-field">
                   <label for="topo-sprite-theme">Characters</label>
                   <select id="topo-sprite-theme">
@@ -1156,7 +1211,8 @@
                     <option value="fast">Fast</option>
                   </select>
                 </div>
-              </div>
+                </div>
+              </details>
               <div id="topo-web-legend" class="web-legend">
                 <span><span class="web-legend-dot" style="background:#38bdf8;"></span>ACTIVE / PASS-OFF &nbsp;<span class="web-legend-dot" style="background:#fbbf24;"></span>SPAWN / LOOP &nbsp;<span class="web-legend-dot" style="background:#a78bfa;"></span>VERIFY GATE &nbsp;<span class="web-legend-dot" style="background:#34d399;"></span>PASS / DELEGATE &nbsp;<span class="web-legend-dot" style="background:#10b981;"></span>+CREATED FILE &nbsp;<span class="web-legend-dot" style="background:#f59e0b;"></span>~MODIFIED FILE &nbsp;<span class="web-legend-dot" style="background:#f87171;"></span>FAILED</span>
                 <div class="row" style="gap:8px;">
@@ -1347,11 +1403,11 @@
             </div>
           </div>
 
-          <!-- VIEW 1 SUB-PANEL: TOPOLOGY PERFORMANCE & BOTTLENECK PROFILER -->
+          <!-- VIEW 1 SUB-PANEL: SELF-ASSEMBLING NODE FLOW & TOPOLOGY PERFORMANCE -->
           <div id="topo-perf-panel" class="panel">
             <div class="panel-head">
               <div class="row" style="gap:8px; align-items:center;">
-                <h2 class="panel-title">Topology Performance &amp; Bottlenecks</h2>
+                <h2 class="panel-title">Self-Assembling Node Flow &amp; Topology Performance</h2>
                 <span id="topo-perf-badge" class="badge">PROFILER STANDBY</span>
                 <span id="topo-perf-speedup-pill" class="pill pill-idle mono" title="Parallel Speedup Ratio: sum(subtask_time) / wall_clock_time">Sp: 1.00×</span>
                 <span id="topo-perf-critical-pill" class="pill pill-idle mono" title="Identified Critical-Path Bottleneck">Critical Path: —</span>
@@ -1361,7 +1417,7 @@
               </div>
             </div>
             <div class="panel-head" style="margin-top:-4px; margin-bottom:6px; font-size:11.5px; color:#94a3b8;">
-              <span>Time allocation per executed swarm node. The critical-path bottleneck is automatically highlighted in amber/red with optimization recommendations.</span>
+              <span>Dynamic self-assembling swarm topology. Each node presents its Name, Model, and Scription (directive / output) along the critical path.</span>
             </div>
             <div id="topo-perf-bars-container" style="display:flex; flex-direction:column; gap:8px; padding:6px 2px;">
               <div class="muted" style="padding:10px; font-size:12px;">No executed mission profile available yet. Run a swarm mission to inspect per-node latency and critical path bottlenecks.</div>
@@ -1374,7 +1430,7 @@
           <div class="panel">
             <div class="panel-head">
               <div class="row">
-                <h2 class="panel-title">Live Mission Output &amp; Execution Report</h2>
+                <h2 id="monitor-mission-report" class="panel-title">Mission output and report</h2>
                 <span id="mission-output-badge" class="badge">Idle</span>
               </div>
               <div class="row">
@@ -1416,6 +1472,7 @@
             </details>
           </div>
 
+          </details>
           <details class="panel-collapse">
             <summary>Pending Approvals, Objectives &amp; Activity Feed</summary>
             <div class="grid-2">
@@ -1497,6 +1554,15 @@
                 <span class="muted">:</span>
                 <input id="mission-workers-per-coord" class="builder-num" type="number" min="1" max="32" value="4" style="width:42px; padding:2px 4px; font-size:11px;" title="Workers per Coordinator (W)" />
                 <span id="mission-ratio-badge" class="badge mono" style="font-size:10.5px; padding:2px 6px;">1:4 (4w)</span>
+              </div>
+              <div class="row" style="gap:4px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:3px 7px;" title="Swarm topology mode and m-Eulerian branching order">
+                <span class="muted" style="font-size:11px;">Topology</span>
+                <select id="mission-topology-mode" style="font-size:11px; padding:2px 4px;">
+                  <option value="m_eulerian_join_cut" selected>m-Eulerian Join-Cut</option>
+                  <option value="elastic_stigmergy">Elastic Stigmergy</option>
+                </select>
+                <span class="muted" style="font-size:11px;">m</span>
+                <input id="mission-branching-order" class="builder-num" type="number" min="2" max="6" value="3" style="width:36px; padding:2px 4px; font-size:11px;" title="m-Eulerian branching order (2..6)" />
               </div>
               <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap;" title="Allow the coordinator to grant public market data requests for this mission"><input id="mission-market-plugins" type="checkbox" /><span>Allow market plugins</span></label>
               <label class="row" style="gap:5px; font-size:11.5px;" title="The worker model provider can receive Kraken account details. Balances and orders require a dedicated read-only key. Permission applies to this mission only."><input id="mission-kraken-account" type="checkbox" /><span>Allow Kraken account reads (shared with worker model)</span></label>
@@ -1643,11 +1709,12 @@
               <div class="row">
                 <label class="row" style="gap:5px; cursor:pointer; font-size:12px; margin-right:8px;"><input id="chat-toggle-deliberation" type="checkbox" /><span class="muted">Swarm Deliberations</span><span id="deliberation-count-badge" class="nav-pill" style="display:none;">0</span></label>
                 <select id="chat-mode">
-                  <option value="workspace_agent">workspace_agent (Selected Harness)</option>
-                  <option value="hive_council" selected>hive_council</option>
-                  <option value="direct_node">direct_node</option>
+                  <option value="sabrina" selected>Sabrina (fast, selected harness)</option>
+                  <option value="workspace_agent">Workspace Agent (selected harness)</option>
+                  <option value="hive_council">Hive Council (multi-model)</option>
+                  <option value="direct_node">Direct model</option>
                 </select>
-                <select id="chat-target"></select>
+                <select id="chat-target" aria-label="Chat model" disabled></select>
                 <button id="btn-clear-chat" class="btn-ghost" type="button">Clear History</button>
               </div>
             </div>
@@ -1771,6 +1838,7 @@
                 <button id="btn-open-kraken-monitor-plugin" class="btn-primary" type="button" title="Open the live Kraken Monitor + WebSocket + 24h Top Gainers plugin tab">📈 Open Live Monitor &amp; 24h Gainers Plugin</button>
                 <button id="btn-launch-kraken-gui" class="btn-ok" type="button" title="Open the standalone Sabrina Kraken Live & $1,000 Paper Desktop Monitor">🖥 Launch Kraken Desktop Monitor</button>
                 <button id="btn-run-kraken-qa" class="btn-ghost" type="button" title="Run deterministic Product QA (imports, headless Tcl/Tk GUI smoke, UI parity, unit tests)">🧪 Run Product QA Smoke Check</button>
+                <button id="btn-kraken-paper-review" class="btn-ghost" type="button" title="Send the simulated portfolio totals to Claude and GPT, then have Gemini review their findings">Review paper results with Claude, GPT &amp; Gemini</button>
                 <button id="btn-swarm-kraken-qa" class="btn-ghost" type="button" title="Dispatch the 4-agent Swarm in Product QA mode to audit the Kraken GUI product">⚡ Swarm QA Mission on Kraken</button>
                 <button id="btn-swarm-manage-kraken" class="btn-primary" type="button" title="Deploy the Swarm to autonomously monitor order-books, turnover velocity, and QuantOrb safety">🤖 Deploy Swarm Kraken Manager</button>
               </div>
@@ -2167,6 +2235,7 @@
         <section id="view-system" class="view">
           <div class="subtabs" id="system-subtabs">
             <button type="button" class="subtab-btn active" data-subtab="providers">API Keys &amp; Providers <span id="vault-status-badge" class="badge" style="padding:2px 7px; font-size:10.5px;">DPAPI · 0 Unlocked</span></button>
+            <button type="button" class="subtab-btn" data-subtab="gpu-deploy">GPU Cloud &amp; Swarm Deploy <span id="gpu-deploy-badge" class="badge" style="padding:2px 7px; font-size:10.5px;">0 Pods</span></button>
             <button type="button" class="subtab-btn" data-subtab="fleet">Model Fleet &amp; Vault <span id="fleet-count-badge" class="badge" style="padding:2px 7px; font-size:10.5px;">Loading…</span></button>
             <button type="button" class="subtab-btn" data-subtab="roles">Role Bindings <span id="roles-status-badge" class="badge" style="padding:2px 7px; font-size:10.5px;">7 Roles</span></button>
             <button type="button" class="subtab-btn" data-subtab="skills">Skill Registry <span id="skills-count-badge" class="badge" style="padding:2px 7px; font-size:10.5px;">Loading…</span></button>
@@ -2197,33 +2266,58 @@
                   </div>
                 </div>
                 <div class="row">
-                  <select id="vault-provider" style="min-width:190px;">
-                    <option value="gemini">Google Gemini (gemini)</option>
-                    <option value="openai">OpenAI (openai)</option>
-                    <option value="anthropic">Anthropic (anthropic)</option>
-                    <option value="openrouter">OpenRouter (openrouter)</option>
-                    <option value="huggingface">HuggingFace Router &amp; FLUX (huggingface)</option>
-                    <option value="cerebras">Cerebras Wafer-Scale (cerebras)</option>
-                    <option value="sambanova">SambaNova Cloud (sambanova)</option>
-                    <option value="fireworks">Fireworks AI (fireworks)</option>
-                    <option value="nvidia">NVIDIA NIM (nvidia)</option>
-                    <option value="github">GitHub Models (github)</option>
-                    <option value="cohere">Cohere (cohere)</option>
-                    <option value="perplexity">Perplexity Sonar (perplexity)</option>
-                    <option value="xai">xAI Grok (xai)</option>
-                    <option value="deepseek">DeepSeek (deepseek)</option>
-                    <option value="groq">Groq (groq)</option>
-                    <option value="mistral">Mistral (mistral)</option>
-                    <option value="together">Together AI (together)</option>
-                    <option value="pollinations">Pollinations Open Text/Image (pollinations)</option>
-                    <option value="lmstudio">LM Studio / vLLM Local :1234 (lmstudio)</option>
-                    <option value="ollama">Ollama Local (ollama)</option>
+                  <select id="vault-provider" style="min-width:210px;">
+                    <optgroup label="Cloud Platforms (Google / AWS)">
+                      <option value="gemini">Google Gemini (gemini)</option>
+                      <option value="google_vertex">Google Cloud / Vertex AI (google_vertex)</option>
+                      <option value="aws_bedrock">Amazon AWS Bedrock &amp; EC2 GPU (aws_bedrock)</option>
+                    </optgroup>
+                    <optgroup label="GPU Pod &amp; Cloud Compute">
+                      <option value="runpod">RunPod GPU Pods &amp; Serverless (runpod)</option>
+                      <option value="vastai">Vast.ai GPU Marketplace (vastai)</option>
+                      <option value="lambda_labs">Lambda Cloud GPU Instances (lambda_labs)</option>
+                      <option value="modal">Modal Serverless GPU (modal)</option>
+                      <option value="coreweave">CoreWeave GPU Cluster (coreweave)</option>
+                      <option value="custom_gpu">Custom GPU Pod / vLLM (custom_gpu)</option>
+                    </optgroup>
+                    <optgroup label="Model API Providers">
+                      <option value="openai">OpenAI (openai)</option>
+                      <option value="anthropic">Anthropic (anthropic)</option>
+                      <option value="openrouter">OpenRouter (openrouter)</option>
+                      <option value="huggingface">HuggingFace Router &amp; FLUX (huggingface)</option>
+                      <option value="cerebras">Cerebras Wafer-Scale (cerebras)</option>
+                      <option value="sambanova">SambaNova Cloud (sambanova)</option>
+                      <option value="fireworks">Fireworks AI (fireworks)</option>
+                      <option value="nvidia">NVIDIA NIM (nvidia)</option>
+                      <option value="github">GitHub Models (github)</option>
+                      <option value="cohere">Cohere (cohere)</option>
+                      <option value="perplexity">Perplexity Sonar (perplexity)</option>
+                      <option value="xai">xAI Grok (xai)</option>
+                      <option value="deepseek">DeepSeek (deepseek)</option>
+                      <option value="groq">Groq (groq)</option>
+                      <option value="mistral">Mistral (mistral)</option>
+                      <option value="together">Together AI (together)</option>
+                      <option value="pollinations">Pollinations Open Text/Image (pollinations)</option>
+                    </optgroup>
+                    <optgroup label="Local Runtimes">
+                      <option value="lmstudio">LM Studio / vLLM Local :1234 (lmstudio)</option>
+                      <option value="ollama">Ollama Local (ollama)</option>
+                    </optgroup>
                   </select>
                   <input id="vault-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste provider API key (encrypted locally via DPAPI)…" style="flex:2 1 260px;" />
                   <button id="btn-vault-toggle-vis" class="btn-ghost" type="button">Show</button>
                   <button id="btn-vault-save" class="btn-ok" type="button">Save &amp; Verify</button>
                   <button id="btn-vault-probe" class="btn-ghost" type="button">Test Key</button>
                 </div>
+                <div id="vault-config-fields" class="row" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--border); flex-wrap:wrap; gap:8px;"></div>
+              </div>
+
+              <div class="tier-tabs" id="vault-category-tabs" style="margin-top:8px; margin-bottom:8px;">
+                <button type="button" class="tier-btn active" data-vault-cat="">All Providers</button>
+                <button type="button" class="tier-btn" data-vault-cat="cloud_platform">Cloud Platforms (Google / AWS)</button>
+                <button type="button" class="tier-btn" data-vault-cat="gpu_pod">GPU Pods (RunPod / Vast / Lambda / Modal)</button>
+                <button type="button" class="tier-btn" data-vault-cat="model_api">Model APIs</button>
+                <button type="button" class="tier-btn" data-vault-cat="local">Local</button>
               </div>
 
               <div style="overflow-x:auto;">
@@ -2532,30 +2626,33 @@
                     <span id="schema-stat-fanout" class="telemetry-kv" title="Aggregate max_children fan-out vs max_concurrency">agents: 1/∞ · Σmax_ch: 0+1∞ vs conc: ∞</span>
                   </div>
 
-                  <!-- Interactive Agents & Vault Readiness Panel -->
+                  <!-- Self-Assembling Nodes: Name · Model · Scription -->
                   <div class="panel" style="padding:10px 12px; background:var(--surface-2); gap:8px;">
                     <div class="panel-head">
-                      <span class="panel-title">Agents, Fleet Models &amp; Vault Readiness</span>
+                      <div>
+                        <span class="panel-title">Self-Assembling Nodes (Name · Model · Scription)</span>
+                        <div class="muted" style="font-size:11px; margin-top:2px;">Topology self-assembles dynamically. Each node defines its Name, Model, and Scription directive.</div>
+                      </div>
                       <span id="schema-vault-readiness-badge" class="pill pill-ok">Checking Vault…</span>
                     </div>
-                    <div style="overflow-x:auto; max-height:240px; overflow-y:auto;">
-                      <table>
+                    <div style="overflow-x:auto; max-height:280px; overflow-y:auto;">
+                      <table style="width:100%;">
                         <thead>
                           <tr>
                             <th style="width:28px;">On</th>
-                            <th>Agent / Role</th>
-                            <th>Model &amp; Provider</th>
-                            <th style="width:66px;">Max Ch.</th>
-                            <th>Vault</th>
+                            <th style="min-width:130px;">Node Name</th>
+                            <th style="min-width:140px;">Model</th>
+                            <th style="min-width:220px;">Scription (Directive / Description)</th>
+                            <th style="width:65px;">Vault</th>
                             <th style="width:34px;"></th>
                           </tr>
                         </thead>
                         <tbody id="schema-vault-body"></tbody>
                       </table>
                     </div>
-                    <div class="builder-inline-form">
-                      <input id="builder-agent-id" type="text" placeholder="agent id (e.g. sec-scout)" style="flex:1 1 110px;" />
-                      <input id="builder-agent-role" type="text" list="builder-role-options" placeholder="role (e.g. rag_scout)" style="flex:1 1 115px;" />
+                    <div class="builder-inline-form" style="gap:7px; flex-wrap:wrap;">
+                      <input id="builder-agent-id" type="text" placeholder="Node Name (e.g. Quant Specialist)" style="flex:1 1 130px;" />
+                      <input id="builder-agent-role" type="text" list="builder-role-options" placeholder="role (e.g. rag_scout)" style="flex:0.9 1 110px;" />
                       <datalist id="builder-role-options">
                         <option value="coordinator"></option>
                         <option value="planner_architect"></option>
@@ -2566,10 +2663,11 @@
                         <option value="fast_worker"></option>
                         <option value="research_scout"></option>
                       </datalist>
-                      <input id="builder-agent-model" type="text" list="builder-model-options" placeholder="model from fleet…" style="flex:1.4 1 155px;" />
+                      <input id="builder-agent-model" type="text" list="builder-model-options" placeholder="model from fleet…" style="flex:1.2 1 140px;" />
                       <datalist id="builder-model-options"></datalist>
-                      <input id="builder-agent-max-children" class="builder-num" type="number" min="0" placeholder="∞" title="Optional max_children (leave blank for unlimited ∞)" style="width:54px;" />
-                      <button id="btn-builder-add-agent" class="btn-ok" type="button" style="padding:5px 10px; font-size:11.5px;">+ Add Agent</button>
+                      <input id="builder-agent-scription" type="text" placeholder="scription (directive / what it owns and does)..." style="flex:2.2 1 200px;" />
+                      <input id="builder-agent-max-children" class="builder-num" type="number" min="0" placeholder="∞" title="Optional max_children (leave blank for unlimited ∞)" style="display:none;" />
+                      <button id="btn-builder-add-agent" class="btn-ok" type="button" style="padding:5px 12px; font-size:11.5px;">+ Add Node</button>
                     </div>
                   </div>
 
@@ -2684,6 +2782,116 @@
                     <span class="badge safety">execution_authorized=False</span>
                   </div>
                   <pre id="evobench-scaffold-json" class="mono muted" style="margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; background:var(--bg); padding:8px 10px; border-radius:8px; border:1px solid var(--border); font-size:11.5px;">(Run a self-analytical round to inspect promoted scaffold Σ_K)</pre>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUB-TAB 7: GPU CLOUD & SWARM DEPLOYMENT FRAMEWORK -->
+          <div id="subview-gpu-deploy" class="subview">
+            <div class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 class="panel-title">GPU Cloud &amp; Swarm Deployment Framework</h2>
+                  <div class="muted" style="margin-top:3px;">Connect Google Cloud / Vertex AI, Amazon AWS / Bedrock, RunPod, Vast.ai, Lambda Cloud, Modal, CoreWeave, or self-hosted GPU pods and deploy swarm worker pools directly into Sabrina's Model Fleet.</div>
+                </div>
+                <div class="row">
+                  <span id="gpu-deploy-feedback" class="feedback"></span>
+                  <button id="btn-gpu-refresh" class="btn-ghost" type="button">Refresh GPU Providers</button>
+                </div>
+              </div>
+
+              <div class="grid-2" style="margin-top:10px; gap:12px;">
+                <div style="border:1px solid var(--border); border-radius:8px; padding:12px; background:rgba(15,23,42,0.45);">
+                  <div class="panel-head" style="margin-bottom:8px;">
+                    <span class="panel-title" style="color:var(--cyan);">Deploy Swarm to GPU Provider</span>
+                    <span id="gpu-est-cost" class="pill pill-idle">Est: $0.00/hr</span>
+                  </div>
+                  <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    <select id="gpu-deploy-provider" style="flex:1 1 200px;">
+                      <option value="runpod">RunPod (GPU Pods &amp; Serverless)</option>
+                      <option value="vastai">Vast.ai (GPU Marketplace)</option>
+                      <option value="lambda_labs">Lambda Cloud (GPU Instances)</option>
+                      <option value="google_vertex">Google Cloud / Vertex AI</option>
+                      <option value="aws_bedrock">Amazon AWS (Bedrock &amp; EC2 GPU)</option>
+                      <option value="modal">Modal (Serverless GPU Containers)</option>
+                      <option value="coreweave">CoreWeave (GPU Cluster)</option>
+                      <option value="custom_gpu">Custom GPU Pod / Self-Hosted vLLM</option>
+                    </select>
+                    <input id="gpu-deploy-name" type="text" placeholder="Swarm name (e.g. research-swarm-1)" style="flex:1 1 180px;" />
+                  </div>
+                  <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    <select id="gpu-deploy-sku" style="flex:2 1 210px;"></select>
+                    <input id="gpu-deploy-workers" type="number" min="1" max="64" value="1" title="Worker / GPU count" style="width:90px;" />
+                    <select id="gpu-deploy-runtime" style="flex:1 1 150px;">
+                      <option value="vllm">vLLM OpenAI Server</option>
+                      <option value="ollama">Ollama GPU Node</option>
+                      <option value="sabrina_worker">Sabrina Swarm Worker</option>
+                    </select>
+                  </div>
+                  <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:8px;">
+                    <input id="gpu-deploy-model" type="text" placeholder="Model ID (e.g. Qwen/Qwen2.5-Coder-14B-Instruct)" style="flex:2 1 220px;" />
+                    <input id="gpu-deploy-region" type="text" placeholder="Region (optional)" style="flex:1 1 120px;" />
+                    <input id="gpu-deploy-disk" type="number" min="10" max="2000" value="50" title="Disk GB" style="width:85px;" />
+                  </div>
+                  <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center;">
+                    <input id="gpu-deploy-image" type="text" placeholder="Container image (optional — defaults to runtime image)" style="flex:2 1 240px;" />
+                    <label class="row" style="gap:5px; cursor:pointer; font-size:12px;">
+                      <input id="gpu-deploy-autoreg" type="checkbox" checked />
+                      <span>Auto-register endpoint in Model Fleet</span>
+                    </label>
+                  </div>
+                  <div class="row" style="gap:8px; flex-wrap:wrap;">
+                    <button id="btn-gpu-dryrun" class="btn-ghost" type="button">Preview Spec (Dry Run)</button>
+                    <button id="btn-gpu-deploy" class="btn-ok" type="button">Deploy Swarm to GPU</button>
+                  </div>
+                  <details id="gpu-spec-drawer" style="margin-top:10px;">
+                    <summary class="muted" style="cursor:pointer;">Last Generated Provider Deployment Spec</summary>
+                    <pre id="gpu-spec-preview" style="background:#090d16; border:1px solid var(--border); border-radius:8px; padding:8px; font-size:11px; max-height:200px; overflow:auto; margin:6px 0 0 0;">Click "Preview Spec (Dry Run)" to inspect the provider API payload before launching.</pre>
+                  </details>
+                </div>
+
+                <div style="border:1px solid var(--border); border-radius:8px; padding:12px; background:rgba(15,23,42,0.45); overflow:auto;">
+                  <div class="panel-head" style="margin-bottom:8px;">
+                    <span class="panel-title">Registered Cloud &amp; GPU Pod Providers</span>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Provider</th>
+                        <th>Auth</th>
+                        <th>Capabilities</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="gpu-providers-body">
+                      <tr><td colspan="4" class="muted">Loading GPU providers…</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div style="margin-top:14px;">
+                <div class="panel-head" style="margin-bottom:6px;">
+                  <h3 class="panel-title" style="font-size:14px;">Active &amp; Recent GPU Swarm Deployments</h3>
+                </div>
+                <div style="overflow-x:auto;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Swarm / ID</th>
+                        <th>Provider</th>
+                        <th>GPU &amp; Workers</th>
+                        <th>Model / Runtime</th>
+                        <th>Status</th>
+                        <th>Endpoint</th>
+                        <th style="width:230px;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="gpu-deployments-body">
+                      <tr><td colspan="7" class="muted">No GPU swarm deployments recorded yet.</td></tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
@@ -3247,10 +3455,11 @@
               pct: Number(pts[idx] || 0),
               price: Number(pxs[idx] || s.last || 0),
               timeLbl: lbls[idx] || "",
+              vwapDist: Number(s.vwap_dist_pct) || 0,
             };
           });
-          const boxW = 196;
-          const boxH = 22 + rowsAtX.length * 15;
+          const boxW = 216;
+          const boxH = 22 + rowsAtX.length * 16;
           const bx = hx + 12 + boxW > cssW - 8 ? Math.max(padL + 4, hx - boxW - 12) : hx + 12;
           const by = padT + 6;
           ctx.fillStyle = "rgba(9, 15, 26, 0.94)";
@@ -3262,10 +3471,11 @@
           ctx.font = "600 10px ui-monospace, Consolas, monospace";
           ctx.fillText(`Window @ ${rowsAtX[0]?.timeLbl || "24h"}`, bx + 8, by + 14);
           rowsAtX.forEach((r, ri) => {
-            const ry = by + 29 + ri * 15;
+            const ry = by + 29 + ri * 16;
             ctx.fillStyle = r.color;
             const pxStr = r.price >= 10 ? "$" + r.price.toFixed(2) : "$" + r.price.toPrecision(4);
-            ctx.fillText(`${r.symbol.padEnd(9)} ${(r.pct >= 0 ? "+" : "") + r.pct.toFixed(2)}% (${pxStr})`, bx + 8, ry);
+            const vStr = r.vwapDist ? ` [VWAP ${r.vwapDist > 0 ? "+" : ""}${r.vwapDist.toFixed(1)}%]` : "";
+            ctx.fillText(`${r.symbol.padEnd(8)} ${(r.pct >= 0 ? "+" : "") + r.pct.toFixed(1)}% (${pxStr})${vStr}`, bx + 8, ry);
           });
         }
 
@@ -3331,19 +3541,94 @@
           tickStamp.textContent = "⚡ WS tick " + new Date().toLocaleTimeString();
         }
         const gainers = (tickBody.gainers_24h && tickBody.gainers_24h.gainers) || [];
-        for (const g of gainers) {
-          const sym = String(g.symbol || "");
-          const pxCell = section.querySelector(`[data-km-price="${CSS.escape(sym)}"]`);
-          if (pxCell) {
-            const p = Number(g.last) || 0;
-            pxCell.textContent = p >= 10 ? "$" + p.toFixed(2) : "$" + p.toPrecision(5);
-          }
-          const chgCell = section.querySelector(`[data-km-chg="${CSS.escape(sym)}"]`);
-          if (chgCell) {
-            const c = Number(g.change_pct_24h) || 0;
-            chgCell.className = "km-mono " + (c >= 0 ? "km-pos" : "km-neg");
-            chgCell.textContent = (c >= 0 ? "+" : "") + c.toFixed(2) + "%";
-          }
+        const tbody = section.querySelector("[data-km-gainer-list]");
+        if (tbody && gainers.length) {
+          const oldRows = new Map(Array.from(tbody.querySelectorAll("tr[data-km-gainer-row]"))
+            .map((row) => [row.getAttribute("data-km-gainer-row"), row]));
+          const palette = ["#34d399", "#38bdf8", "#fbbf24", "#a78bfa", "#f472b6",
+            "#2dd4bf", "#60a5fa", "#fb923c", "#c084fc", "#4ade80", "#f87171",
+            "#818cf8", "#e879f9", "#facc15", "#22d3ee", "#fda4af", "#a3e635",
+            "#fcd34d", "#93c5fd", "#d8b4fe", "#6ee7b7", "#fdba74", "#67e8f9",
+            "#f9a8d4", "#c4b5fd"];
+          const rows = gainers.map((g, index) => {
+            const sym = String(g.symbol || "?");
+            let row = oldRows.get(sym);
+            if (!row || row.cells.length !== 13) {
+              row = document.createElement("tr");
+              row.setAttribute("data-km-gainer-row", sym);
+              for (let i = 0; i < 13; i++) row.appendChild(document.createElement("td"));
+              const name = document.createElement("strong");
+              name.textContent = sym;
+              row.cells[1].replaceChildren(name);
+              if (g.held_in_portfolio) {
+                const held = document.createElement("span");
+                held.className = "km-mini-badge km-ok";
+                held.textContent = "HELD";
+                row.cells[1].appendChild(document.createTextNode(" "));
+                row.cells[1].appendChild(held);
+              }
+              if (g.is_stock) {
+                const stk = document.createElement("span");
+                stk.className = "km-mini-badge km-info";
+                stk.textContent = "xSTOCK";
+                row.cells[1].appendChild(document.createTextNode(" "));
+                row.cells[1].appendChild(stk);
+              }
+              row.cells[5].textContent = "—";
+            }
+            const cells = row.cells;
+            const dot = document.createElement("span");
+            dot.className = "km-swatch";
+            dot.style.background = palette[index % palette.length];
+            cells[0].className = "km-mono";
+            cells[0].replaceChildren(dot, document.createTextNode("#" + (index + 1)));
+
+            const change = Number(g.change_pct_24h) || 0;
+            cells[2].className = "km-mono " + (change >= 0 ? "km-pos" : "km-neg");
+            cells[2].textContent = (change >= 0 ? "+" : "") + change.toFixed(2) + "%";
+
+            const chg1h = Number(g.chg_1h) || 0;
+            cells[3].className = "km-mono " + (chg1h > 0 ? "km-pos" : (chg1h < 0 ? "km-neg" : "km-muted"));
+            cells[3].textContent = chg1h !== 0 ? (chg1h > 0 ? "+" : "") + chg1h.toFixed(2) + "%" : "—";
+
+            const price = Number(g.last) || 0;
+            cells[4].className = "km-mono";
+            cells[4].textContent = price >= 10 ? "$" + price.toFixed(2) : "$" + price.toPrecision(5);
+
+            cells[6].className = "km-mono";
+            cells[6].textContent = formatUsdCompactJs(Number(g.vol_24h_usd) || 0);
+
+            const rpos = Number(g.range_pos_pct) || 50;
+            cells[7].className = "km-mono " + (rpos >= 80 ? "km-pos" : (rpos <= 20 ? "km-neg" : "km-muted"));
+            cells[7].textContent = Math.round(rpos) + "%";
+            cells[7].title = "Position in 24h Low-High Range";
+
+            cells[8].className = "km-mono";
+            cells[8].textContent = (Number(g.spread_bps) || 0).toFixed(1) + " bp";
+
+            const imbalance = (Number(g.book_imbalance) || 0) * 100;
+            cells[9].className = "km-mono " + (imbalance > 5 ? "km-pos" : (imbalance < -5 ? "km-neg" : "km-muted"));
+            cells[9].textContent = imbalance ? (imbalance > 0 ? "+" : "") + imbalance.toFixed(0) + "%" : "—";
+            cells[9].title = "Top-of-Book Bid/Ask Imbalance";
+
+            const cvd = Number(g.cvd_usd_2s) || 0;
+            cells[10].className = "km-mono " + (cvd > 0 ? "km-pos" : (cvd < 0 ? "km-neg" : "km-muted"));
+            cells[10].textContent = cvd ? (cvd > 0 ? "+" : "") + Math.round(cvd).toLocaleString() + "$" : "—";
+            cells[10].title = "Live 2s Whale CVD Flow";
+
+            const vdist = Number(g.vwap_dist_pct) || 0;
+            cells[11].className = "km-mono " + (vdist > 0 ? "km-pos" : (vdist < 0 ? "km-neg" : "km-muted"));
+            cells[11].textContent = vdist !== 0 ? (vdist > 0 ? "+" : "") + vdist.toFixed(1) + "%" : "—";
+            cells[11].title = "Distance from 24h Institutional VWAP";
+
+            const trd = Number(g.trades_24h) || 0;
+            const avgTrd = Number(g.avg_trade_usd) || 0;
+            cells[12].className = "km-mono km-small";
+            cells[12].textContent = trd ? trd.toLocaleString() : "—";
+            cells[12].title = trd ? `24h Trades: ${trd.toLocaleString()} (Avg size: $${Math.round(avgTrd).toLocaleString()})` : "24h Trades";
+            return row;
+          });
+          tbody.replaceChildren(...rows);
         }
         // Re-mark active Paper Lab single-pair positions when live WS quotes arrive
         const quotes = tickBody.quotes || {};
@@ -3372,11 +3657,41 @@
         });
         if (tickBody.chart_spec) {
           const st = pluginChartState.get(pluginName) || { hoverRatio: null };
-          st.spec = tickBody.chart_spec;
+          const oldSeries = new Map(((st.spec && st.spec.series) || []).map((s) => [s.symbol, s]));
+          const updatedSeries = (tickBody.chart_spec.series || []).map((current) => {
+            const prior = oldSeries.get(current.symbol);
+            if (!prior || !Array.isArray(prior.price_series) || prior.price_series.length < 3) return current;
+            const prices = prior.price_series.slice();
+            const percentages = (prior.pct_series || []).slice();
+            const base = Number(prices[0]) || 0;
+            prices[prices.length - 1] = current.last;
+            if (base > 0 && percentages.length) percentages[percentages.length - 1] = (current.last / base - 1) * 100;
+            return { ...current, labels: prior.labels, price_series: prices, pct_series: percentages };
+          });
+          st.spec = { ...tickBody.chart_spec, series: updatedSeries };
           pluginChartState.set(pluginName, st);
           const canvas = section.querySelector('canvas[data-plugin-chart="kraken_gainers_24h"]');
-          if (canvas) drawKrakenGainersChart(canvas, tickBody.chart_spec, st.hoverRatio);
+          if (canvas) drawKrakenGainersChart(canvas, st.spec, st.hoverRatio);
         }
+      }
+
+      function annotateKrakenPaperStrategies(host, snapshot) {
+        const paper = (snapshot && snapshot.paper) || {};
+        const verdicts = (paper.deterministic_wl_gate && paper.deterministic_wl_gate.portfolios) || {};
+        host.querySelectorAll("[data-km-pf]").forEach((card) => {
+          const key = card.getAttribute("data-km-pf") || "";
+          const verdict = verdicts[key];
+          if (!verdict) return;
+          const current = verdict.active_rd_strategy || ((paper.portfolios || {})[key] || {}).rd_replacement_id;
+          const blocked = verdict.status === "NO_DISTINCT_REPLACEMENT";
+          const note = document.createElement("div");
+          note.className = "km-mono km-small " + (blocked ? "km-amber" : "km-muted");
+          note.style.marginTop = "5px";
+          note.style.overflowWrap = "anywhere";
+          const label = current ? "Active strategy: " + current : "Active strategy unavailable";
+          note.textContent = blocked ? label + " • Replacement blocked: no distinct candidate" : label;
+          card.appendChild(note);
+        });
       }
 
       function renderPluginTabOutput(section, res, pluginName = "") {
@@ -3395,6 +3710,7 @@
           richHost.style.display = "block";
           richHost.replaceChildren(sanitizePluginHtmlFragment(body.html));
           const effPlugin = pluginName || section.dataset.pluginName || "";
+          if (effPlugin === "kraken_monitor") annotateKrakenPaperStrategies(richHost, body.snapshot);
           richHost.querySelectorAll("[data-plugin-op]").forEach((btnEl) => {
             btnEl.addEventListener("click", () => {
               const op = btnEl.getAttribute("data-plugin-op") || "";
@@ -3492,7 +3808,7 @@
             if (!section.classList.contains("active") || !section.dataset.loaded || wsBusy) return;
             wsBusy = true;
             try {
-              const filt = pluginFilterState.get("kraken_monitor") || { asset_class: "crypto", limit: 10, chart_mode: "trajectory" };
+              const filt = pluginFilterState.get("kraken_monitor") || { asset_class: "crypto", limit: 25, chart_mode: "trajectory" };
               const wsRes = await callBridge("PluginTabs", "run_plugin_tab_operation", "kraken_monitor", "ws_ticks", filt);
               const body = wsRes && wsRes.data ? wsRes.data.result : wsRes;
               applyKrakenWsTickDelta(section, "kraken_monitor", body);
@@ -4395,33 +4711,26 @@
         };
         nodesById.set("sabrina", rootNode);
 
-        // If no real workers are running, show standby council hubs from schema.
+        // If no real workers are running, render the full stigmergic swarm council from the active schema
         // When real live workers exist, render the real active workers directly under Sabrina!
         if (effWorkers.length === 0) {
-          const hubMeta = {
-            codex: { role: "planner_architect", fallbackModel: "openai/gpt-5", fallbackCmd: "python -m swarm_command.router" },
-            antigravity: { role: "execution_specialist", fallbackModel: "gemini-2.5-pro", fallbackCmd: "python -m live_swarm_runner" },
-            claude: { role: "critic_verifier", fallbackModel: "anthropic/claude-sonnet-4-5", fallbackCmd: "python -m verify_h1_v2_z3_and_hashes" },
-          };
-          Object.keys(hubMeta).forEach((pKey) => {
-            const hInfo = (nodeMap[pKey] && typeof nodeMap[pKey] === "object") ? nodeMap[pKey] : {};
-            const matchedSchema = schemaAgents.find((a) => a.role === hubMeta[pKey].role || a.id === pKey);
-            const hModel = String((matchedSchema && matchedSchema.model) || hubMeta[pKey].fallbackModel);
-            const hProv = inferProviderFromModelId(hModel, matchedSchema && matchedSchema.provider);
-            const hStatusRaw = String(hInfo.status || "STANDBY").toUpperCase();
-            const hStatus = hStatusRaw.split(/\s+/)[0] || "STANDBY";
-            const hCmd = String(hInfo.command || hInfo.active_command || hubMeta[pKey].fallbackCmd);
-            const hState = String(hInfo.state || (hStatus === "WORKING" || hStatus === "ACTIVE" ? "ACTIVE" : (hStatus === "VERIFYING" ? "VALIDATING" : "STANDBY")));
-            nodesById.set(pKey, {
-              id: pKey,
-              agent_id: pKey,
-              name: pKey,
+          // Render ALL agents declared in the active collective schema (e.g. 7-agent / 8-agent swarm)
+          schemaAgents.filter(a => a.id !== "sabrina" && a.role !== "coordinator").forEach((agent) => {
+            const aKey = agent.id || agent.role;
+            const hInfo = (nodeMap[aKey] && typeof nodeMap[aKey] === "object") ? nodeMap[aKey] : {};
+            const hModel = String(agent.model || "gemini-4-neon");
+            const hProv = inferProviderFromModelId(hModel, agent.provider);
+            const hCmd = String(hInfo.command || hInfo.active_command || "python -m live_swarm_runner");
+            nodesById.set(aKey, {
+              id: aKey,
+              agent_id: aKey,
+              name: agent.name || aKey,
               mode: "SEEDED",
-              role: hubMeta[pKey].role,
+              role: agent.role,
               model: hModel,
               provider: hProv,
-              max_children: null,
-              task: String(hInfo.detail || "Council standby"),
+              max_children: agent.max_children || null,
+              task: String(hInfo.detail || agent.task || "Council standby"),
               command: hCmd,
               active_command: hCmd,
               prompt: "",
@@ -4434,26 +4743,26 @@
               logprob: hInfo.logprob != null ? Number(hInfo.logprob) : -0.10,
               hasRealLogprob: hInfo.logprob != null,
               gate: confGate,
-              gate_status: String(hInfo.gate_status || (hState === "STANDBY" ? "STANDBY" : "PASS")),
+              gate_status: "STANDBY",
               action_trail: Array.isArray(hInfo.action_trail) ? hInfo.action_trail : [],
               progress_pct: null,
               current_step: "standby",
               llm_used: false,
               latency_ms: null,
-              state: hState,
-              status: hStatus,
+              state: "STANDBY",
+              status: "CONFIGURED",
               depthExceeded: false,
               agentLimitExceeded: false,
               unreachable: false,
               hasSpindownRule: false,
               isLiveRunNode: true,
             });
-            rootNode.childIds.push(pKey);
-            rootNode.acceptedChildIds.push(pKey);
+            rootNode.childIds.push(aKey);
+            rootNode.acceptedChildIds.push(aKey);
             edges.push({
-              id: `sabrina->${pKey}:STANDBY`,
+              id: `sabrina->${aKey}:STANDBY`,
               from: "sabrina",
-              to: pKey,
+              to: aKey,
               rule_id: "COUNCIL_SCHEMA",
               min_logprob: confGate,
               liveLabel: "STANDBY",
@@ -4801,6 +5110,7 @@
       }
 
       let swarmLinkSourceId = "";
+      let swarmEditingWorkflow = false;
       let swarmPendingPair = null; // { from, to, editingId }
       let cachedSwarmA2aLinks = [];
 
@@ -4809,6 +5119,12 @@
         const txt = el("swarm-a2a-banner-text");
         const cancelBtn = el("btn-swarm-a2a-cancel");
         const pill = el("swarm-a2a-count-pill");
+        const edit = el("btn-swarm-a2a-edit-mode");
+        if (edit) {
+          edit.textContent = swarmEditingWorkflow ? "Done editing" : "Edit workflow";
+          edit.setAttribute("aria-pressed", String(swarmEditingWorkflow));
+        }
+        if (el("btn-swarm-a2a-clear")) el("btn-swarm-a2a-clear").hidden = !swarmEditingWorkflow;
         if (pill) pill.textContent = `${cachedSwarmA2aLinks.length} A2A link${cachedSwarmA2aLinks.length === 1 ? "" : "s"}`;
         if (!banner || !txt) return;
         if (swarmLinkSourceId) {
@@ -4821,7 +5137,7 @@
           if (cancelBtn) cancelBtn.style.display = "inline-flex";
         } else {
           banner.classList.remove("linking");
-          txt.innerHTML = `<span style="color:var(--cyan); font-weight:700;">🔗 Click-to-Link A2A Workflow:</span> Click any node on the Swarm Monitor below to select a <b>source</b>, then click a <b>second node</b> to define a <b>Loop</b>, <b>Pass-Off</b>, <b>Critique Gate</b>, <b>Delegation</b>, <b>Blackboard Sync</b>, or <b>Escalation</b>.`;
+          txt.textContent = swarmEditingWorkflow ? "Select two workers to edit their workflow link." : "Select a worker to inspect it.";
           if (cancelBtn) cancelBtn.style.display = "none";
         }
       }
@@ -4860,6 +5176,7 @@
       }
 
       window.__clickSwarmA2aEdge = (edgeId) => {
+        if (!swarmEditingWorkflow) return;
         const found = cachedSwarmA2aLinks.find((x) => x.id === edgeId);
         if (found) openSwarmA2aComposer(found.from, found.to, found.id);
       };
@@ -4872,12 +5189,12 @@
             cancelSwarmA2aComposer(false);
           } else {
             selectedLiveNodeKey = cleanId;
-            if (!swarmLinkSourceId) {
+            if (swarmEditingWorkflow && !swarmLinkSourceId) {
               swarmPendingPair = null;
               if (el("swarm-a2a-composer")) el("swarm-a2a-composer").style.display = "none";
               swarmLinkSourceId = cleanId;
               updateSwarmA2aBanner();
-            } else {
+            } else if (swarmEditingWorkflow) {
               openSwarmA2aComposer(swarmLinkSourceId, cleanId);
               return;
             }
@@ -6212,6 +6529,7 @@
       }
 
       let selectedMissionOutputId = "";
+      let monitorOpenedReport = null;
       const contractTemplate = {
         objective: "Summarize this repository using the README.",
         constraints: ["Keep the summary to one sentence."],
@@ -6425,8 +6743,8 @@
           speedupPill.textContent = `Wall Clock: ~${wallClockSec}s`;
         }
 
-        // Render bar chart
-        const barRows = subtasks.map((st) => {
+        // Render self-assembling topological node stream (Node Name · Model · Scription)
+        const barRows = subtasks.map((st, idx) => {
           const isBottleneck = st === bottleneck;
           const pctWidth = Math.max(4, Math.round((st.latency_ms / maxMs) * 100));
           const timeLabel = `${(st.latency_ms / 1000.0).toFixed(1)}s`;
@@ -6435,26 +6753,33 @@
           let barColor = isBottleneck
             ? "linear-gradient(90deg, #f59e0b, #ef4444)"
             : "linear-gradient(90deg, #0284c7, #38bdf8)";
-          let borderHighlight = isBottleneck ? "border:1px solid #ef4444; box-shadow:0 0 10px rgba(239,68,68,0.3);" : "";
+          let borderHighlight = isBottleneck
+            ? "border:1px solid rgba(239,68,68,0.7); box-shadow:0 0 12px rgba(239,68,68,0.25);"
+            : "border:1px solid rgba(56,189,248,0.2);";
           let badgeTag = isBottleneck
-            ? '<span class="pill pill-err mono" style="font-size:9.5px; padding:1px 5px; margin-left:6px;">CRITICAL PATH BOTTLENECK</span>'
-            : "";
+            ? '<span class="pill pill-err mono" style="font-size:9.5px; padding:1px 5px; margin-left:6px;">⚠ CRITICAL PATH BOTTLENECK</span>'
+            : `<span class="pill pill-idle mono" style="font-size:9.5px; padding:1px 5px; margin-left:6px;">NODE #${idx + 1}</span>`;
+
+          const scription = st.summary || st.description || st.role || "Self-assembled execution node";
 
           return `
-            <div style="display:flex; flex-direction:column; gap:3px; padding:6px 8px; background:rgba(15,23,42,0.6); border-radius:6px; ${borderHighlight}">
-              <div style="display:flex; justify-content:space-between; align-items:center; font-size:11.5px;">
-                <div style="display:flex; align-items:center; gap:6px;">
-                  <strong style="color:${isBottleneck ? '#fbbf24' : '#e2e8f0'};">${esc(st.name)}</strong>
-                  <span class="mono muted" style="font-size:10.5px;">(${esc(st.role)} · ${esc(st.model || 'local')})</span>
+            <div style="display:flex; flex-direction:column; gap:5px; padding:8px 10px; background:rgba(15,23,42,0.75); border-radius:7px; ${borderHighlight}">
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <strong style="color:${isBottleneck ? '#fbbf24' : '#38bdf8'}; font-size:12.5px;">${esc(st.name)}</strong>
+                  <span class="pill pill-idle mono" style="font-size:10.5px; background:rgba(30,41,59,0.8);">${esc(st.model || 'local')}</span>
                   ${badgeTag}
                 </div>
                 <div style="display:flex; align-items:center; gap:8px;">
-                  <span class="mono" style="font-weight:700; color:${isBottleneck ? '#f87171' : '#38bdf8'};">${timeLabel}</span>
+                  <span class="mono" style="font-weight:700; color:${isBottleneck ? '#f87171' : '#38bdf8'}; font-size:12px;">${timeLabel}</span>
                   <span class="mono muted" style="font-size:10.5px;">(${nodePctOfTotal}%)</span>
                 </div>
               </div>
-              <div class="progress-track" style="height:7px; background:#1e293b; border-radius:4px; overflow:hidden;">
-                <div style="width:${pctWidth}%; height:100%; background:${barColor}; border-radius:4px; transition:width 0.3s ease;"></div>
+              <div style="font-size:11px; color:#cbd5e1; line-height:1.4; padding:4px 8px; background:rgba(2,6,23,0.55); border-radius:4px; border-left:3px solid ${isBottleneck ? '#ef4444' : '#38bdf8'}; font-family:var(--font-mono, monospace);">
+                <span class="muted mono" style="font-size:10px; font-weight:700; text-transform:uppercase; color:#94a3b8;">Scription:</span> ${esc(scription)}
+              </div>
+              <div class="progress-track" style="height:6px; background:#1e293b; border-radius:3px; overflow:hidden; margin-top:2px;">
+                <div style="width:${pctWidth}%; height:100%; background:${barColor}; border-radius:3px; transition:width 0.3s ease;"></div>
               </div>
             </div>
           `;
@@ -6561,65 +6886,40 @@
         if (costEl) costEl.textContent = `💵 $${estCostUsd.toFixed(3)}`;
 
         const missionWorkers = workers.filter(w => !w.mission_id || w.mission_id === mid);
-        const roleWorkerMap = new Map();
-        for (const w of missionWorkers) {
-          const role = String(w.role || "").toLowerCase();
-          if (!w.recovery_for && !roleWorkerMap.has(role)) roleWorkerMap.set(role, w);
-        }
-        for (const w of missionWorkers) {
-          if (w.recovery_for && roleWorkerMap.get(w.recovery_role)?.id === w.recovery_for) {
-            roleWorkerMap.set(w.recovery_role, w);
-          }
-        }
 
-        const stageConfigs = [
-          { id: "planner", key: "planner_architect", name: "1. PLANNER", defaultDesc: "Decompose Goal" },
-          { id: "scout", key: "research_scout", name: "2. SCOUT", defaultDesc: "Scan Workspace" },
-          { id: "executor", key: "execution_specialist", name: "3. EXECUTOR", defaultDesc: "Synthesize Deliverable" },
-          { id: "verifier", key: "critic_verifier", name: "4. VERIFIER", defaultDesc: "Audit & Gate" },
-        ];
-
-        let activeTickerText = "";
-        stageConfigs.forEach(sc => {
-          const stepEl = el(`lmb-step-${sc.id}`);
-          const statusEl = el(`lmb-step-${sc.id}-status`);
-          const detailEl = el(`lmb-step-${sc.id}-detail`);
-          if (!stepEl) return;
-
-          const w = roleWorkerMap.get(sc.key);
-          if (!w) {
-            stepEl.className = "lmb-step";
-            if (statusEl) statusEl.textContent = "QUEUED";
-            if (detailEl) detailEl.textContent = sc.defaultDesc;
-          } else {
+        const stepperContainer = el("lmb-stepper");
+        if (stepperContainer && missionWorkers.length > 0) {
+          stepperContainer.style.gridTemplateColumns = `repeat(${Math.min(missionWorkers.length, 8)}, 1fr)`;
+          stepperContainer.innerHTML = missionWorkers.map((w, idx) => {
             const st = String(w.status || "WORKING").toUpperCase();
             const pct = w.progress_pct != null ? `${w.progress_pct}%` : "";
+            let cls = "lmb-step active";
+            let statusText = w.recovery_for ? "⚡ RECOVERING" : `⚡ ${pct || "RUNNING"}`;
             if (st === "DONE" || st === "PASS") {
-              stepEl.className = "lmb-step done";
-              if (statusEl) statusEl.textContent = w.recovery_for ? "✓ RECOVERED" : "✓ DONE";
-              if (detailEl) detailEl.textContent = esc(shortLabel(w.summary || w.detail || "Completed", 32));
+              cls = "lmb-step done";
+              statusText = w.recovery_for ? "✓ RECOVERED" : "✓ DONE";
             } else if (st === "FAILED" || st === "ERROR") {
-              stepEl.className = "lmb-step failed";
-              if (statusEl) statusEl.innerHTML = `<span style="color:#f87171;">⚠️ FAILED</span>`;
-              if (detailEl) detailEl.textContent = esc(shortLabel(w.llm_error || w.detail || "Failed", 32));
-              if (!activeTickerText) activeTickerText = `⚠️ ${w.name || sc.name}: ${w.llm_error || "Execution failed"}`;
-            } else {
-              stepEl.className = "lmb-step active";
-              if (statusEl) statusEl.textContent = w.recovery_for ? "RECOVERING" : `⚡ ${pct || "RUNNING"}`;
-              if (detailEl) detailEl.textContent = esc(shortLabel(w.detail || w.current_step || sc.defaultDesc, 34));
-              if (!activeTickerText) {
-                const modelTag = w.model ? ` via ${w.model}` : "";
-                activeTickerText = `⚡ ${w.name || sc.name}: ${w.detail || w.current_step || "Executing workstream"}${modelTag} (${pct})`;
-              }
+              cls = "lmb-step failed";
+              statusText = "⚠️ FAILED";
             }
-          }
-        });
+            const cleanRole = (w.role || "worker").replace(/_/g, " ").toUpperCase();
+            const cleanModel = (w.model || "llm").split("/").pop();
+            return `
+              <div class="${cls}" style="padding:6px 8px; background:rgba(15,23,42,0.6); border:1px solid #334155; border-radius:6px; font-size:11px;">
+                <div style="display:flex; justify-content:space-between; font-weight:600;">
+                  <span class="mono">${idx + 1}. ${esc(cleanRole)}</span>
+                  <span class="muted">${statusText}</span>
+                </div>
+                <div class="muted mono" style="font-size:9.5px; color:var(--cyan); margin-top:2px;">${esc(cleanModel)}</div>
+                <div class="muted" style="font-size:10px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(w.detail || w.summary || w.task || "Active")}</div>
+              </div>
+            `;
+          }).join("");
+        }
 
         const tickerEl = el("lmb-ticker-text");
         if (tickerEl) {
-          if (activeTickerText) {
-            tickerEl.textContent = activeTickerText;
-          } else if (overallPct >= 100) {
+          if (overallPct >= 100) {
             tickerEl.textContent = "✓ All stages completed. Deliverable report sealed and verified.";
           } else {
             tickerEl.textContent = runningMission ? (runningMission.last_event || "Swarm pipeline active...") : "Swarm pipeline active...";
@@ -6665,10 +6965,96 @@
         )).length;
       }
 
+      function renderMonitorOverview(swarm, automations) {
+        const chains = swarm.followup_chains || [];
+        const active = swarm.active_missions || [];
+        const audits = (swarm.pending_audit_decisions || []).filter(item => item.needs_more_work);
+        const hasAutomationStatus = Boolean(automations && Array.isArray(automations.loops));
+        const loops = hasAutomationStatus ? automations.loops : [];
+        const running = active.filter(item => !item.background_chain).map(item => ({
+          goal: item.goal, detail: item.last_event || "Running", mission_id: item.mission_id,
+        }));
+        for (const chain of chains.filter(item => ["QUEUED", "RUNNING"].includes(item.state))) {
+          running.push({
+            goal: chain.goal, detail: `${chain.state === "QUEUED" ? "Queued" : "Running in background"} · ${chain.remaining} follow-up${chain.remaining === 1 ? "" : "s"} remaining`,
+            mission_id: chain.current_mission_id,
+          });
+        }
+        for (const loop of loops.filter(item => String(item.status || "").toLowerCase() === "running")) {
+          running.push({goal: loop.name || "Automation", detail: "Automation running", automation: "loops"});
+        }
+        const attention = chains.filter(item => ["ATTENTION", "FAILED", "INTERRUPTED"].includes(item.state))
+          .map(item => ({goal:item.goal, detail:item.detail, mission_id:item.current_mission_id}));
+        for (const audit of audits) attention.push({
+          goal:`Review ${audit.mission_id}`, detail:(audit.issues || [])[0] || audit.summary || "Verification needs review",
+          mission_id:audit.mission_id,
+        });
+        for (const approval of swarm.pending_actions || []) attention.push({goal:approval.title, detail:approval.detail});
+        const approvals = Array.isArray(automations?.pending_approvals) ? automations.pending_approvals : [];
+        const pendingLoopIds = new Set();
+        for (const approval of approvals) {
+          const loop = loops.find(item => item.id === approval.loop_id);
+          if (approval.loop_id) pendingLoopIds.add(approval.loop_id);
+          attention.push({goal: loop?.name || "Automation awaiting approval",
+                          detail: approval.pending_approval?.reason || "Waiting for approval", automation: "attention"});
+        }
+        for (const loop of loops.filter(item => String(item.status || "").toLowerCase() === "waiting_approval" && !pendingLoopIds.has(item.id))) {
+          attention.push({goal: loop.name || "Automation awaiting approval", detail: "Waiting for approval", automation: "attention"});
+        }
+        const missionOutputs = swarm.mission_outputs || [];
+        const liveIds = new Set(missionOutputs.map(run => run.mission_id));
+        const savedAttention = (swarm.saved_run_attention || []).filter(run => !liveIds.has(run.mission_id));
+        for (const run of [...missionOutputs, ...savedAttention]) {
+          if (["FAILED", "ERROR", "BLOCKED", "INTERRUPTED"].includes(run.state) && !attention.some(item => item.mission_id === run.mission_id)) {
+            attention.push({goal:run.goal, detail:run.error || run.summary || run.state, mission_id:run.mission_id});
+          }
+        }
+        const recent = new Map();
+        const completed = [
+          ...missionOutputs,
+          ...chains.flatMap(chain => chain.runs || []),
+          ...(swarm.recent_saved_runs || []),
+          ...savedAttention,
+        ].filter(item => item.mission_id && !["ACTIVE (RUNNING)", "RUNNING", "QUEUED"].includes(item.state));
+        for (const run of completed) {
+          if (!recent.has(run.mission_id)) recent.set(run.mission_id, {...run, detail:run.state});
+        }
+        const synced = swarm.monitor_connection;
+        const freshness = synced === "connecting" ? "Connecting to services…" :
+          synced === "degraded" ? "Some services are unavailable. Local mission status is shown." : "Coordinator status";
+        const workerCount = activeWorkerCount(swarm);
+        el("swarm-monitor-connection").textContent = `${freshness} · ${workerCount} active worker${workerCount === 1 ? "" : "s"}`;
+        if (synced === "degraded") attention.unshift({goal:"Service connection limited", detail:"Check the service badges in the sidebar."});
+        const recentRows = [...recent.values()].sort((a, b) => Number(b.completed_at || b.updated_at || 0) - Number(a.completed_at || a.updated_at || 0));
+        el("monitor-running-count").textContent = `${running.length} active`;
+        const attentionCount = el("monitor-attention-count");
+        attentionCount.textContent = String(attention.length);
+        attentionCount.classList.toggle("has-attention", attention.length > 0);
+        el("monitor-recent-count").textContent = String(recentRows.length);
+        const automationSummary = el("monitor-automation-summary");
+        if (hasAutomationStatus) {
+          const enabled = loops.filter(loop => loop.enabled);
+          const scheduled = enabled.filter(loop => Number.isFinite(Number(loop.next_run)) && Number(loop.next_run) > 0 &&
+            !["running", "waiting_approval"].includes(String(loop.status || "").toLowerCase())).length;
+          automationSummary.textContent = `${enabled.length} automation${enabled.length === 1 ? "" : "s"} enabled · ${scheduled}\u00a0scheduled`;
+        } else {
+          automationSummary.textContent = "Automation status unavailable";
+        }
+        function list(id, rows, empty) {
+          const markup = rows.slice(0, 20).map(item => `<li class="swarm-monitor-item"><div><b>${esc(shortLabel(item.goal || item.mission_id || "Mission", 105))}</b><span class="muted">${esc(shortLabel(item.detail || "", 135))}</span></div>${item.automation ? `<button class="btn-ghost" type="button" data-monitor-automation="${item.automation}" aria-label="View automation ${esc(shortLabel(item.goal || "", 105))}">View</button>` : (item.mission_id ? `<button class="btn-ghost" type="button" data-monitor-run="${esc(item.mission_id)}" aria-label="Open run ${esc(item.mission_id)}">Open</button>` : "")}</li>`).join("") || `<li class="muted">${empty}</li>`;
+          const target = el(id);
+          if (target.innerHTML !== markup) target.innerHTML = markup;
+        }
+        list("monitor-running", running, "No runs active.");
+        list("monitor-attention", attention, "No action needed.");
+        list("monitor-recent", recentRows, "No saved runs yet.");
+      }
+
       function renderSnapshot(snap) {
         if (!snap) return;
         latestSnap = snap;
         const swarm = snap.swarm || {};
+        renderMonitorOverview(swarm, snap.automations);
         const nodes = swarm.nodes || {};
         const workers = Array.isArray(swarm.workers) ? swarm.workers : [];
         const recentSpindowns = Array.isArray(swarm.recent_spindowns) ? swarm.recent_spindowns : [];
@@ -6761,11 +7147,8 @@
           const recKey = `${recStep.source || "swarm"}:${recStep.goal}`;
           if (recKey !== window.__lastAppliedRecKey) {
             window.__lastAppliedRecKey = recKey;
-            const okToAutoLoop = latestMission
-              ? ["PASS", "DONE", "COMPLETED"].includes(String(latestMission.state || "").toUpperCase())
-              : true;
             if (typeof window.__applyRecommendedNextGoal === "function") {
-              window.__applyRecommendedNextGoal(recStep.goal, recStep.source || "", okToAutoLoop);
+              window.__applyRecommendedNextGoal(recStep.goal, recStep.source || "");
             }
           }
         }
@@ -6849,12 +7232,33 @@
 
         const feed = swarm.activity_feed || [];
         el("swarm-feed").innerHTML = feed.length
-          ? feed.map((ev) => `
+          ? feed.map((ev) => {
+              const bdgUp = String(ev.badge || "").toUpperCase();
+              const isJc = bdgUp.startsWith("JOIN_CUT");
+              const badgeHtml = isJc
+                ? `<span class="pill ${bdgUp.includes("DEDUP") ? "pill-warn" : (String(ev.summary || "").includes("JOINED") ? "pill-ok" : "pill-run")}" style="font-size:10px; padding:1px 6px;">${esc(ev.badge)}</span>`
+                : `[${esc(ev.badge)}]`;
+              return `
               <div class="feed-item">
-                <div class="feed-meta"><span><b>${esc(ev.actor)}</b> · [${esc(ev.badge)}]</span><span>${esc(ev.time)} (${esc(ev.ago)})</span></div>
+                <div class="feed-meta"><span><b>${esc(ev.actor)}</b> · ${badgeHtml}</span><span>${esc(ev.time)} (${esc(ev.ago)})</span></div>
                 <div>${esc(ev.summary)}</div>
-              </div>`).join("")
+              </div>`;
+            }).join("")
           : '<div class="muted">No swarm activity recorded yet.</div>';
+
+        // Update Active Modules / Deployment Health badge in topbar
+        const dh = snap.deployment_health;
+        const dhBadge = el("deploy-health-badge");
+        const dhDot = el("deploy-health-dot");
+        const dhLabel = el("deploy-health-label");
+        if (dh && dhBadge && dhDot && dhLabel) {
+          dhLabel.textContent = dh.summary || `Modules: ${dh.active_count || 0}/${dh.total_count || 0}`;
+          dhDot.className = dh.all_ok ? "dot ok" : "dot warn";
+          const tipLines = Array.isArray(dh.modules)
+            ? dh.modules.map((m) => `${m.active ? "✓" : "✗"} ${m.label}: ${m.detail || (m.active ? "active" : "off")}`)
+            : [];
+          dhBadge.title = tipLines.length ? `Deployment Health\n${tipLines.join("\n")}` : "Deployment Health";
+        }
 
         // Swarm Monitor Live Spawn Event Log (strictly real backend feed / spindowns; never simState)
         const liveLogEntries = feed.length
@@ -6862,13 +7266,17 @@
               const bdg = String(ev.badge || "LIVE").toUpperCase();
               const pill = (bdg.includes("FAIL") || bdg.includes("ERR") || bdg.includes("HAZARD") || bdg.includes("VETO"))
                 ? "pill-err"
-                : (bdg.includes("SEARCH") || bdg.includes("DOCS") || bdg.includes("QUERY"))
-                  ? "pill-search"
-                  : (bdg === "FILE_CREATED" || bdg.includes("PASS") || bdg.includes("DONE") || bdg.includes("SPINDOWN"))
-                    ? "pill-ok"
-                    : (bdg === "FILE_MODIFIED" || bdg.includes("SPAWN") || bdg.includes("WARN"))
-                      ? "pill-warn"
-                      : "pill-run";
+                : (bdg === "JOIN_CUT_DEDUP")
+                  ? "pill-warn"
+                  : (bdg === "JOIN_CUT")
+                    ? (String(ev.summary || "").includes("JOINED") ? "pill-ok" : "pill-run")
+                    : (bdg.includes("SEARCH") || bdg.includes("DOCS") || bdg.includes("QUERY"))
+                      ? "pill-search"
+                      : (bdg === "FILE_CREATED" || bdg.includes("PASS") || bdg.includes("DONE") || bdg.includes("SPINDOWN"))
+                        ? "pill-ok"
+                        : (bdg === "FILE_MODIFIED" || bdg.includes("SPAWN") || bdg.includes("WARN"))
+                          ? "pill-warn"
+                          : "pill-run";
               return { tag: bdg, pill, time: String(ev.time || ev.ago || ""), msg: `${ev.actor || "swarm"} :: ${ev.summary || ""}` };
             })
           : recentSpindowns.slice(0, 20).map((sd) => ({
@@ -6926,7 +7334,11 @@
         renderLiveMissionBanner(swarm, workers);
 
         // Live Mission Output & Execution Report
-        renderMissionOutputs(swarm.mission_outputs || []);
+        const fullOutputs = [...(swarm.mission_outputs || [])];
+        if (monitorOpenedReport && !fullOutputs.some(item => item.mission_id === monitorOpenedReport.mission_id)) {
+          fullOutputs.push(monitorOpenedReport);
+        }
+        renderMissionOutputs(fullOutputs);
 
         // Live Swarm Workers Fleet (6 aligned columns: Worker | Role | Model | Status | Exclusive Locks | Action)
         const fleetBadge = el("swarm-fleet-badge");
@@ -6962,6 +7374,16 @@
                 const llmBadge = w.llm_used
                   ? ` <span class="pill pill-ok" style="font-size:10px; margin-left:4px;">${esc(w.provider || "llm")}${w.latency_ms != null ? ` · ${esc(w.latency_ms)}ms` : ""}</span>`
                   : "";
+                const cantorBadge = (w.cantor_path !== undefined && w.cantor_path !== null)
+                  ? (() => {
+                      const sp = w.bounding_sphere;
+                      const spTxt = sp ? ` r=${Number(sp.r).toFixed(3)}` : "";
+                      const spTip = sp
+                        ? `Cantor path '${w.cantor_path}' | 3D Sphere (${sp.cx}, ${sp.cy}, ${sp.cz}) r=${sp.r}`
+                        : `Cantor path '${w.cantor_path}'`;
+                      return ` <span class="pill pill-run mono" style="font-size:10px; margin-left:4px;" title="${esc(spTip)}">JC:${esc(w.cantor_path || "root")}${esc(spTxt)}</span>`;
+                    })()
+                  : "";
                 const workerPreviewHtml = w.llm_error
                   ? `<div style="color:var(--red); font-size:11px; margin-top:4px; font-weight:600; background:rgba(239,68,68,0.12); padding:3px 7px; border-radius:4px; border:1px solid rgba(239,68,68,0.3);">⚠️ ${esc(shortLabel(w.llm_error, 240))}</div>`
                   : (w.output_preview
@@ -6980,9 +7402,9 @@
                       <div class="muted mono" style="font-size:11px;">${esc(subMeta)}</div>
                     </td>
                     <td style="max-width:320px;">
-                      <div style="display:flex; align-items:center; gap:6px;">
+                      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
                         <b>${esc(w.role || "worker")}</b>
-                        ${llmBadge}
+                        ${llmBadge}${cantorBadge}
                       </div>
                       ${isWorking ? `
                         <div style="margin-top:4px; display:flex; align-items:flex-start; gap:6px; background:rgba(15,23,42,0.7); padding:4px 8px; border-radius:5px; border:1px solid rgba(56,189,248,0.3);">
@@ -7010,7 +7432,9 @@
                     </td>
                     <td><span class="mono muted" style="font-size:11px;">${(w.locks || []).map((l) => esc(l)).join(", ") || "—"}</span></td>
                     <td>
-                      <button class="btn-err" type="button" data-spindown-id="${esc(wid)}">Spin Down</button>
+                      ${w.background_chain
+                        ? `<button class="btn-err" type="button" data-stop-chain-id="${esc(w.background_chain)}">Stop chain</button>`
+                        : `<button class="btn-err" type="button" data-spindown-id="${esc(wid)}">Spin Down</button>`}
                     </td>
                   </tr>`;
               }).join("")
@@ -7167,6 +7591,7 @@
           if (prevVal && roster.some((r) => String(r.id) === prevVal)) {
             targetSel.value = prevVal;
           }
+          syncChatTarget();
         }
         // Swarm Deliberations stream (toggleable, keeps operator chat clean)
         const deliberations = snap.swarm_deliberations || (snap.swarm && snap.swarm.deliberations) || [];
@@ -7203,14 +7628,7 @@
             : '<div class="muted" style="font-size:12px;">No active swarm deliberations recorded yet.</div>';
         }
 
-        const chatHist = snap.chat_history || [];
-        el("chat-feed").innerHTML = chatHist.length
-          ? chatHist.slice(-30).map((m) => `
-              <div class="feed-item">
-                <div class="feed-meta"><span><b>${esc(m.sender || m.role || "operator")}</b></span><span>${esc(m.time || "")}</span></div>
-                <div style="white-space:pre-wrap;">${esc(m.text || m.reply || JSON.stringify(m))}</div>
-              </div>`).join("")
-          : '<div class="muted">No operator chat messages yet.</div>';
+        renderChatFeed(snap.chat_history || [], snap.chat_revision);
 
         if (snap.workspace) {
           syncTopWorkspacePill(snap.workspace);
@@ -7859,12 +8277,16 @@
         }
       }
 
+      let bridgeRequestsInFlight = 0;
+
       async function callBridge(source, method, ...args) {
         if (!window.pywebview || !window.pywebview.api || typeof window.pywebview.api[method] !== "function") {
           const msg = `Bridge method '${method}' unavailable`;
           debugLog("ERROR", source, msg);
           return { ok: false, error: msg };
         }
+        if (uiReloadInFlight) return {ok:false, error:"The console is reloading. Try again when it is ready."};
+        bridgeRequestsInFlight++;
         try {
           const res = await window.pywebview.api[method](...args);
           if (res && typeof res === "object" && (res.ok === false || res.error)) {
@@ -7876,6 +8298,8 @@
           const msg = err && err.message ? err.message : String(err);
           debugLog("ERROR", source, `${method} exception: ${msg}`);
           return { ok: false, error: msg };
+        } finally {
+          bridgeRequestsInFlight--;
         }
       }
 
@@ -7905,14 +8329,17 @@
           debugLog("WARN", "HotReload", "reload_ui bridge method unavailable");
           return;
         }
-        uiReloadInFlight = true;
         const dot = el("ui-live-dot");
         const lbl = el("ui-live-label");
+        if (pollInFlight || startupRequest || bridgeRequestsInFlight) {
+          if (reason === "manual" && lbl) lbl.textContent = "Waiting for current request";
+          return;
+        }
+        uiReloadInFlight = true;
+        if (pollTimer) clearTimeout(pollTimer);
         if (dot) dot.className = "dot warn";
         if (lbl) lbl.textContent = reason === "auto" ? "Hot Reloading…" : "Reloading UI…";
         try {
-          // Let the current startup callback return to the page that requested it.
-          if (startupRequest) await Promise.allSettled([startupRequest]);
           const res = await window.pywebview.api.reload_ui();
           if (!res || res.ok === false) {
             if (dot) dot.className = "dot err";
@@ -7921,7 +8348,7 @@
             uiReloadInFlight = false;
           } else if (!res.reloaded) {
             if (dot) dot.className = "dot ok";
-            if (lbl) lbl.textContent = "UI Live";
+            if (lbl) lbl.textContent = "UI Ready";
             uiReloadInFlight = false;
           }
         } catch (err) {
@@ -7929,16 +8356,19 @@
           if (lbl) lbl.textContent = "Reload Error";
           debugLog("ERROR", "HotReload", `reload_ui threw: ${err}`);
           uiReloadInFlight = false;
+        } finally {
+          if (!uiReloadInFlight) scheduleNextPoll();
         }
       }
 
       async function poll() {
-        if (!window.pywebview || !window.pywebview.api) return;
+        if (!window.pywebview || !window.pywebview.api || uiReloadInFlight) return;
         if (pollInFlight) {
           pollPending = true;
           return;
         }
         pollInFlight = true;
+        let reloadAfterPoll = false;
         try {
           let snap;
           try {
@@ -7950,9 +8380,10 @@
             debugLog("ERROR", "Poll", `get_snapshot failed: ${err}`);
             return;
           }
-          // Recover from a broken renderer even when it cannot display this snapshot.
-          if (snap.ui_dirty && !uiReloadInFlight) {
-            triggerUiReload("auto");
+          reloadAfterPoll = Boolean(snap.ui_dirty && snap.ui_auto_reload);
+          const label = el("ui-live-label");
+          if (label && !uiReloadInFlight) {
+            label.textContent = snap.ui_dirty ? "UI update available" : (snap.ui_auto_reload ? "Dev reload enabled" : "UI Ready");
           }
           renderSnapshot(snap);
           (snap.backend_warnings || []).forEach((w) => {
@@ -7966,6 +8397,7 @@
           debugLog("ERROR", "Render", `Could not display snapshot: ${err}`);
         } finally {
           pollInFlight = false;
+          if (reloadAfterPoll) setTimeout(() => triggerUiReload("auto"), 0);
           if (pollPending) {
             pollPending = false;
             setTimeout(poll, 0);
@@ -8031,6 +8463,15 @@
       };
 
       el("workers-body").addEventListener("click", (ev) => {
+        const chain = ev.target.closest("[data-stop-chain-id]");
+        if (chain) {
+          chain.disabled = true;
+          callBridge("Swarm", "stop_mission", chain.dataset.stopChainId).then(async res => {
+            el("quick-swarm-feedback").textContent = res?.message || res?.error || "Stop requested.";
+            await triggerFastPoll(4000);
+          }).finally(() => { chain.disabled = false; });
+          return;
+        }
         const btn = ev.target && ev.target.closest ? ev.target.closest("[data-spindown-id]") : null;
         if (btn) {
           window.__spindownWorker(btn.dataset.spindownId || "");
@@ -8057,12 +8498,9 @@
       if (el("btn-reload-ui")) {
         el("btn-reload-ui").addEventListener("click", () => triggerUiReload("manual"));
       }
-      window.__remainingAutoLoops = 0;
-      window.__autoLoopDispatching = false;
-      window.__autoLoopTimer = null;
       window.__previousQuickMissionGoal = "";
 
-      function applyRecommendedNextGoalToInputs(goalText, sourceTag = "", allowAutoRelaunch = false) {
+      function applyRecommendedNextGoalToInputs(goalText, sourceTag = "") {
         const cleanGoal = String(goalText || "").replace(/\s+/g, " ").trim();
         if (!cleanGoal) return;
         const quickInp = el("quick-mission-goal");
@@ -8093,23 +8531,7 @@
           recTxt.title = cleanGoal;
         }
         const qfb = el("quick-swarm-feedback");
-        if (allowAutoRelaunch && window.__remainingAutoLoops > 0) {
-          window.__remainingAutoLoops = Math.max(0, Number(window.__remainingAutoLoops) - 1);
-          const rem = window.__remainingAutoLoops;
-          if (qfb) {
-            qfb.textContent = `↻ Self-looping Finale next step (${rem} more cycle${rem === 1 ? "" : "s"} after this)…`;
-          }
-          if (window.__autoLoopTimer) clearTimeout(window.__autoLoopTimer);
-          window.__autoLoopTimer = setTimeout(() => {
-            window.__autoLoopTimer = null;
-            if (el("btn-quick-launch")) {
-              window.__autoLoopDispatching = true;
-              el("btn-quick-launch").click();
-            }
-          }, 950);
-        } else if (qfb) {
-          qfb.textContent = "✨ Finale next step loaded into mission input — press Enter or ▶ Launch Mission to loop again.";
-        }
+        if (qfb) qfb.textContent = "Suggested next step is ready to review.";
       }
       window.__applyRecommendedNextGoal = applyRecommendedNextGoalToInputs;
 
@@ -8149,8 +8571,6 @@
       el("btn-quick-suggest-next").addEventListener("click", async () => {
         if (!nextStepEditor.hidden) return;
         nextStepEditor.hidden = false;
-        window.__remainingAutoLoops = 0;
-        if (window.__autoLoopTimer) clearTimeout(window.__autoLoopTimer);
         nextStepStatus.textContent = "Loading completed runs…";
         const result = await callBridge("Swarm", "list_completed_runs");
         nextStepParent.replaceChildren();
@@ -8229,19 +8649,17 @@
       }
       if (el("btn-quick-launch")) {
         el("btn-quick-launch").addEventListener("click", async () => {
-          const isAutoCycle = Boolean(window.__autoLoopDispatching);
-          window.__autoLoopDispatching = false;
           const goal = (el("quick-mission-goal") ? el("quick-mission-goal").value : "").trim();
           if (!goal) {
             if (el("quick-swarm-feedback")) el("quick-swarm-feedback").textContent = "Enter a mission goal first.";
             return;
           }
-          const backend = isAutoCycle ? "" : (el("quick-browser-backend")?.value || "");
-          const marketPlugins = !isAutoCycle && Boolean(el("quick-market-plugins")?.checked);
-          const krakenAccount = !isAutoCycle && Boolean(el("quick-kraken-account")?.checked);
-          const additionalPlugins = isAutoCycle ? [] : (el("quick-plugin-capabilities")?.value || "").split(",").map(x => x.trim()).filter(Boolean);
+          const backend = el("quick-browser-backend")?.value || "";
+          const marketPlugins = Boolean(el("quick-market-plugins")?.checked);
+          const krakenAccount = Boolean(el("quick-kraken-account")?.checked);
+          const additionalPlugins = (el("quick-plugin-capabilities")?.value || "").split(",").map(x => x.trim()).filter(Boolean);
           const pluginCapabilities = [...new Set([...(marketPlugins ? ["kraken_console.quote", "polymarket_us.markets", "polymarket_us.bbo", "polymarket_us.book"] : []), ...(krakenAccount ? ["kraken_console.status", "kraken_console.balances", "kraken_console.open_orders", "kraken_console.query_order"] : []), ...additionalPlugins])];
-          if (!isAutoCycle && el("quick-kraken-entry")?.checked && !pluginCapabilities.includes("kraken_console.queue_entry")) pluginCapabilities.push("kraken_console.queue_entry");
+          if (el("quick-kraken-entry")?.checked && !pluginCapabilities.includes("kraken_console.queue_entry")) pluginCapabilities.push("kraken_console.queue_entry");
           if (backend && pluginCapabilities.length) {
             el("quick-swarm-feedback").textContent = "Market plugins are available in standard missions. Clear the interactive tool or uncheck market plugins.";
             return;
@@ -8258,26 +8676,30 @@
             el("quick-browser-url").focus();
             return;
           }
-          if (backend) {
-            window.__remainingAutoLoops = 0;
-            clearTimeout(window.__autoLoopTimer);
-            window.__autoLoopTimer = null;
-          } else if (!isAutoCycle) {
-            const selLoops = parseInt((el("quick-auto-loop-count") && el("quick-auto-loop-count").value) || "0", 10) || 0;
-            window.__remainingAutoLoops = Math.max(0, Math.min(5, selLoops));
+          const autoFollowups = backend ? 0 : Number(el("quick-auto-loop-count").value);
+          if (autoFollowups && pluginCapabilities.length) {
+            el("quick-swarm-feedback").textContent = "Choose Draft next step only for missions with plugin permissions.";
+            return;
           }
           if (el("mission-goal")) el("mission-goal").value = goal;
           if (el("quick-swarm-feedback")) {
-            el("quick-swarm-feedback").textContent = window.__remainingAutoLoops > 0
-              ? `Launching live swarm mission (+${window.__remainingAutoLoops} auto-loop${window.__remainingAutoLoops === 1 ? "" : "s"} queued)…`
+            el("quick-swarm-feedback").textContent = autoFollowups > 0
+              ? "Sending the mission to the background coordinator…"
               : backend.startsWith("visible-")
                 ? "Launching mission. Allow the browser connection if prompted."
                 : "Launching live swarm mission…";
           }
           const allowWrites = Boolean(el("quick-allow-writes") && el("quick-allow-writes").checked);
-          const res = backend
-            ? await callBridge("Swarm", "launch_context_first_mission", goal, null, null, false, false, backend, browserUrl, Boolean(el("browser-manual-start")?.checked), desktopWindowId, Boolean(el("desktop-headed")?.checked))
-            : await callBridge("Swarm", "launch_mission", goal, "codex_thought_antigravity_implement", false, null, null, null, null, allowWrites, "", pluginCapabilities);
+          const launchButton = el("btn-quick-launch");
+          launchButton.disabled = true;
+          let res;
+          try {
+            res = backend
+              ? await callBridge("Swarm", "launch_context_first_mission", goal, null, null, false, false, backend, browserUrl, Boolean(el("browser-manual-start")?.checked), desktopWindowId, Boolean(el("desktop-headed")?.checked))
+              : await callBridge("Swarm", "launch_mission", goal, "codex_thought_antigravity_implement", false, null, null, null, null, allowWrites, "", pluginCapabilities, autoFollowups);
+          } finally {
+            launchButton.disabled = false;
+          }
           if (res && res.mission_id) {
             selectedMissionOutputId = String(res.mission_id);
           }
@@ -8291,17 +8713,169 @@
       }
       if (el("btn-quick-stop")) {
         el("btn-quick-stop").addEventListener("click", async () => {
-          window.__remainingAutoLoops = 0;
-          if (window.__autoLoopTimer) {
-            clearTimeout(window.__autoLoopTimer);
-            window.__autoLoopTimer = null;
-          }
           if (el("quick-swarm-feedback")) el("quick-swarm-feedback").textContent = "Stopping active missions…";
           const res = await callBridge("Swarm", "stop_mission", "");
           if (el("quick-swarm-feedback")) el("quick-swarm-feedback").textContent = (res && (res.message || res.error)) || "Stopped active missions.";
           await triggerFastPoll(4000);
         });
       }
+      // Semantic Prompt Intent Detector: auto-fills hidden mission options & renders compact chips
+      (() => {
+        const manualOverrides = new Set();
+        const detectPromptIntent = (rawText) => {
+          const text = String(rawText || "").trim();
+          const low = text.toLowerCase();
+          if (!text) return null;
+          const hasWriteVerb = /\b(fix|edit|update|implement|write|create|build|refactor|patch|resolve|sync|modify|add|remove|delete|wire|rename|replace|generate|install)\b/.test(low);
+          const hasReadOnly = /\b(read[- ]?only|audit|review|inspect|explain|summarize|summary|list|check|analyze|analyse|diagnose|report|compare|research)\b/.test(low);
+          const allowWrites = hasWriteVerb || !hasReadOnly;
+
+          const urlMatch = text.match(/https?:\/\/[^\s"'<>]+/i);
+          let browserBackend = "";
+          if (/\b(agent[- ]?desktop|desktop window|desktop app|click on screen|gui app)\b/.test(low)) {
+            browserBackend = "agent-desktop";
+          } else if (/\bplaywright\b/.test(low)) {
+            browserBackend = "playwright-cli";
+          } else if (/\b(agent[- ]?browser|headless browser)\b/.test(low)) {
+            browserBackend = "agent-browser";
+          } else if (/\b(microsoft edge|in edge|open edge)\b/.test(low)) {
+            browserBackend = "visible-edge";
+          } else if (urlMatch || /\b(google chrome|in chrome|open chrome|browser|website|webpage|web page|navigate to)\b/.test(low)) {
+            browserBackend = "visible-chrome";
+          }
+
+          const marketPlugins = /\b(kraken|market|gainers|ticker|ohlc|candle|polymarket|order ?book|crypto|btc|eth|sol|spot price|volume)\b/.test(low);
+          const krakenAccount = /\b(kraken account|kraken balance|my balance|open orders|my positions|portfolio balance|account read)\b/.test(low);
+          const krakenEntry = /\b(kraken spot buy|buy on ego|place spot order|order relay)\b/.test(low);
+
+          let autoLoops = 0;
+          const loopNum = low.match(/(?:(\d+)\s*(?:background\s+)?follow[- ]?ups?|(?:iterate|loop)\s+(\d+)\s+times?)/);
+          if (loopNum) {
+            autoLoops = Math.max(0, Math.min(3, Number(loopNum[1] || loopNum[2] || 0)));
+          } else if (/\b(auto follow[- ]?up|keep iterating|background follow[- ]?up)\b/.test(low)) {
+            autoLoops = 1;
+          }
+
+          return {
+            allowWrites,
+            browserBackend,
+            browserUrl: urlMatch ? urlMatch[0].replace(/[.,);]+$/, "") : "",
+            marketPlugins,
+            krakenAccount,
+            krakenEntry,
+            autoLoops,
+          };
+        };
+        window.__detectPromptIntent = detectPromptIntent;
+
+        const applyDetectedIntent = () => {
+          const inp = el("quick-mission-goal");
+          const bar = el("quick-prompt-intent-bar");
+          if (!inp || !bar) return;
+          const intent = detectPromptIntent(inp.value);
+          if (!intent) {
+            manualOverrides.clear();
+            bar.innerHTML = '<span class="muted" style="font-size:11px;">✦ Prompt detection active — type naturally; writes, browser, market data &amp; follow-ups auto-configure.</span>';
+            return;
+          }
+          const writesEl = el("quick-allow-writes");
+          const backendEl = el("quick-browser-backend");
+          const urlEl = el("quick-browser-url");
+          const marketEl = el("quick-market-plugins");
+          const kAcctEl = el("quick-kraken-account");
+          const kEntryEl = el("quick-kraken-entry");
+          const loopEl = el("quick-auto-loop-count");
+
+          if (writesEl && !manualOverrides.has("writes")) writesEl.checked = intent.allowWrites;
+          if (marketEl && !manualOverrides.has("market")) marketEl.checked = intent.marketPlugins;
+          if (kAcctEl && !manualOverrides.has("kraken_account")) kAcctEl.checked = intent.krakenAccount;
+          if (kEntryEl && !manualOverrides.has("kraken_entry")) kEntryEl.checked = intent.krakenEntry;
+          if (loopEl && !manualOverrides.has("loops")) loopEl.value = String(intent.autoLoops);
+          if (backendEl && !manualOverrides.has("browser")) {
+            if (backendEl.value !== intent.browserBackend) {
+              backendEl.value = intent.browserBackend;
+              backendEl.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
+          if (urlEl && intent.browserUrl && !manualOverrides.has("browser")) {
+            urlEl.value = intent.browserUrl;
+          }
+
+          const chips = [];
+          const chip = (key, label, cls = "pill-run") =>
+            `<span class="pill ${cls}" style="font-size:10.5px; padding:2px 7px; display:inline-flex; align-items:center; gap:5px;">${esc(label)}<button type="button" data-dismiss-intent="${esc(key)}" style="background:none; border:none; color:inherit; cursor:pointer; padding:0; font-size:11px; line-height:1;" title="Override / disable">×</button></span>`;
+
+          if (writesEl && writesEl.checked) {
+            chips.push(chip("writes", "✦ Workspace Writes", "pill-ok"));
+          } else {
+            chips.push(`<span class="pill pill-idle" style="font-size:10.5px; padding:2px 7px;">✦ Read-Only</span>`);
+          }
+          if (backendEl && backendEl.value) {
+            chips.push(chip("browser", `✦ Tool: ${backendEl.value}${urlEl && urlEl.value ? " (" + shortLabel(urlEl.value, 28) + ")" : ""}`, "pill-run"));
+          }
+          if (marketEl && marketEl.checked) chips.push(chip("market", "✦ Market Data", "pill-run"));
+          if (kAcctEl && kAcctEl.checked) chips.push(chip("kraken_account", "⚠ Kraken Account Read", "pill-warn"));
+          if (kEntryEl && kEntryEl.checked) chips.push(chip("kraken_entry", "⚠ Kraken Spot Buy", "pill-err"));
+          if (loopEl && Number(loopEl.value) > 0) chips.push(chip("loops", `✦ ${loopEl.value} Follow-up${Number(loopEl.value) === 1 ? "" : "s"}`, "pill-run"));
+          bar.innerHTML = chips.join(" ");
+        };
+
+        const toggleBtn = el("btn-quick-options-toggle");
+        const advDrawer = el("quick-advanced-options");
+        if (toggleBtn && advDrawer) {
+          toggleBtn.addEventListener("click", () => {
+            const nextHidden = !advDrawer.hidden;
+            advDrawer.hidden = nextHidden;
+            toggleBtn.setAttribute("aria-expanded", String(!nextHidden));
+            toggleBtn.textContent = nextHidden ? "⚙ Options" : "⚙ Hide Options";
+          });
+        }
+
+        const goalEl = el("quick-mission-goal");
+        if (goalEl) {
+          goalEl.addEventListener("input", applyDetectedIntent);
+          goalEl.addEventListener("change", applyDetectedIntent);
+        }
+
+        const barEl = el("quick-prompt-intent-bar");
+        if (barEl) {
+          barEl.addEventListener("click", (ev) => {
+            const btn = ev.target.closest("[data-dismiss-intent]");
+            if (!btn) return;
+            const key = btn.dataset.dismissIntent;
+            manualOverrides.add(key);
+            if (key === "writes" && el("quick-allow-writes")) el("quick-allow-writes").checked = false;
+            if (key === "market" && el("quick-market-plugins")) el("quick-market-plugins").checked = false;
+            if (key === "kraken_account" && el("quick-kraken-account")) el("quick-kraken-account").checked = false;
+            if (key === "kraken_entry" && el("quick-kraken-entry")) el("quick-kraken-entry").checked = false;
+            if (key === "loops" && el("quick-auto-loop-count")) el("quick-auto-loop-count").value = "0";
+            if (key === "browser" && el("quick-browser-backend")) {
+              el("quick-browser-backend").value = "";
+              el("quick-browser-backend").dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            applyDetectedIntent();
+          });
+        }
+
+        const manualBindings = [
+          ["quick-allow-writes", "writes"],
+          ["quick-browser-backend", "browser"],
+          ["quick-market-plugins", "market"],
+          ["quick-kraken-account", "kraken_account"],
+          ["quick-kraken-entry", "kraken_entry"],
+          ["quick-auto-loop-count", "loops"],
+        ];
+        manualBindings.forEach(([id, key]) => {
+          const ctrl = el(id);
+          if (ctrl) {
+            ctrl.addEventListener("change", (ev) => {
+              if (ev.isTrusted) manualOverrides.add(key);
+              applyDetectedIntent();
+            });
+          }
+        });
+      })();
+
       if (el("quick-mission-goal")) {
         el("quick-mission-goal").addEventListener("keydown", (e) => {
           if (e.key === "Enter" && el("btn-quick-launch")) el("btn-quick-launch").click();
@@ -8333,6 +8907,18 @@
           }
           updateLaunchRatioBadge();
         });
+      });
+      async function syncSwarmTopologyControl() {
+        const c = Math.max(1, Math.min(8, parseInt(el("mission-coordinators")?.value || "1", 10) || 1));
+        const w = Math.max(1, Math.min(32, parseInt(el("mission-workers-per-coord")?.value || "4", 10) || 4));
+        const topoMode = el("mission-topology-mode")?.value || "m_eulerian_join_cut";
+        const mOrder = Math.max(2, Math.min(6, parseInt(el("mission-branching-order")?.value || "3", 10) || 3));
+        try {
+          await callBridge("Swarm", "set_swarm_ratio", c, w, topoMode, 6, true, mOrder);
+        } catch (_) {}
+      }
+      ["mission-topology-mode", "mission-branching-order"].forEach((tid) => {
+        if (el(tid)) el(tid).addEventListener("change", syncSwarmTopologyControl);
       });
 
       el("btn-release-review").addEventListener("click", async () => {
@@ -8407,6 +8993,7 @@
         const pluginCapabilities = [...new Set([...(el("mission-market-plugins")?.checked
           ? ["kraken_console.quote", "kraken_monitor.top_gainers_24h", "polymarket_us.markets", "polymarket_us.bbo", "polymarket_us.book"] : []), ...(krakenAccount ? ["kraken_console.status", "kraken_console.balances", "kraken_console.open_orders", "kraken_console.query_order"] : []), ...additionalPlugins])];
         if (el("mission-kraken-entry")?.checked && !pluginCapabilities.includes("kraken_console.queue_entry")) pluginCapabilities.push("kraken_console.queue_entry");
+        await syncSwarmTopologyControl();
         const res = await callBridge("Swarm", "launch_mission", goal, mode, phys, coordCount, workersPerCoord, null, null, false, "", pluginCapabilities);
         if (res && res.mission_id) {
           selectedMissionOutputId = String(res.mission_id);
@@ -8415,11 +9002,6 @@
         await triggerFastPoll(12000);
       });
       el("btn-stop-mission").addEventListener("click", async () => {
-        window.__remainingAutoLoops = 0;
-        if (window.__autoLoopTimer) {
-          clearTimeout(window.__autoLoopTimer);
-          window.__autoLoopTimer = null;
-        }
         el("swarm-feedback").textContent = "Stopping active missions & spinning down all child workers…";
         const res = await callBridge("Swarm", "stop_mission", "");
         el("swarm-feedback").textContent = (res && (res.message || res.error)) || "Stopped active missions.";
@@ -8508,7 +9090,23 @@
           el("btn-send-chat").click();
         }
       });
+      let lastChatRevision = -1;
+      function renderChatFeed(history, revision) {
+        if (Number.isInteger(revision)) {
+          if (revision < lastChatRevision) return;
+          lastChatRevision = revision;
+        }
+        const items = Array.isArray(history) ? history : [];
+        el("chat-feed").innerHTML = items.length
+          ? items.slice(-30).map((m) => `
+              <div class="feed-item">
+                <div class="feed-meta"><span><b>${esc(m.sender || m.role || "operator")}</b></span><span>${esc(m.time || "")}</span></div>
+                <div style="white-space:pre-wrap;">${esc(m.text || m.reply || JSON.stringify(m))}</div>
+              </div>`).join("")
+          : '<div class="muted">No operator chat messages yet.</div>';
+      }
       let lastChatJobRunning = false;
+      let lastFinishedChatJobId = "";
       let lastOrderChatJob = "";
       function renderChatJobState(job) {
         if (!job || typeof job !== "object") return;
@@ -8529,12 +9127,39 @@
         }
         if (running) {
           const sec = Number(job.elapsed_sec || 0).toFixed(1);
-          if (fb) fb.textContent = `⏳ ${job.stage || `Running ${job.mode || "chat"}…`} (${sec}s) — click Cancel to abort`;
-        } else if (lastChatJobRunning && !running) {
+          if (fb) fb.textContent = `⏳ ${job.stage || `Running ${job.mode || "chat"}…`} (${sec}s) — Cancel stops after the current step`;
+        } else if (lastChatJobRunning || (job.job_id && job.job_id !== lastFinishedChatJobId)) {
+          lastFinishedChatJobId = String(job.job_id || "");
           if (fb) fb.textContent = job.stage || (job.ok ? "Delivered." : (job.error || "Chat finished."));
-          if (job.mode === "workspace_agent") refreshWorkspace();
+          if (job.mode === "workspace_agent" || job.mode === "sabrina") refreshWorkspace();
         }
         lastChatJobRunning = running;
+      }
+
+      let chatViewTimer = null;
+      let chatViewPolling = false;
+      let chatViewJobId = "";
+      async function pollChatView() {
+        if (chatViewPolling) return;
+        chatViewPolling = true;
+        const requestedJobId = chatViewJobId;
+        let running = false;
+        try {
+          const view = await window.pywebview.api.get_chat_view();
+          if (requestedJobId !== chatViewJobId) {
+            running = true;
+          } else if (view) {
+            renderChatFeed(view.chat_history, view.chat_revision);
+            renderChatJobState(view.chat_job);
+            running = Boolean(view.chat_job && view.chat_job.running);
+          }
+        } catch (err) {
+          debugLog("WARN", "Chat", `Chat update failed: ${err}`);
+          triggerFastPoll(5000);
+        } finally {
+          chatViewPolling = false;
+        }
+        if (running) chatViewTimer = setTimeout(pollChatView, 500);
       }
 
       el("btn-send-chat").addEventListener("click", async () => {
@@ -8551,7 +9176,13 @@
           if (res && res.ok) {
             el("chat-input").value = "";
             if (res.chat_job) renderChatJobState(res.chat_job);
-            triggerFastPoll(15000);
+            if (window.pywebview.api.get_chat_view) {
+              chatViewJobId = String(res.job_id || "");
+              if (chatViewTimer) clearTimeout(chatViewTimer);
+              pollChatView();
+            } else {
+              triggerFastPoll(15000);
+            }
           } else {
             el("chat-feedback").textContent = (res && (res.error || res.message)) || "Chat error (see UI Diagnostics)";
             if (res && res.chat_job) renderChatJobState(res.chat_job);
@@ -8806,6 +9437,7 @@
           v.classList.toggle("active", v.id === "subview-" + subtab);
         });
         if (subtab === "evobench") refreshEvoBenchUi();
+        if (subtab === "gpu-deploy" && typeof refreshGpuDeployUi === "function") refreshGpuDeployUi();
       }
 
       let evoPollTimer = null;
@@ -9356,11 +9988,18 @@
         return await vaultHttp("/api/vault/status");
       }
 
-      async function vaultSaveKey(provider, key, probe = true) {
+      async function vaultSaveKey(provider, key, probe = true, config = null) {
         if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.set_vault_key === "function") {
-          return await window.pywebview.api.set_vault_key(provider, key, probe);
+          return await window.pywebview.api.set_vault_key(provider, key, probe, config);
         }
-        return await vaultHttp("/api/vault/key", "POST", { provider, api_key: key, probe });
+        return await vaultHttp("/api/vault/key", "POST", { provider, api_key: key, probe, config });
+      }
+
+      async function vaultSaveConfig(provider, config) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.set_vault_provider_config === "function") {
+          return await window.pywebview.api.set_vault_provider_config(provider, config);
+        }
+        return await vaultHttp("/api/vault/config", "POST", { provider, config });
       }
 
       async function vaultDeleteKey(provider) {
@@ -9386,6 +10025,62 @@
 
       let editingVaultProvider = null;
       let lastVaultData = null;
+      let activeVaultCategory = "";
+
+      function collectVaultConfigFields() {
+        const box = el("vault-config-fields");
+        if (!box) return null;
+        const inputs = box.querySelectorAll("input[data-cfg-key]");
+        if (!inputs.length) return null;
+        const cfg = {};
+        inputs.forEach((inp) => {
+          cfg[inp.dataset.cfgKey] = inp.value.trim();
+        });
+        return cfg;
+      }
+
+      function renderVaultConfigFields(prov) {
+        const box = el("vault-config-fields");
+        if (!box) return;
+        const provObj = (lastVaultData && Array.isArray(lastVaultData.providers))
+          ? lastVaultData.providers.find((p) => String(p.provider) === prov)
+          : null;
+        const fields = provObj && Array.isArray(provObj.config_fields) ? provObj.config_fields : [];
+        if (!fields.length) {
+          box.style.display = "none";
+          box.innerHTML = "";
+          return;
+        }
+        const currentCfg = (provObj && provObj.config) || {};
+        box.style.display = "flex";
+        box.innerHTML = fields.map((f) => {
+          const val = currentCfg[f.key] ?? f.default ?? "";
+          return `<label style="display:flex; flex-direction:column; gap:3px; flex:1 1 190px; font-size:11px; color:var(--muted);">
+              <span>${esc(f.label || f.key)}</span>
+              <input type="text" data-cfg-key="${esc(f.key)}" value="${esc(val)}" placeholder="${esc(f.placeholder || "")}" style="padding:5px 8px; font-size:12px;" />
+            </label>`;
+        }).join("") + `<div style="display:flex; align-items:flex-end;">
+            <button id="btn-vault-save-config" class="btn-ghost" type="button" style="padding:6px 10px; font-size:11.5px;">Save Platform Config</button>
+          </div>`;
+        const saveCfgBtn = el("btn-vault-save-config");
+        if (saveCfgBtn) {
+          saveCfgBtn.addEventListener("click", async () => {
+            const cfg = collectVaultConfigFields();
+            const fb = el("vault-feedback");
+            fb.textContent = `Saving ${prov} platform configuration…`;
+            try {
+              const res = await vaultSaveConfig(prov, cfg || {});
+              fb.textContent = (res && res.ok !== false)
+                ? `✓ Saved ${prov} platform settings.`
+                : `Config save failed: ${(res && (res.error || res.message)) || "error"}`;
+              await refreshVaultStatus();
+              if (typeof refreshGpuDeployUi === "function") refreshGpuDeployUi();
+            } catch (err) {
+              fb.textContent = `Config save error: ${err}`;
+            }
+          });
+        }
+      }
 
       function updateVaultEditorUi() {
         const card = el("vault-editor-card");
@@ -9394,6 +10089,8 @@
         const sel = el("vault-provider");
         const inp = el("vault-key-input");
         if (!card || !title || !cancelBtn) return;
+        const selectedProv = editingVaultProvider || (sel ? sel.value : "gemini");
+        renderVaultConfigFields(selectedProv);
         if (editingVaultProvider) {
           const provObj = (lastVaultData && Array.isArray(lastVaultData.providers))
             ? lastVaultData.providers.find((p) => String(p.provider) === editingVaultProvider)
@@ -9436,11 +10133,14 @@
         if (activeInlineInp && document.activeElement === activeInlineInp) {
           return;
         }
-        if (!providers.length) {
-          tbody.innerHTML = '<tr><td colspan="5" class="muted">No vault providers reported.</td></tr>';
+        const filteredProviders = activeVaultCategory
+          ? providers.filter((p) => String(p.category || "model_api") === activeVaultCategory)
+          : providers;
+        if (!filteredProviders.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="muted">No vault providers in this category.</td></tr>';
           return;
         }
-        tbody.innerHTML = providers.map((p) => {
+        tbody.innerHTML = filteredProviders.map((p) => {
           const prov = String(p.provider || "");
           const label = String(p.label || prov);
           const src = String(p.source || "none");
@@ -9684,8 +10384,9 @@
         editingVaultProvider = null;
         updateVaultEditorUi();
         fb.textContent = `Encrypting ${prov} key via DPAPI & verifying…`;
+        const cfgPayload = collectVaultConfigFields();
         try {
-          const res = await vaultSaveKey(prov, rawKey, true);
+          const res = await vaultSaveKey(prov, rawKey, true, cfgPayload);
           const probeErr = res && res.probe && res.probe.ok === false ? (res.probe.error || res.probe.last_error || "") : "";
           if (res && res.ok !== false && !probeErr) {
             fb.textContent = `✓ Saved & verified ${prov} key · ${res.unlocked_count ?? 0} models unlocked`;
@@ -9718,10 +10419,22 @@
         }
       });
 
+      function syncChatTarget() {
+        const mode = el("chat-mode").value;
+        const target = el("chat-target");
+        target.disabled = mode === "sabrina" || mode === "workspace_agent";
+        if (mode === "hive_council") target.value = "hive_council";
+        if (mode === "direct_node" && (!target.value || target.value === "hive_council")) {
+          const first = [...target.options].find((option) => option.value !== "hive_council");
+          if (first) target.value = first.value;
+        }
+      }
+      el("chat-mode").addEventListener("change", syncChatTarget);
+      syncChatTarget();
       el("chat-target").addEventListener("change", () => {
         const modeSel = el("chat-mode");
         const targetVal = el("chat-target").value;
-        if (modeSel && modeSel.value !== "workspace_agent") {
+        if (modeSel && modeSel.value !== "workspace_agent" && modeSel.value !== "sabrina") {
           modeSel.value = targetVal === "hive_council" ? "hive_council" : "direct_node";
         }
       });
@@ -9738,6 +10451,237 @@
           fb.textContent = `Probe all error: ${err}`;
         }
       });
+
+      document.querySelectorAll("#vault-category-tabs .tier-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          activeVaultCategory = btn.dataset.vaultCat || "";
+          document.querySelectorAll("#vault-category-tabs .tier-btn").forEach((b) => {
+            b.classList.toggle("active", b === btn);
+          });
+          if (lastVaultData) renderVaultStatus(lastVaultData);
+        });
+      });
+
+      // === GPU CLOUD & SWARM DEPLOYMENT FRAMEWORK ===
+      let lastGpuProvidersData = [];
+      let lastGpuDeploymentsData = [];
+
+      async function gpuApiGetProviders() {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.get_gpu_providers === "function") {
+          return await window.pywebview.api.get_gpu_providers();
+        }
+        return await vaultHttp("/api/gpu/providers");
+      }
+
+      async function gpuApiDeploy(payload) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.deploy_swarm_to_gpu === "function") {
+          return await window.pywebview.api.deploy_swarm_to_gpu(payload);
+        }
+        return await vaultHttp("/api/gpu/deploy", "POST", payload);
+      }
+
+      async function gpuApiCheckStatus(deploymentId) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.check_gpu_deployment_status === "function") {
+          return await window.pywebview.api.check_gpu_deployment_status(deploymentId);
+        }
+        return await vaultHttp("/api/gpu/status", "POST", { deployment_id: deploymentId });
+      }
+
+      async function gpuApiTerminate(deploymentId) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.terminate_gpu_deployment === "function") {
+          return await window.pywebview.api.terminate_gpu_deployment(deploymentId);
+        }
+        return await vaultHttp("/api/gpu/terminate", "POST", { deployment_id: deploymentId });
+      }
+
+      async function gpuApiRegisterModel(deploymentId) {
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.register_gpu_deployment_model === "function") {
+          return await window.pywebview.api.register_gpu_deployment_model(deploymentId);
+        }
+        return await vaultHttp("/api/gpu/register-model", "POST", { deployment_id: deploymentId });
+      }
+
+      function populateGpuSkuSelector() {
+        const provSel = el("gpu-deploy-provider");
+        const skuSel = el("gpu-deploy-sku");
+        if (!provSel || !skuSel) return;
+        const provId = provSel.value;
+        const prov = lastGpuProvidersData.find((p) => p.provider_id === provId);
+        const offers = (prov && Array.isArray(prov.offers)) ? prov.offers : [];
+        skuSel.innerHTML = offers.length
+          ? offers.map((o) => {
+              const vram = o.vram_gb ? `${o.vram_gb}GB` : "Serverless";
+              const rate = Number(o.price_per_hr || 0) > 0 ? `$${Number(o.price_per_hr).toFixed(2)}/hr` : "Usage/Self";
+              return `<option value="${esc(o.gpu_type)}" data-rate="${Number(o.price_per_hr || 0)}">${esc(o.gpu_type)} (${vram} · ${rate})</option>`;
+            }).join("")
+          : '<option value="NVIDIA RTX 4090" data-rate="0.69">NVIDIA RTX 4090</option>';
+        updateGpuCostEstimate();
+      }
+
+      function updateGpuCostEstimate() {
+        const skuSel = el("gpu-deploy-sku");
+        const workersInp = el("gpu-deploy-workers");
+        const badge = el("gpu-est-cost");
+        if (!skuSel || !workersInp || !badge) return;
+        const opt = skuSel.options[skuSel.selectedIndex];
+        const rate = opt ? Number(opt.dataset.rate || 0) : 0;
+        const count = Math.max(1, parseInt(workersInp.value || "1", 10) || 1);
+        const total = rate * count;
+        badge.textContent = total > 0 ? `Est: $${total.toFixed(2)}/hr (${count}x)` : `Usage / Self-Hosted (${count}x)`;
+      }
+
+      function renderGpuDeployUi() {
+        const pBody = el("gpu-providers-body");
+        const dBody = el("gpu-deployments-body");
+        const badge = el("gpu-deploy-badge");
+        const activeCount = lastGpuDeploymentsData.filter((d) => d.status === "running" || d.status === "provisioning").length;
+        if (badge) badge.textContent = `${activeCount} Active · ${lastGpuDeploymentsData.length} Total`;
+
+        if (pBody) {
+          pBody.innerHTML = lastGpuProvidersData.length
+            ? lastGpuProvidersData.map((p) => {
+                const authPill = p.unlocked
+                  ? `<span class="pill pill-ok">${esc((p.source || "UNLOCKED").toUpperCase())}</span>`
+                  : '<span class="pill pill-warn">LOCKED</span>';
+                const caps = (p.capabilities || []).slice(0, 3).map((c) => `<span class="badge" style="font-size:10px; padding:1px 5px;">${esc(c)}</span>`).join(" ");
+                return `<tr>
+                  <td><div><b>${esc(p.display_name)}</b></div><div class="mono muted" style="font-size:10.5px;">${esc(p.provider_id)}</div></td>
+                  <td>${authPill}</td>
+                  <td>${caps}</td>
+                  <td><button class="btn-ghost" type="button" style="padding:4px 8px; font-size:11px;" onclick="window.__unlockProvider('${esc(p.provider_id)}')">Configure</button></td>
+                </tr>`;
+              }).join("")
+            : '<tr><td colspan="4" class="muted">No GPU providers registered.</td></tr>';
+        }
+
+        if (dBody) {
+          dBody.innerHTML = lastGpuDeploymentsData.length
+            ? lastGpuDeploymentsData.map((d) => {
+                const st = String(d.status || "unknown");
+                const stCls = st === "running" ? "pill-ok" : (st === "provisioning" || st === "dry_run_ready" ? "pill-run" : (st === "terminated" ? "pill-idle" : "pill-warn"));
+                const ep = d.inference_endpoint
+                  ? `<span class="mono" style="font-size:11px;" title="${esc(d.inference_endpoint)}">${esc(d.inference_endpoint.slice(0, 38))}${d.inference_endpoint.length > 38 ? "…" : ""}</span>`
+                  : '<span class="muted">—</span>';
+                const fleetTag = d.registered_model_id
+                  ? `<div class="muted" style="font-size:10.5px; color:var(--green);">Fleet: ${esc(d.registered_model_id)}</div>`
+                  : "";
+                return `<tr>
+                  <td><div><b>${esc(d.swarm_name)}</b></div><div class="mono muted" style="font-size:10.5px;">${esc(d.deployment_id)}${d.dry_run ? " · DRY-RUN" : ""}</div></td>
+                  <td class="mono">${esc(d.provider)}</td>
+                  <td>${esc(d.worker_count)}× ${esc(d.gpu_type)}<div class="muted" style="font-size:10.5px;">$${Number(d.estimated_hourly_usd || 0).toFixed(2)}/hr</div></td>
+                  <td><div>${esc(d.model_id || "default")}</div><div class="muted" style="font-size:10.5px;">${esc(d.runtime_mode)}</div>${fleetTag}</td>
+                  <td><span class="pill ${stCls}">${esc(st.toUpperCase())}</span>${d.error ? `<div class="muted" style="color:var(--red); font-size:10.5px;">${esc(d.error)}</div>` : ""}</td>
+                  <td>${ep}</td>
+                  <td>
+                    <div class="row" style="gap:4px;">
+                      <button class="btn-ghost" type="button" style="padding:4px 7px; font-size:11px;" onclick="window.__gpuCheckStatus('${esc(d.deployment_id)}')">Status</button>
+                      <button class="btn-ghost" type="button" style="padding:4px 7px; font-size:11px;" onclick="window.__gpuRegisterFleet('${esc(d.deployment_id)}')">Register</button>
+                      <button class="btn-err" type="button" style="padding:4px 7px; font-size:11px;" ${st === "terminated" ? "disabled" : ""} onclick="window.__gpuTerminate('${esc(d.deployment_id)}')">Stop</button>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join("")
+            : '<tr><td colspan="7" class="muted">No GPU swarm deployments recorded yet.</td></tr>';
+        }
+        populateGpuSkuSelector();
+      }
+
+      async function refreshGpuDeployUi() {
+        try {
+          const data = await gpuApiGetProviders();
+          if (data && data.ok !== false) {
+            lastGpuProvidersData = Array.isArray(data.providers) ? data.providers : [];
+            lastGpuDeploymentsData = Array.isArray(data.deployments) ? data.deployments : [];
+            renderGpuDeployUi();
+          }
+        } catch (err) {
+          debugLog("WARN", "GPUDeploy", `GPU provider load failed: ${err}`);
+        }
+      }
+
+      function buildGpuDeployPayload(dryRun) {
+        return {
+          provider: el("gpu-deploy-provider") ? el("gpu-deploy-provider").value : "runpod",
+          swarm_name: el("gpu-deploy-name") ? el("gpu-deploy-name").value.trim() : "",
+          gpu_type: el("gpu-deploy-sku") ? el("gpu-deploy-sku").value : "NVIDIA RTX 4090",
+          worker_count: parseInt((el("gpu-deploy-workers") && el("gpu-deploy-workers").value) || "1", 10) || 1,
+          runtime_mode: el("gpu-deploy-runtime") ? el("gpu-deploy-runtime").value : "vllm",
+          model_id: el("gpu-deploy-model") ? el("gpu-deploy-model").value.trim() : "",
+          region: el("gpu-deploy-region") ? el("gpu-deploy-region").value.trim() : "",
+          disk_gb: parseInt((el("gpu-deploy-disk") && el("gpu-deploy-disk").value) || "50", 10) || 50,
+          container_image: el("gpu-deploy-image") ? el("gpu-deploy-image").value.trim() : "",
+          auto_register_model: Boolean(el("gpu-deploy-autoreg") && el("gpu-deploy-autoreg").checked),
+          dry_run: Boolean(dryRun),
+        };
+      }
+
+      async function triggerGpuDeploy(dryRun) {
+        const fb = el("gpu-deploy-feedback");
+        const preview = el("gpu-spec-preview");
+        const drawer = el("gpu-spec-drawer");
+        const payload = buildGpuDeployPayload(dryRun);
+        if (fb) fb.textContent = dryRun ? `Generating ${payload.provider} dry-run spec…` : `Deploying swarm to ${payload.provider}…`;
+        try {
+          const res = await gpuApiDeploy(payload);
+          if (res && res.spec && preview) {
+            preview.textContent = JSON.stringify(res.spec, null, 2);
+            if (drawer) drawer.open = true;
+          }
+          if (res && Array.isArray(res.deployments)) {
+            lastGpuDeploymentsData = res.deployments;
+            renderGpuDeployUi();
+          }
+          if (fb) {
+            fb.textContent = (res && res.ok)
+              ? (dryRun ? `✓ Dry-run spec ready (${res.deployment && res.deployment.deployment_id})` : `✓ Swarm deployed (${res.deployment && res.deployment.status})`)
+              : `Deploy failed: ${(res && (res.error || res.message)) || "error"}`;
+          }
+          if (res && res.ok && !dryRun) await loadFleet(false, true);
+        } catch (err) {
+          if (fb) fb.textContent = `Deploy error: ${err}`;
+        }
+      }
+
+      if (el("gpu-deploy-provider")) el("gpu-deploy-provider").addEventListener("change", populateGpuSkuSelector);
+      if (el("gpu-deploy-sku")) el("gpu-deploy-sku").addEventListener("change", updateGpuCostEstimate);
+      if (el("gpu-deploy-workers")) el("gpu-deploy-workers").addEventListener("input", updateGpuCostEstimate);
+      if (el("btn-gpu-refresh")) el("btn-gpu-refresh").addEventListener("click", refreshGpuDeployUi);
+      if (el("btn-gpu-dryrun")) el("btn-gpu-dryrun").addEventListener("click", () => triggerGpuDeploy(true));
+      if (el("btn-gpu-deploy")) el("btn-gpu-deploy").addEventListener("click", () => triggerGpuDeploy(false));
+
+      window.__gpuCheckStatus = async (depId) => {
+        const fb = el("gpu-deploy-feedback");
+        if (fb) fb.textContent = `Checking status for ${depId}…`;
+        const res = await gpuApiCheckStatus(depId);
+        if (res && Array.isArray(res.deployments)) {
+          lastGpuDeploymentsData = res.deployments;
+          renderGpuDeployUi();
+        }
+        if (fb) fb.textContent = (res && res.ok) ? `✓ ${depId}: ${res.deployment && res.deployment.status}` : `Status check failed: ${(res && res.error) || "error"}`;
+      };
+
+      window.__gpuRegisterFleet = async (depId) => {
+        const fb = el("gpu-deploy-feedback");
+        if (fb) fb.textContent = `Registering ${depId} in Model Fleet…`;
+        const res = await gpuApiRegisterModel(depId);
+        if (res && Array.isArray(res.deployments)) {
+          lastGpuDeploymentsData = res.deployments;
+          renderGpuDeployUi();
+        }
+        if (fb) fb.textContent = (res && res.ok) ? `✓ Registered in Model Fleet` : `Register failed: ${(res && res.error) || "error"}`;
+        if (res && res.ok) await loadFleet(false, true);
+      };
+
+      window.__gpuTerminate = async (depId) => {
+        const fb = el("gpu-deploy-feedback");
+        if (fb) fb.textContent = `Stopping ${depId}…`;
+        const res = await gpuApiTerminate(depId);
+        if (res && Array.isArray(res.deployments)) {
+          lastGpuDeploymentsData = res.deployments;
+          renderGpuDeployUi();
+        }
+        if (fb) fb.textContent = (res && res.ok) ? `✓ Terminated ${depId}` : `Terminate failed: ${(res && res.error) || "error"}`;
+      };
 
       el("btn-vault-refresh").addEventListener("click", async () => {
         await refreshVaultStatus();
@@ -10025,6 +10969,7 @@
         const res = await callBridge("Workspace", "set_workspace_directory", clean, el("ws-mode") ? el("ws-mode").value : "approve_writes", false);
         if (res && res.ok) {
           el("chat-mode").value = "workspace_agent";
+          syncChatTarget();
           el("ws-tree-details").open = true;
           renderWorkspace(res);
           if (fb) fb.textContent = `✓ Workspace active: ${res.root} (Workspace Agent & Swarm Missions synced)`;
@@ -10060,6 +11005,7 @@
         if (res && res.ok) {
           el("ws-new-name").value = "";
           el("chat-mode").value = "workspace_agent";
+          syncChatTarget();
           el("ws-tree-details").open = true;
           renderWorkspace(res);
           el("ws-feedback").textContent = `✓ Sandbox created: ${res.root}`;
@@ -10072,6 +11018,7 @@
         const res = await callBridge("Workspace", "pick_workspace_folder");
         if (res && res.ok) {
           el("chat-mode").value = "workspace_agent";
+          syncChatTarget();
           el("ws-tree-details").open = true;
           renderWorkspace(res);
           el("ws-feedback").textContent = `✓ Attached folder: ${res.root} (Workspace Agent & Swarm Missions synced)`;
@@ -11309,7 +12256,29 @@
             s.agents[idx].model = m;
             s.agents[idx].provider = prov;
           }
-        }, `✓ Bound agent #${idx + 1} to ${m} (${prov}) (synced to JSON, vault & web).`);
+        }, `✓ Bound node #${idx + 1} to ${m} (${prov}) (synced to JSON, vault & web).`);
+      };
+
+      window.__builderEditAgentName = (idx, nameVal) => {
+        const n = String(nameVal || "").trim();
+        if (!n) return;
+        commitBuilderSchemaMutation((s) => {
+          if (s.agents && s.agents[idx]) {
+            s.agents[idx].name = n;
+            s.agents[idx].id = n.toLowerCase().replace(/[^a-z0-9_-]/g, "_");
+          }
+        }, `✓ Updated node name to '${n}' (synced to topology).`);
+      };
+
+      window.__builderEditAgentScription = (idx, scriptionVal) => {
+        const desc = String(scriptionVal || "").trim();
+        commitBuilderSchemaMutation((s) => {
+          if (s.agents && s.agents[idx]) {
+            s.agents[idx].description = desc;
+            s.agents[idx].task = desc;
+            s.agents[idx].prompt = desc;
+          }
+        }, `✓ Updated scription directive for node #${idx + 1}`);
       };
 
       window.__builderEditAgentMaxChildren = (idx, val) => {
@@ -11502,7 +12471,7 @@
           ? parsed.deterministic_spawning_rules
           : (Array.isArray(parsed.spawning_rules) ? parsed.spawning_rules : (Array.isArray(parsed.rules) ? parsed.rules : []));
 
-        // Render interactive Agents table with toggle, inline fleet model binding, max_children, vault readiness, remove
+        // Render self-assembling nodes table: Node Name · Model · Scription
         let readyCount = 0;
         let enabledCount = 0;
         el("schema-vault-body").innerHTML = agentsList.length
@@ -11516,20 +12485,26 @@
                 ? `<span class="pill pill-ok">READY</span>`
                 : `<span class="pill pill-lock" onclick="window.__unlockProvider('${esc(a.provider)}')" title="Unlock ${esc(a.provider)} key in Vault">KEY_MISSING</span>`;
               const rowStyle = a.enabled === false ? 'style="opacity:0.45;"' : "";
+              const scriptionText = a.task || a.prompt || a.description || "";
               return `
                 <tr ${rowStyle}>
-                  <td><input type="checkbox" ${a.enabled !== false ? "checked" : ""} onchange="window.__builderToggleAgent(${idx}, this.checked)" title="Enable/disable agent in DAG" /></td>
-                  <td><b>${esc(a.id)}</b><div class="muted mono" style="font-size:10.5px;">${esc(a.role)}</div></td>
+                  <td><input type="checkbox" ${a.enabled !== false ? "checked" : ""} onchange="window.__builderToggleAgent(${idx}, this.checked)" title="Enable/disable node in topology" /></td>
                   <td>
-                    <input class="builder-model-input" type="text" list="builder-model-options" value="${esc(a.model)}" onchange="window.__builderEditAgentModel(${idx}, this.value)" title="Bind model from fleet (auto-infers provider)" />
+                    <input class="builder-model-input" type="text" value="${esc(a.name || a.id)}" onchange="window.__builderEditAgentName(${idx}, this.value)" style="font-weight:600; width:100%;" title="Node Name" />
+                    <div class="muted mono" style="font-size:10px; margin-top:2px;">role: ${esc(a.role)}</div>
+                  </td>
+                  <td>
+                    <input class="builder-model-input" type="text" list="builder-model-options" value="${esc(a.model)}" onchange="window.__builderEditAgentModel(${idx}, this.value)" title="Bind model from fleet" />
                     <div class="muted mono" style="font-size:10px; margin-top:2px;">provider: ${esc(a.provider)}</div>
                   </td>
-                  <td><input class="builder-num" style="width:52px; padding:2px 4px; font-size:11px;" type="number" min="0" placeholder="∞" value="${a.max_children !== null ? esc(a.max_children) : ""}" onchange="window.__builderEditAgentMaxChildren(${idx}, this.value)" title="Leave blank for unlimited (∞)" /></td>
+                  <td>
+                    <textarea class="builder-scription-input" rows="2" onchange="window.__builderEditAgentScription(${idx}, this.value)" placeholder="Self-assembled scription / directive for this node..." style="width:100%; min-height:36px; padding:4px 6px; font-size:11px; background:#0b1120; border:1px solid #1e293b; border-radius:4px; color:#cbd5e1; resize:vertical; font-family:var(--font-mono, monospace);">${esc(scriptionText)}</textarea>
+                  </td>
                   <td>${badgeHtml}</td>
-                  <td><button class="btn-ghost" type="button" style="padding:2px 6px; font-size:10.5px; color:var(--red);" onclick="window.__builderRemoveAgent(${idx})" title="Remove agent">✕</button></td>
+                  <td><button class="btn-ghost" type="button" style="padding:2px 6px; font-size:10.5px; color:var(--red);" onclick="window.__builderRemoveAgent(${idx})" title="Remove node">✕</button></td>
                 </tr>`;
             }).join("")
-          : '<tr><td colspan="6" class="muted">No agents defined yet. Use "+ Add Agent" below.</td></tr>';
+          : '<tr><td colspan="6" class="muted">No self-assembling nodes defined. Use "+ Add Node" below or let the topology auto-assemble.</td></tr>';
 
         const vBadge = el("schema-vault-readiness-badge");
         if (vBadge) {
@@ -11851,6 +12826,41 @@
       }
 
       if (el("btn-swarm-a2a-cancel")) el("btn-swarm-a2a-cancel").addEventListener("click", () => cancelSwarmA2aComposer(true));
+      el("btn-swarm-a2a-edit-mode").addEventListener("click", () => {
+        swarmEditingWorkflow = !swarmEditingWorkflow;
+        cancelSwarmA2aComposer(true);
+      });
+      el("btn-monitor-new-mission").addEventListener("click", () => {
+        el("swarm-monitor-detail").open = true;
+        el("quick-mission-goal").focus();
+      });
+      el("swarm-monitor-detail").addEventListener("toggle", function () {
+        if (this.open) renderTopology(lastRenderedTopology.nodes, lastRenderedTopology.workers, lastRenderedTopology.activeHandoffs);
+      });
+      el("view-swarm").addEventListener("click", async event => {
+        const automationButton = event.target.closest("[data-monitor-automation]");
+        if (automationButton) {
+          switchView("automations");
+          switchAutomationsSubtab("auto-loops");
+          if (automationButton.dataset.monitorAutomation === "attention") {
+            el("auto-approvals-panel").scrollIntoView({block: "start"});
+          }
+          return;
+        }
+        const button = event.target.closest("[data-monitor-run]");
+        if (!button) return;
+        const missionId = button.dataset.monitorRun;
+        el("swarm-monitor-detail").open = true;
+        el("monitor-mission-report").scrollIntoView({block: "start"});
+        const result = await callBridge("Swarm", "get_mission_output", missionId);
+        if (result?.ok && result.output) {
+          selectedMissionOutputId = missionId;
+          monitorOpenedReport = result.output;
+          renderSingleMissionOutput(result.output);
+        } else {
+          el("mission-output-body").textContent = "No saved report is available for this run.";
+        }
+      });
       if (el("btn-swarm-a2a-close")) el("btn-swarm-a2a-close").addEventListener("click", () => cancelSwarmA2aComposer(true));
       if (el("swarm-a2a-comm-type")) {
         el("swarm-a2a-comm-type").addEventListener("change", () => {
@@ -12085,17 +13095,33 @@
         const idInp = el("builder-agent-id");
         const roleInp = el("builder-agent-role");
         const modelInp = el("builder-agent-model");
+        const scriptionInp = el("builder-agent-scription");
         const maxChInp = el("builder-agent-max-children");
         const role = (roleInp.value || "rag_scout").trim();
         const id = (idInp.value || `${role.replace(/[^a-z0-9]+/gi, "-")}-${Date.now() % 1000}`).trim();
+        const name = (idInp.value || id).trim();
         const model = (modelInp.value || "gemini-4-argon").trim();
+        const scription = (scriptionInp && scriptionInp.value ? scriptionInp.value : `${role} self-assembling node directive`).trim();
         const provider = inferProviderFromModelId(model, "");
-        const maxChRaw = String(maxChInp.value || "").trim();
+        const maxChRaw = String((maxChInp && maxChInp.value) || "").trim();
         const maxCh = isUnboundedVal(maxChRaw) ? null : Math.max(0, parseInt(maxChRaw, 10) || 0);
         commitBuilderSchemaMutation((s) => {
-          s.agents.push({ id, role, model, provider, status: "ACTIVE", max_children: maxCh, enabled: true, task: `${role} node` });
-        }, `✓ Added agent '${id}' (${role} · ${model}) to schema & web.`);
+          s.agents.push({
+            id,
+            name,
+            role,
+            model,
+            provider,
+            status: "ACTIVE",
+            max_children: maxCh,
+            enabled: true,
+            description: scription,
+            task: scription,
+            prompt: scription,
+          });
+        }, `✓ Added node '${name}' (${model}) with scription to topology.`);
         idInp.value = "";
+        if (scriptionInp) scriptionInp.value = "";
       });
 
       el("btn-builder-add-rule").addEventListener("click", () => {
@@ -13089,6 +14115,31 @@
             }
           } else if (fb) {
             fb.textContent = (res && res.error) || "Product QA check failed.";
+          }
+        });
+      }
+      const krakenReviewButton = el("btn-kraken-paper-review");
+      if (krakenReviewButton) {
+        krakenReviewButton.addEventListener("click", async () => {
+          const feedback = el("kraken-qa-feedback");
+          const receipt = el("kraken-qa-receipt");
+          krakenReviewButton.disabled = true;
+          feedback.textContent = "Claude and GPT are reviewing the paper results. Gemini will compare their findings.";
+          receipt.style.display = "none";
+          try {
+            const result = await callBridge("Kraken", "run_kraken_model_review");
+            if (!Array.isArray(result?.reviewers)) {
+              feedback.textContent = result?.error || "Could not load the paper review.";
+              return;
+            }
+            const count = result.reviewers.filter(row => row.ok).length;
+            feedback.textContent = `${count} of 3 models replied · Paper snapshot ${new Date(result.evidence.published_at).toLocaleString()}`;
+            receipt.textContent = result.reviewers.map(row =>
+              `${row.name} (${row.reported_model || row.model} via ${row.route})\n${row.ok ? row.text : row.error}`
+            ).join("\n\n");
+            receipt.style.display = "block";
+          } finally {
+            krakenReviewButton.disabled = false;
           }
         });
       }
@@ -14450,6 +15501,10 @@
         const item = list[0];
         activeAuditMissionId = String(item.mission_id || "");
         panel.style.display = "block";
+        // Avoid stacking duplicate post-mission prompt banners for the same run
+        if (el("recommended-next-banner")) {
+          el("recommended-next-banner").style.display = "none";
+        }
         const needsWork = Boolean(item.needs_more_work);
         const badge = el("audit-decision-badge");
         if (badge) {

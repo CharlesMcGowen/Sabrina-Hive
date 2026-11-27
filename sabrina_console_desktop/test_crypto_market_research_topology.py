@@ -103,6 +103,18 @@ class TestCryptoMarketResearchTopology(unittest.TestCase):
         self.assertTrue(trace_query.get("ok"))
         self.assertEqual(trace_query.get("traces"), [])
 
+    def test_bridge_loads_m_eulerian_rsi_preset(self) -> None:
+        """Verify bridge can activate the m-Eulerian RSI Join-Cut schema preset."""
+        bridge = SabrinaDesktopBridge(role_bindings_path=self.tmp_path / "role_bindings.json")
+        res = bridge.load_preset_swarm_schema("m_eulerian_rsi")
+        self.assertTrue(res.get("ok"), f"m-Eulerian preset load failed: {res.get('error')}")
+
+        schema = bridge.get_swarm_schema()
+        self.assertTrue(schema.get("ok"))
+        self.assertIn("m-Eulerian RSI", schema["schema"]["swarm_name"])
+        self.assertEqual(schema["schema"]["topology"]["m_eulerian"]["genus"], 0)
+        self.assertEqual(schema["schema"]["topology"]["m_eulerian"]["m_order"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

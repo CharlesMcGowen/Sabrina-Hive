@@ -53,16 +53,49 @@
         },
         "queue_entry": {
           "classification": "financial",
-          "required": ["operation", "account", "pair", "side", "purpose", "volume", "ordertype", "oflags"],
+          "required": [
+            "operation",
+            "account",
+            "pair",
+            "side",
+            "purpose",
+            "volume",
+            "ordertype",
+            "oflags"
+          ],
           "fields": {
-            "account": {"type": "string", "pattern": "execution-v1(?:-acct2)?"},
-            "pair": {"type": "string", "pattern": "[A-Z0-9]{3,24}"},
-            "side": {"type": "string", "pattern": "buy"},
-            "purpose": {"type": "string", "pattern": "entry"},
-            "volume": {"type": "string", "pattern": "[0-9]{1,12}(?:[.][0-9]{1,12})?"},
-            "ordertype": {"type": "string", "pattern": "market|limit"},
-            "oflags": {"type": "string", "pattern": "fciq|post,fciq"},
-            "price": {"type": "string", "pattern": "[0-9]{1,12}(?:[.][0-9]{1,12})?"}
+            "account": {
+              "type": "string",
+              "pattern": "execution-v1(?:-acct2)?"
+            },
+            "pair": {
+              "type": "string",
+              "pattern": "[A-Z0-9]{3,24}"
+            },
+            "side": {
+              "type": "string",
+              "pattern": "buy"
+            },
+            "purpose": {
+              "type": "string",
+              "pattern": "entry"
+            },
+            "volume": {
+              "type": "string",
+              "pattern": "[0-9]{1,12}(?:[.][0-9]{1,12})?"
+            },
+            "ordertype": {
+              "type": "string",
+              "pattern": "market|limit"
+            },
+            "oflags": {
+              "type": "string",
+              "pattern": "fciq|post,fciq"
+            },
+            "price": {
+              "type": "string",
+              "pattern": "[0-9]{1,12}(?:[.][0-9]{1,12})?"
+            }
           }
         }
       }
@@ -121,7 +154,7 @@
       }
     },
     "kraken_monitor": {
-      "sha256": "fafc8524a927b102a5a84ff04aedd0350c857a3aadc3177e81d97fea54382d56",
+      "sha256": "77687df53997b3ed973727aeb6fecc604a2e29e6fe4508c1f9adde32088eb742",
       "operations": {
         "top_gainers_24h": {
           "classification": "public",
@@ -136,7 +169,7 @@
             "limit": {
               "type": "integer",
               "min": 1,
-              "max": 20
+              "max": 25
             },
             "min_volume_usd": {
               "type": "integer",

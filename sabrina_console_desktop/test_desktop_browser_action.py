@@ -26,7 +26,7 @@ class TestDesktopBrowserAction(unittest.TestCase):
             with patch.dict(os.environ, {"SABRINA_LINKEDIN_ACCOUNT_URL": "https://www.linkedin.com/in/test-profile/"}), \
                     patch("sabrina_console_desktop.live_swarm_runner.dispatch_browser_open",
                           side_effect=[OSError("IE desktop is unavailable"), "Edge accepted the address."]) as dispatch, \
-                    patch("sabrina_console_desktop.sabrina_desktop_ui.launch_swarm_mission") as legacy:
+                    patch.object(bridge, "_try_local_desktop_action", return_value=None) as generic_action:
                 started = bridge.launch_mission(LINKEDIN_GOAL)
                 self.assertTrue(started["ok"])
                 output = bridge.swarm_runner.wait_for_mission(started["mission_id"])
@@ -34,7 +34,7 @@ class TestDesktopBrowserAction(unittest.TestCase):
                 ("Internet Explorer", "https://www.linkedin.com/in/test-profile/"),
                 ("Microsoft Edge", "https://www.linkedin.com/in/test-profile/"),
             ])
-            legacy.assert_not_called()
+            generic_action.assert_not_called()
             self.assertEqual(output["state"], "DONE")
             self.assertEqual(output["execution_mode"], "LOCAL_DESKTOP")
             self.assertFalse(output["execution_authorized"])

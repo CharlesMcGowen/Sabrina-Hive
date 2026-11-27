@@ -22,11 +22,19 @@ def recover_own_reservation(client):
         raise RuntimeError("Previous executor belongs to another host; reservation retained")
     if not isinstance(pid, int) or pid <= 0:
         raise RuntimeError("Uncertain reservation lacks executor evidence")
-    try:
-        os.kill(pid, 0)
+    if os.name == "nt":
+        # Signal zero is a console control event on Windows.
+        from ..worker_identity import process_start
+        stopped = process_start(pid) == "absent"
+    else:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            stopped = True
+        else:
+            stopped = False
+    if not stopped:
         raise RuntimeError("Previous executor still exists; reservation retained")
-    except ProcessLookupError:
-        pass
     names = subprocess.check_output(["docker", "ps", "--format", "{{.Names}}"], text=True)
     if any(name.startswith(("math-proof-", "math-print-")) for name in names.splitlines()):
         raise RuntimeError("Previous proof container still exists; reservation retained")

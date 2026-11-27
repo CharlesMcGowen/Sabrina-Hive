@@ -47,6 +47,8 @@ candidate-instructions.md
 sabrina_desktop_ui.html.before*
 sabrina_desktop_ui.py.before*
 *.log
+scratch/
+sabrina_console_desktop/scratch/
 
 # Proprietary Trading Tools & Financial Strategies (Exempt from public framework)
 *kraken*

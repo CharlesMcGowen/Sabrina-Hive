@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import math
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -25,6 +26,19 @@ from tools.lab_http import LabHTTP
 from tools.worker_identity import stopped_evidence
 
 TERMINAL = {'completed', 'failed', 'cancelled'}
+
+
+def _worker_loop(stop, step, report_error):
+    """Keep the queue worker alive when both work and error logging hit a transient failure."""
+    while not stop.is_set():
+        try:
+            step()
+        except Exception as exc:
+            try:
+                report_error(exc)
+            except Exception:
+                logging.getLogger(__name__).exception("Could not persist coordinator worker error")
+        stop.wait(0.2)
 
 
 def bounded(value, name, maximum=200):
@@ -613,23 +627,15 @@ class Control:
 
     def start(self):
         self.recover()
+        def report_error(kind, exc):
+            with self.store.connect(True) as db:
+                self.event(db, 'service', kind, {'error': str(exc)[:1000]})
         def infer_loop():
-            while not self.stop.is_set():
-                try:
-                    self.inference_step()
-                except Exception as exc:
-                    with self.store.connect(True) as db:
-                        self.event(db, 'service', 'worker_error', {'error': str(exc)[:1000]})
-                self.stop.wait(0.2)
+            _worker_loop(self.stop, self.inference_step, lambda exc: report_error('worker_error', exc))
         def objective_loop():
             runtime = Runtime(self.config, self.store.path, fleet_factory=lambda c,s: GatewayFleet(self,c,s))
-            while not self.stop.is_set():
-                try:
-                    self.objective_step(runtime)
-                except Exception as exc:
-                    with self.store.connect(True) as db:
-                        self.event(db, 'service', 'objective_worker_error', {'error': str(exc)[:1000]})
-                self.stop.wait(0.2)
+            _worker_loop(self.stop, lambda: self.objective_step(runtime),
+                         lambda exc: report_error('objective_worker_error', exc))
         for target in [infer_loop] + [objective_loop]*3:
             thread = threading.Thread(target=target, daemon=True)
             thread.start()

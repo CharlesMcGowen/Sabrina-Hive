@@ -1,0 +1,134 @@
+{
+  "schema_version": "2.1.0-collective",
+  "swarm_name": "m-Eulerian RSI Join-Cut Swarm (Planar Genus-0 Topology)",
+  "execution_authorized": false,
+  "topology": {
+    "max_spawn_depth": 5,
+    "max_concurrency": 8,
+    "max_total_agents": 16,
+    "confidence_gate_threshold": -0.25,
+    "confidence_gate_probability": 0.779,
+    "blackboard_bus": "dnd_rsi_blackboard.sqlite3",
+    "m_eulerian": {
+      "m_order": 2,
+      "genus": 0,
+      "macro_cycles": 2,
+      "topological_invariants": {
+        "crossing_free_planar": true,
+        "euler_characteristic_c_alpha": "(m-1)n - l(alpha) + 2",
+        "isolated_genus_0_sub_spheres": true
+      }
+    }
+  },
+  "deterministic_spawning_rules": [
+    {
+      "rule_id": "MR1_MACRO_CYCLE_INIT",
+      "parent_role": "coordinator",
+      "child_role": "planner_architect",
+      "min_logprob": -0.22,
+      "trigger": "macro_cycle_init && depth < 5",
+      "transition": "SPAWNING -> ACTIVE -> VALIDATING"
+    },
+    {
+      "rule_id": "MR2_LOCAL_QUORUM_ROLLOUTS",
+      "parent_role": "planner_architect",
+      "child_role": "research_scout",
+      "min_logprob": -0.25,
+      "trigger": "hub_grafted && speculative_rollouts_m <= 8",
+      "transition": "SPAWNING -> ACTIVE -> VALIDATING"
+    },
+    {
+      "rule_id": "MR3_SPECULATIVE_EXEC",
+      "parent_role": "research_scout",
+      "child_role": "execution_specialist",
+      "min_logprob": -0.25,
+      "trigger": "evidence_collected && log_da_feedback_active",
+      "transition": "SPAWNING -> ACTIVE -> VALIDATING"
+    },
+    {
+      "rule_id": "MR4_LOG_FIN_PROMOTION",
+      "parent_role": "execution_specialist",
+      "child_role": "critic_verifier",
+      "min_logprob": -0.18,
+      "trigger": "deliverable_ready && outer_face_ports_open",
+      "transition": "SPAWNING -> ACTIVE -> VALIDATING"
+    },
+    {
+      "rule_id": "MR5_JOIN_CUT_SPINDOWN",
+      "parent_role": "critic_verifier",
+      "child_role": "fast_worker",
+      "min_logprob": -0.25,
+      "trigger": "log_fin_verified && execution_authorized == false",
+      "transition": "VALIDATING -> PASS -> SPINDOWN"
+    }
+  ],
+  "agents": [
+    {
+      "id": "sabrina",
+      "role": "coordinator",
+      "model": "gemini-4-neon",
+      "provider": "gemini",
+      "status": "ACTIVE",
+      "max_children": 2,
+      "enabled": true,
+      "task": "Topological Lead Coordinator & Genus-0 Root Sphere"
+    },
+    {
+      "id": "eulerian-eval-hub",
+      "role": "planner_architect",
+      "model": "gemini-4-neon",
+      "provider": "gemini",
+      "status": "ACTIVE",
+      "max_children": 2,
+      "enabled": true,
+      "task": "White Evaluation Hub (i=1) & Macro-Cycle Expansion Controller"
+    },
+    {
+      "id": "quorum-speculative-scout",
+      "role": "research_scout",
+      "model": "gemini-4-hydrogen",
+      "provider": "gemini",
+      "status": "ACTIVE",
+      "max_children": 2,
+      "enabled": true,
+      "task": "Local Quorum Arbiter (m-1 speculative LOG_da rollouts)"
+    },
+    {
+      "id": "join-cut-bridge-worker",
+      "role": "execution_specialist",
+      "model": "gemini-4-argon",
+      "provider": "gemini",
+      "status": "ACTIVE",
+      "max_children": 2,
+      "enabled": true,
+      "task": "Black Inner-Degree-2 Join-Cut Bridge & Synthesis Specialist"
+    },
+    {
+      "id": "outer-port-verifier",
+      "role": "critic_verifier",
+      "model": "anthropic/claude-sonnet-4-5",
+      "provider": "anthropic",
+      "status": "VALIDATING",
+      "max_children": 1,
+      "enabled": true,
+      "task": "Planar Map Closer & LOG_fin Port Invariant Gate"
+    },
+    {
+      "id": "gate-lease-guard",
+      "role": "fast_worker",
+      "model": "ollama/qwen2.5-coder:14b",
+      "provider": "ollama",
+      "status": "VALIDATING",
+      "max_children": 1,
+      "enabled": true,
+      "task": "Read-Only Lease & Hash Guardrail"
+    }
+  ],
+  "objectives": [
+    {
+      "id": "obj-m-eulerian-rsi",
+      "state": "ACTIVE",
+      "goal": "Execute m-Eulerian RSI Join-Cut Macro-Cycle on Genus-0 Planar Topology"
+    }
+  ]
+}

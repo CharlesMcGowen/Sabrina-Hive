@@ -62,11 +62,14 @@ from swarm_console.gemini_copilot import (
 )
 from swarm_console.registry import ModelSkillRegistry, default_skill_roots
 from swarm_console.vault import ProviderKeyVault
+from swarm_console.gpu_providers import SwarmGpuDeploymentManager
 from swarm_console.harness_collective import HarnessPolicy, HarnessRegistry
 from swarm_console.harness_updates import NATIVE_HARNESS_ID, HarnessUpdates
 from swarm_console.workspace_agent import WorkspaceAgent
 from swarm_console.workspace_sandbox import (
     DEFAULT_SANDBOX_ROOT,
+    MUTATING_TOOLS,
+    TOOL_INPUT_MODELS,
     VALID_POLICY_PROFILES,
     VALID_WORKSPACE_MODES,
     WorkspaceSandbox,
@@ -80,6 +83,8 @@ if str(ROOT_IMPORT) not in sys.path:
 
 try:
     from sabrina_console_desktop.live_swarm_runner import LiveSwarmRunner
+    from sabrina_console_desktop.followup_coordinator import FollowupCoordinator, IN_PROGRESS, MODE as FOLLOWUP_MODE
+    from sabrina_console_desktop.join_cut_registry import JoinCutRegistry
     from sabrina_console_desktop.connector_registry import ConnectorRegistry
     from sabrina_console_desktop.automation_engine import AutomationEngine
     from sabrina_console_desktop.workspace_topology_index import (
@@ -88,12 +93,27 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script execution
     from live_swarm_runner import LiveSwarmRunner  # type: ignore[no-redef]
+    from followup_coordinator import FollowupCoordinator, IN_PROGRESS, MODE as FOLLOWUP_MODE  # type: ignore[no-redef]
+    from join_cut_registry import JoinCutRegistry  # type: ignore[no-redef]
     from connector_registry import ConnectorRegistry  # type: ignore[no-redef]
     from automation_engine import AutomationEngine  # type: ignore[no-redef]
     from workspace_topology_index import (  # type: ignore[no-redef]
         get_machine_and_catalog_snapshot,
         refresh_and_search_machine_catalog,
     )
+
+try:
+    from sabrina_console_desktop.tools.promotion_ledger import PromotionLedger
+    from sabrina_console_desktop.tools.signal_promotion_gate import SignalGate, KIND_SIGNAL, KIND_CANDIDATE
+except ImportError:  # pragma: no cover - direct script execution
+    try:
+        from tools.promotion_ledger import PromotionLedger  # type: ignore[no-redef]
+        from tools.signal_promotion_gate import SignalGate, KIND_SIGNAL, KIND_CANDIDATE  # type: ignore[no-redef]
+    except ImportError:  # pragma: no cover
+        PromotionLedger = None  # type: ignore[assignment]
+        SignalGate = None  # type: ignore[assignment]
+        KIND_SIGNAL = "signal"
+        KIND_CANDIDATE = "signal_candidate"
 
 try:
     from sabrina_console_desktop.swarm_schema_audit import (
@@ -668,10 +688,12 @@ class SabrinaDesktopBridge:
         step_delay_sec: float | None = None,
         llm_caller: Any | None = None,
         ui_html_path: Path | None = None,
+        coordinator_only: bool = False,
     ) -> None:
         self.active_missions: list[dict[str, Any]] = []
         self.local_feed: list[dict[str, Any]] = []
         self.chat_log: list[dict[str, Any]] = []
+        self._chat_log_revision = 0
         self._isolated_test_mode = (
             role_bindings_path is not None
             or vault_path is not None
@@ -679,6 +701,11 @@ class SabrinaDesktopBridge:
             or custom_models_path is not None
             or swarm_artifacts_dir is not None
         )
+        if not self._isolated_test_mode and not coordinator_only:
+            # Import the optional SDK while the console initializes, before the
+            # first chat needs it. This does not make a model or network request.
+            threading.Thread(target=self._prewarm_workspace_sdk,
+                             name="sabrina-chat-sdk-prewarm", daemon=True).start()
         effective_spindown = (
             float(spindown_delay_sec)
             if spindown_delay_sec is not None
@@ -690,6 +717,7 @@ class SabrinaDesktopBridge:
             else (0.35 if self._isolated_test_mode else 1.1)
         )
         self._remote_lock = threading.Lock()
+        self._kraken_review_lock = threading.Lock()
         self._remote_refreshing = False
         self._remote_last_ts = 0.0
         self._remote_cache: dict[str, Any] = {
@@ -710,6 +738,7 @@ class SabrinaDesktopBridge:
         self._window: Any = None
         self._ui_html_path: Path = Path(ui_html_path) if ui_html_path is not None else (ROOT / "sabrina_desktop_ui.html")
         self._ui_loaded_mtime: float = self._read_ui_asset_mtime()
+        self._ui_auto_reload = os.environ.get("SABRINA_UI_HOT_RELOAD", "").lower() in {"1", "true", "yes", "on"}
         self.workspace_sandbox: WorkspaceSandbox | None = None
         self.workspace_agent: WorkspaceAgent | None = None
         self._workspace_agent_lock = threading.RLock()
@@ -773,6 +802,16 @@ class SabrinaDesktopBridge:
             vault=self.vault,
             custom_models_path=custom_file,
         )
+        gpu_deployments_file = (
+            Path(vault_path).with_name("gpu_deployments.json")
+            if vault_path is not None
+            else (bindings_file.parent / "gpu_deployments.json")
+        )
+        self.gpu_deployments = SwarmGpuDeploymentManager(
+            vault=self.vault,
+            deployments_path=gpu_deployments_file,
+            model_registry=self.registry,
+        )
         if role_bindings_path is None and SWARM_SYNC_FILE.is_file():
             try:
                 seed_data = json.loads(SWARM_SYNC_FILE.read_text(encoding="utf-8"))
@@ -792,7 +831,7 @@ class SabrinaDesktopBridge:
         effective_llm_caller = (
             llm_caller
             if llm_caller is not None
-            else (None if self._isolated_test_mode else self._call_private_swarm_llm)
+            else (None if self._isolated_test_mode else self._call_swarm_llm)
         )
         self._interface_dispatches: list[dict[str, Any]] = []
         harness_state_dir = (
@@ -801,6 +840,10 @@ class SabrinaDesktopBridge:
             else Path(bindings_file).parent
         )
         self.harness_updates = HarnessUpdates(harness_state_dir / "harness_updates.sqlite3")
+        self.followup_coordinator = FollowupCoordinator(harness_state_dir / "mission_followups")
+        self._monitor_runs: list[dict[str, str]] = []
+        self._monitor_attention: list[dict[str, Any]] = []
+        self._monitor_runs_at = 0.0
         self.harness_registry = HarnessRegistry(
             ollama_base_url=OLLAMA_BASE,
             llm_caller=effective_llm_caller,
@@ -823,12 +866,36 @@ class SabrinaDesktopBridge:
             runner_kwargs["harness_registry"] = self.harness_registry
         if "auto_spindown" in inspect.signature(LiveSwarmRunner.__init__).parameters:
             runner_kwargs["auto_spindown"] = self._isolated_test_mode
+        jc_db_path = (
+            (bindings_file.parent / "join_cut_registry.sqlite3")
+            if self._isolated_test_mode
+            else (control_dir / "join_cut_registry.sqlite3")
+        )
+        self.join_cut_registry = JoinCutRegistry(jc_db_path)
+        if "join_cut_registry" in inspect.signature(LiveSwarmRunner.__init__).parameters:
+            runner_kwargs["join_cut_registry"] = self.join_cut_registry
+        ledger_root = (
+            (bindings_file.parent / "promotion_ledger")
+            if self._isolated_test_mode
+            else (ROOT / "artifacts" / "gainers_paper" / "ledger")
+        )
+        self.signal_gate: Any = None
+        self.promotion_ledger: Any = None
+        if SignalGate is not None:
+            try:
+                self.signal_gate = SignalGate(root=ledger_root)
+                self.promotion_ledger = self.signal_gate.ledger
+            except Exception:
+                self.signal_gate = None
+                self.promotion_ledger = None
         self.swarm_runner = LiveSwarmRunner(**runner_kwargs)
+        if not self._isolated_test_mode and hasattr(self.swarm_runner, "configure_topology"):
+            self.swarm_runner.configure_topology(topology_mode="m_eulerian_join_cut", branching_order=3)
         self.swarm_runner.skill_lookup_fn = self.match_swarm_skills
         self.swarm_runner.capability_manifest_fn = self.get_preflight_manifest
         if llm_caller is None and not self._isolated_test_mode:
             self.swarm_runner.model_readiness = lambda role, model: self._call_swarm_llm(
-                role, model, "", "", readiness_only=True, local_only=True,
+                role, model, "", "", readiness_only=True,
             )["model"]
         self._swarm_a2a_links_path: Path = (
             bindings_file.parent / "swarm_a2a_links.json"
@@ -856,18 +923,25 @@ class SabrinaDesktopBridge:
             connector_registry=self.connector_registry,
             gemini_caller=self._call_private_automation_model,
             swarm_caller=lambda g, r: self.launch_mission(goal=g, mode=r or "coordinator"),
-            agent_caller=self._call_private_swarm_llm,
+            agent_caller=self._call_swarm_llm,
         )
-        if not self._isolated_test_mode:
+        if not self._isolated_test_mode and not coordinator_only:
             self.automation_engine.start_background_scheduler(poll_seconds=15.0)
         self._restore_workspace_state()
-        if not self._isolated_test_mode:
+        if not self._isolated_test_mode and not coordinator_only:
             self._trigger_remote_refresh(force=True)
             threading.Thread(
                 target=self._prewarm_registry_worker,
                 name="sabrina-registry-prewarm",
                 daemon=True,
             ).start()
+
+    @staticmethod
+    def _prewarm_workspace_sdk() -> None:
+        try:
+            from google import genai  # noqa: F401
+        except Exception:
+            pass
 
     def _prewarm_registry_worker(self) -> None:
         try:
@@ -1107,8 +1181,11 @@ class SabrinaDesktopBridge:
                     seeded.append({"sender": "operator", "time": ts_str, "text": user_msg})
                 if reply_msg:
                     seeded.append({"sender": speaker, "time": ts_str, "text": reply_msg})
-            if seeded and not self.chat_log:
-                self.chat_log = seeded[-40:]
+            if seeded:
+                with self._chat_lock:
+                    if not self.chat_log:
+                        self.chat_log = seeded[-40:]
+                        self._chat_log_revision += 1
         except Exception:
             pass
 
@@ -1422,6 +1499,7 @@ class SabrinaDesktopBridge:
         self._trigger_remote_refresh(force=False)
         with self._remote_lock:
             remote = dict(self._remote_cache)
+            snapshot_loaded = self._remote_last_ts > 0
 
         api_ok = bool(remote.get("api_ok", False))
         health: dict[str, Any] = dict(remote.get("health") or {})
@@ -1452,10 +1530,22 @@ class SabrinaDesktopBridge:
         runner_state = self.swarm_runner.get_state()
         live_workers = list(runner_state.get("workers") or [])
         live_active_missions = list(runner_state.get("active_missions") or [])
+        chains = self.followup_coordinator.snapshot()
+        active_chains = [c for c in chains if c["state"] in IN_PROGRESS]
+        for chain in active_chains:
+            live_workers.extend({**worker, "background_chain": chain["chain_id"]}
+                                for worker in chain.get("workers") or [])
+            if chain["state"] == "RUNNING" and chain.get("current_mission_id"):
+                live_active_missions.append({
+                    "mission_id": chain["current_mission_id"], "goal": chain.get("current_goal") or chain["goal"],
+                    "state": "ACTIVE (RUNNING)", "detail": chain["detail"], "background_chain": chain["chain_id"],
+                })
         runner_status = str(
             runner_state.get("status")
             or ("ACTIVE" if (live_workers or live_active_missions) else "IDLE")
         )
+        if active_chains:
+            runner_status = "ACTIVE"
         self.active_missions = live_active_missions
 
         # Merge dynamic council node states from LiveSwarmRunner and telemetry blackboard
@@ -1523,13 +1613,29 @@ class SabrinaDesktopBridge:
             w.setdefault("action_trail", wt.get("action_trail") or [])
 
         swarm["workers"] = live_workers
-        swarm["active_worker_count"] = int(runner_state.get("active_worker_count", len(live_workers)))
+        swarm["active_worker_count"] = (int(runner_state.get("active_worker_count", 0))
+                                        + sum(len(c.get("workers") or []) for c in active_chains))
         swarm["recent_spindowns"] = list(runner_state.get("recent_spindowns") or [])
         swarm["file_conflicts"] = list(runner_state.get("file_conflicts") or [])
         with self._remote_lock:
             swarm["interface_dispatches"] = list(self._interface_dispatches)
         swarm["active_missions"] = live_active_missions
+        swarm["pending_audit_decisions"] = list(runner_state.get("pending_audit_decisions") or [])
         swarm["mission_outputs"] = list(runner_state.get("mission_outputs") or [])
+        if time.monotonic() - self._monitor_runs_at >= 5:
+            self._monitor_runs_at = time.monotonic()
+            try:
+                self._monitor_runs = self.swarm_runner.list_completed_runs()[:12]
+                self._monitor_attention = self.swarm_runner.list_run_attention()[:12]
+            except OSError:
+                pass
+        swarm["recent_saved_runs"] = self._monitor_runs
+        swarm["saved_run_attention"] = self._monitor_attention
+        terminal_chains = [c for c in chains if c["state"] not in IN_PROGRESS][:12]
+        swarm["followup_chains"] = [{k: v for k, v in c.items() if k != "workers"}
+                                    for c in active_chains + terminal_chains]
+        swarm["monitor_connection"] = ("connecting" if not snapshot_loaded else
+                                       "connected" if api_ok and remote.get("api_8095_ok") else "degraded")
         swarm["active_handoffs"] = list(runner_state.get("active_handoffs") or [])
         swarm["a2a_links"] = list(runner_state.get("a2a_links") or [])
         swarm["deliberations"] = list(runner_state.get("deliberations") or [])
@@ -1667,6 +1773,7 @@ class SabrinaDesktopBridge:
         self._seed_persisted_user_chat()
         with self._chat_lock:
             chat_history = list(self.chat_log[-40:])
+            chat_revision = self._chat_log_revision
 
         schema_errors, schema_warnings, schema_counts = validate_swarm_payload(swarm)
         schema_audit = {
@@ -1719,6 +1826,7 @@ class SabrinaDesktopBridge:
             "ui_asset_mtime": current_ui_mtime,
             "ui_loaded_mtime": self._ui_loaded_mtime,
             "ui_dirty": ui_dirty,
+            "ui_auto_reload": self._ui_auto_reload,
             "recommended_next_step": best_rec,
             "active_prompt_state": active_prompt_state,
             "frontier_research_state": frontier_research_state,
@@ -1736,6 +1844,7 @@ class SabrinaDesktopBridge:
             "models": models,
             "chat_roster": chat_roster,
             "chat_history": chat_history,
+            "chat_revision": chat_revision,
             "chat_job": self.get_chat_job_status(),
             "workspace": self._get_workspace_summary(),
             "swarm_board_messages": swarm_board_messages,
@@ -1743,6 +1852,7 @@ class SabrinaDesktopBridge:
             "vault": self.get_vault_status(),
             "role_bindings": self.role_bindings.list_bindings(unlocked_providers=unlocked),
             "harness_collective": self.harness_registry.list_harnesses(),
+            "deployment_health": self.get_deployment_health(),
             "evo_bench": self._get_evo_bench_snapshot_light(),
             "automations": {
                 "loops": self.automation_engine.list_loops(),
@@ -1753,6 +1863,109 @@ class SabrinaDesktopBridge:
                 f"API :8087 unreachable (remote service on ego:8087 not running — local fallback active): {health.get('error')}"
             ] if (not api_ok and isinstance(health, dict) and health.get("error")) else [],
         }
+
+    def get_deployment_health(self) -> dict[str, Any]:
+        """Return live status of wired backend modules for the Deployment Health badge."""
+        modules: list[dict[str, Any]] = []
+
+        # 1. Join-Cut Registry
+        jc_active = self.join_cut_registry is not None and bool(getattr(self.swarm_runner, "join_cut_enabled", False))
+        jc_nodes = 0
+        if jc_active:
+            try:
+                jc_nodes = len(self.join_cut_registry.all_nodes())
+            except Exception:
+                jc_nodes = -1
+        modules.append({
+            "id": "join_cut_registry",
+            "label": "Join-Cut Swarm",
+            "active": jc_active,
+            "detail": f"m={self.join_cut_registry.params.m}, nodes={jc_nodes}" if jc_active else "disabled",
+        })
+
+        # 2. Promotion Ledger
+        pl_active = self.promotion_ledger is not None
+        pl_finalized = 0
+        if pl_active:
+            try:
+                pl_finalized = len(self.promotion_ledger.finalized())
+            except Exception:
+                pl_finalized = -1
+        modules.append({
+            "id": "promotion_ledger",
+            "label": "Promotion Ledger",
+            "active": pl_active,
+            "detail": f"finalized={pl_finalized}" if pl_active else "unwired",
+        })
+
+        # 3. Signal Promotion Gate
+        sg_active = self.signal_gate is not None
+        sg_signals = 0
+        sg_candidates = 0
+        if sg_active and self.promotion_ledger is not None:
+            try:
+                fin = self.promotion_ledger.finalized()
+                sg_signals = sum(1 for r in fin if r.get("kind") == KIND_SIGNAL)
+                sg_candidates = sum(1 for r in fin if r.get("kind") == KIND_CANDIDATE)
+            except Exception:
+                pass
+        modules.append({
+            "id": "signal_promotion_gate",
+            "label": "Signal Gate",
+            "active": sg_active,
+            "detail": f"signals={sg_signals}, candidates={sg_candidates}" if sg_active else "unwired",
+        })
+
+        # 4. GPU Providers
+        gpu_active = hasattr(self, "get_gpu_providers")
+        modules.append({
+            "id": "gpu_providers",
+            "label": "GPU Providers",
+            "active": gpu_active,
+            "detail": "ready" if gpu_active else "unwired",
+        })
+
+        # 5. m-Eulerian RSI Schema
+        schema_candidates = [
+            ROOT / "data" / "control" / "m_eulerian_rsi_schema.json",
+        ]
+        if hasattr(self, "_swarm_schema_path"):
+            schema_candidates.insert(0, self._swarm_schema_path.parent / "m_eulerian_rsi_schema.json")
+        schema_active = any(p.is_file() for p in schema_candidates)
+        modules.append({
+            "id": "m_eulerian_rsi_schema",
+            "label": "m-Eulerian Schema",
+            "active": schema_active,
+            "detail": "present" if schema_active else "missing",
+        })
+
+        active_count = sum(1 for m in modules if m["active"])
+        total_count = len(modules)
+        return {
+            "active_count": active_count,
+            "total_count": total_count,
+            "all_ok": active_count == total_count,
+            "summary": f"Modules: {active_count}/{total_count} Active",
+            "modules": modules,
+        }
+
+    def get_promotion_ledger_status(self) -> dict[str, Any]:
+        """Expose PromotionLedger & SignalGate status to the UI/bridge."""
+        if self.promotion_ledger is None or self.signal_gate is None:
+            return {"ok": False, "active": False, "finalized": [], "signals": 0, "candidates": 0}
+        try:
+            fin = self.promotion_ledger.finalized()
+            return {
+                "ok": True,
+                "active": True,
+                "dataset": self.signal_gate.dataset,
+                "finalized_count": len(fin),
+                "signals": sum(1 for r in fin if r.get("kind") == KIND_SIGNAL),
+                "candidates": sum(1 for r in fin if r.get("kind") == KIND_CANDIDATE),
+                "recent": fin[-10:],
+            }
+        except Exception as exc:
+            return {"ok": False, "active": True, "error": str(exc)}
 
     def _try_local_desktop_action(self, goal: str) -> str | None:
         """Execute explicit safe local launch intents (e.g. open chrome / open URL)."""
@@ -1822,7 +2035,7 @@ class SabrinaDesktopBridge:
         )
         return manifest.to_dict()
 
-    def _get_qualified_portal_candidates(self) -> list[str]:
+    def _get_qualified_portal_candidates(self, limit_per_tier: int | None = 256) -> list[str]:
         """Return sanctioned, PortalPolicy-qualified external AI portals (`portal:<id>`) if enabled."""
         if self._isolated_test_mode:
             return []
@@ -1830,8 +2043,11 @@ class SabrinaDesktopBridge:
             from harnesses.external.collective_pool import KindCollectivePool
 
             pool = KindCollectivePool()
-            flash = pool.get_tier_candidates("flash")[:4]
-            deep = pool.get_tier_candidates("deep_reasoning")[:4]
+            flash = pool.get_tier_candidates("flash")
+            deep = pool.get_tier_candidates("deep_reasoning")
+            if limit_per_tier is not None and limit_per_tier > 0:
+                flash = flash[:limit_per_tier]
+                deep = deep[:limit_per_tier]
             out: list[str] = []
             for pid in [*flash, *deep]:
                 tag = f"portal:{pid}"
@@ -2298,6 +2514,31 @@ class SabrinaDesktopBridge:
         )
         return res
 
+    def run_kraken_model_review(self) -> dict[str, Any]:
+        try:
+            from sabrina_console_desktop.kraken_model_review import fetch_paper_review_data, review
+            from sabrina_console_desktop.kraken_review_cli import consult
+        except ImportError:
+            return {"ok": False, "error": "The Kraken review tools are unavailable in this Sabrina installation."}
+
+        if not self._kraken_review_lock.acquire(blocking=False):
+            return {"ok": False, "error": "A Kraken paper review is already in progress."}
+        try:
+            data = fetch_paper_review_data()
+
+            def invoke(provider, model, system, prompt):
+                result = self._invoke_provider_text(provider, model, system, prompt,
+                                                    self.vault.get_key(provider), max_reply_tokens=768)
+                if not self._isolated_test_mode:
+                    usage_ledger.record("kraken_paper_review", result)
+                return result
+
+            return review(data, invoke, subscription=consult)
+        except (ValueError, KeyError, OSError, TypeError, RuntimeError, subprocess.SubprocessError):
+            return {"ok": False, "error": "The Kraken forward paper runner did not return a usable snapshot."}
+        finally:
+            self._kraken_review_lock.release()
+
     def launch_kraken_monitor_gui(self) -> dict[str, Any]:
         """Launch the standalone Sabrina Kraken Live & $1,000 Paper Desktop Monitor window."""
         launcher = ROOT / "launch_kraken_monitor.py"
@@ -2359,6 +2600,7 @@ class SabrinaDesktopBridge:
         allow_workspace_writes: bool = False,
         parent_mission_id: str = "",
         plugin_capabilities: list[str] | None = None,
+        auto_followups: int = 0,
     ) -> dict[str, Any]:
         clean_goal = (goal or "").strip()
         if not clean_goal:
@@ -2370,6 +2612,12 @@ class SabrinaDesktopBridge:
 
         now_ts = time.time()
         chosen_mode = mode or "codex_thought_antigravity_implement"
+        if type(auto_followups) is not int or not 0 <= auto_followups <= 3:
+            return {"ok": False, "error": "Choose zero to three automatic follow-ups.", "execution_authorized": False}
+        if auto_followups and (chosen_mode != FOLLOWUP_MODE or physical_input or plugin_capabilities
+                               or parent_mission_id or (not allow_workspace_writes and release.matches_goal(clean_goal))):
+            return {"ok": False, "error": "Background follow-ups require a standard mission without interactive tools or plugin grants.",
+                    "execution_authorized": False}
         if chosen_mode == WINDOWS_POWERSHELL_MODE:
             if plugin_capabilities:
                 return {"ok": False, "error": "Plugin capabilities are unavailable in PowerShell inspection missions.", "execution_authorized": False}
@@ -2385,9 +2633,15 @@ class SabrinaDesktopBridge:
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "execution_authorized": False}
         if browser_request:
-            if plugin_capabilities:
+            if plugin_capabilities or auto_followups:
+                if auto_followups:
+                    return {"ok": False, "error": "Background follow-ups do not open a browser.", "execution_authorized": False}
                 return {"ok": False, "error": "Plugin capabilities are unavailable in browser missions.", "execution_authorized": False}
             return self.swarm_runner.launch_mission(clean_goal, browser_request=browser_request)
+        if auto_followups:
+            return self.followup_coordinator.submit(
+                clean_goal, self.swarm_runner.workspace_root, auto_followups, allow_workspace_writes,
+            )
 
         local_action_msg: str | None = None
         try:
@@ -2433,6 +2687,7 @@ class SabrinaDesktopBridge:
                 quorum_split_threshold=quorum_split_threshold,
                 enable_work_stealing=enable_work_stealing,
                 allow_workspace_writes=bool(allow_workspace_writes),
+                candidate_models=self._get_qualified_portal_candidates(),
                 **({"plugin_capabilities": plugin_capabilities} if plugin_capabilities else {}),
                 **({"parent_mission_id": parent_mission_id} if parent_mission_id else {}),
             )
@@ -2527,6 +2782,7 @@ class SabrinaDesktopBridge:
 
     def stop_mission(self, mission_id: str = "") -> dict[str, Any]:
         try:
+            background = self.followup_coordinator.stop(mission_id or None)
             if not mission_id:
                 ev_cancel = getattr(self, "_evo_bench_cancel_event", None)
                 if ev_cancel is not None:
@@ -2540,6 +2796,9 @@ class SabrinaDesktopBridge:
             state = self.swarm_runner.get_state()
             self.active_missions = list(state.get("active_missions") or [])
             if isinstance(res, dict):
+                if background:
+                    res = {**res, "ok": True, "background_stop_requested": background,
+                           "message": f"Stop requested for {len(background)} background chain(s)."}
                 return {**res, "execution_authorized": False}
             return {
                 "ok": True,
@@ -2718,6 +2977,7 @@ class SabrinaDesktopBridge:
             if restored:
                 with self._chat_lock:
                     self.chat_log = restored
+                    self._chat_log_revision += 1
         except Exception:
             pass
 
@@ -2730,7 +2990,15 @@ class SabrinaDesktopBridge:
             })
             if len(self.chat_log) > 100:
                 self.chat_log = self.chat_log[-100:]
+            self._chat_log_revision += 1
         self._save_operator_chat_log()
+
+    def get_chat_view(self) -> dict[str, Any]:
+        """Read chat state without waiting for the full dashboard snapshot."""
+        job = self.get_chat_job_status()
+        with self._chat_lock:
+            return {"chat_job": job, "chat_history": list(self.chat_log[-40:]),
+                    "chat_revision": self._chat_log_revision}
 
     def get_chat_job_status(self) -> dict[str, Any]:
         with self._chat_job_lock:
@@ -2838,6 +3106,38 @@ class SabrinaDesktopBridge:
             "chat_job": self.get_chat_job_status(),
         }
 
+    def run_signal_research(self, workspace_root: str | None = None) -> dict[str, Any]:
+        """Run one generation of the gainers signal research loop with a live swarm model.
+
+        The model proposes signals; the promotion ledger registers them before scoring and only
+        its own scoring can promote one. Research only: this path cannot place orders.
+        """
+        from tools.crypto_strategy_rsi_loop import CryptoStrategyRsiEngine, format_cycle_report
+
+        try:
+            model_id = self.swarm_runner._resolve_model_for_role("planner_architect")
+        except Exception:
+            model_id = "gemini-2.5-flash"
+        try:
+            engine = CryptoStrategyRsiEngine(
+                workspace_root=Path(workspace_root) if workspace_root else None,
+                llm_caller=self._call_swarm_llm, model_id=model_id,
+            )
+            history = []
+            if engine.history_file.is_file():
+                history = [json.loads(x) for x in engine.history_file.read_text(encoding="utf-8").splitlines() if x.strip()]
+            if history and history[-1].get("stopping_rule_triggered"):
+                return {"ok": True, "execution_authorized": False, "stopped": True,
+                        "reply": "The stopping rule was reached in generation "
+                                 f"{history[-1].get('generation')}: {history[-1].get('verdict_summary')} "
+                                 "No new generation was run. Change the inputs (new data or features) before starting again."}
+            result = engine.run_cycle(generation=1 + max((int(h.get("generation") or 0) for h in history), default=0))
+        except Exception as exc:
+            return {"ok": False, "execution_authorized": False, "error": f"Signal research failed: {exc}"}
+        return {"ok": True, "execution_authorized": False, "generation": result.generation,
+                "promoted": len(result.promoted), "disproven": len(result.disproven),
+                "reply": format_cycle_report(result, engine.last_author)}
+
     def send_chat(self, text: str, mode: str, target: str) -> dict[str, Any]:
         clean = (text or "").strip()
         if not clean:
@@ -2859,6 +3159,11 @@ class SabrinaDesktopBridge:
             from tools.plugin_console import execute_command
             res = execute_command(clean)
             self._append_chat("Plugins", res.get("reply") or res.get("error", "Plugin command failed"))
+            return res
+
+        if lower == "/signals":
+            res = self.run_signal_research()
+            self._append_chat("Signal Research", res.get("reply") or res.get("error", "Signal research failed"))
             return res
 
         if lower.startswith(("/research", "/codex", "/experiment")):
@@ -2955,10 +3260,13 @@ class SabrinaDesktopBridge:
             self._append_chat("Gemini Copilot", f"[ERROR] {res.get('message') or res.get('error')}")
             return res
 
-        if mode == "workspace_agent":
+        if mode in {"sabrina", "workspace_agent"}:
             if progress:
-                progress("Running sandboxed Workspace Agent turn…")
-            return self.send_workspace_chat(clean)
+                progress("Running Sabrina's selected workspace harness…")
+            if mode == "sabrina" and self.workspace_sandbox is None:
+                return self._chat_without_workspace(clean, cancel_event=cancel_event)
+            return self.send_workspace_chat(clean, effort="low" if mode == "sabrina" else "medium",
+                                            cancel_event=cancel_event)
 
         chosen_target = (target or "").strip()
         if mode == "hive_council" or chosen_target in ("", "hive_council"):
@@ -2997,7 +3305,11 @@ class SabrinaDesktopBridge:
                 progress(f"Querying {chosen_target}…")
             return self._dispatch_ollama_chat(chosen_target, clean)
 
-        if provider in {"gemini", "openai", "anthropic", "openrouter", "xai", "deepseek", "groq", "mistral", "together"}:
+        if provider in {
+            "gemini", "google_vertex", "aws_bedrock", "openai", "anthropic", "openrouter",
+            "xai", "deepseek", "groq", "mistral", "together",
+            "runpod", "vastai", "lambda_labs", "modal", "coreweave", "custom_gpu",
+        }:
             api_key = self.vault.get_key(provider) if hasattr(self.vault, "get_key") else None
             if not api_key:
                 err_msg = f"Provider '{provider}' is locked for model '{chosen_target}'. Add an API key in API Keys."
@@ -3339,7 +3651,7 @@ class SabrinaDesktopBridge:
             except Exception as exc:
                 return {"ok": False, "error": str(exc), "provider": "portal", "model": model_id}
 
-        if not api_key and prov not in {"pollinations", "lmstudio"}:
+        if not api_key and prov not in {"pollinations", "lmstudio", "custom_gpu"}:
             return {"ok": False, "error": f"No API key unlocked for {prov}", "provider": prov, "model": model_id}
 
         if prov != "gemini" and bare_model.startswith(f"{prov}/"):
@@ -3403,11 +3715,36 @@ class SabrinaDesktopBridge:
                     "together": "https://api.together.xyz/v1/chat/completions",
                 }
                 url = endpoints.get(prov)
+                if not url and prov in {"google_vertex", "aws_bedrock", "runpod", "vastai", "lambda_labs", "modal", "coreweave", "custom_gpu"}:
+                    cfg = self.vault.get_provider_config(prov) if hasattr(self.vault, "get_provider_config") else {}
+                    custom_base = str(cfg.get("endpoint_url") or "").strip().rstrip("/")
+                    if not custom_base:
+                        if prov == "google_vertex":
+                            region = cfg.get("region") or "us-central1"
+                            project_id = cfg.get("project_id") or "default"
+                            custom_base = f"https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{region}/endpoints/openapi"
+                        elif prov == "aws_bedrock":
+                            region = cfg.get("region") or "us-east-1"
+                            custom_base = f"https://bedrock-runtime.{region}.amazonaws.com/openai/v1"
+                        elif prov == "runpod" and cfg.get("endpoint_id"):
+                            custom_base = f"https://api.runpod.ai/v2/{cfg['endpoint_id']}/openai/v1"
+                        elif prov == "lambda_labs":
+                            custom_base = "https://api.lambdalabs.com/v1"
+                        elif prov == "custom_gpu":
+                            custom_base = "http://127.0.0.1:8000/v1"
+                    if custom_base:
+                        url = custom_base if custom_base.endswith("/chat/completions") else f"{custom_base}/chat/completions"
                 if not url:
-                    return {"ok": False, "error": f"Unsupported provider {prov}", "provider": prov, "model": model_id}
+                    return {"ok": False, "error": f"Unsupported provider {prov} (configure an OpenAI-compatible Endpoint URL in Models & API Keys).", "provider": prov, "model": model_id}
                 req_headers: dict[str, str] = {}
-                if api_key and not (prov in {"pollinations", "lmstudio"} and api_key.lower() in {"local", "open", "public", "true", "1", "enabled"}):
+                if api_key and not (prov in {"pollinations", "lmstudio", "custom_gpu"} and api_key.lower() in {"local", "open", "public", "true", "1", "enabled"}):
                     req_headers["Authorization"] = f"Bearer {api_key}"
+                if prov == "modal" and hasattr(self.vault, "get_provider_config"):
+                    m_cfg = self.vault.get_provider_config("modal")
+                    if m_cfg.get("token_id"):
+                        req_headers["Modal-Key"] = m_cfg["token_id"]
+                        if api_key:
+                            req_headers["Modal-Secret"] = api_key
                 data = _http_json(
                     url,
                     method="POST",
@@ -3417,9 +3754,15 @@ class SabrinaDesktopBridge:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
+                        **({"max_completion_tokens": max_reply_tokens}
+                           if prov == "openai" and max_reply_tokens is not None else {}),
                     },
                     headers=req_headers,
-                    timeout=25.0 if prov in {"huggingface", "cerebras", "sambanova", "fireworks", "nvidia", "github", "cohere", "perplexity", "pollinations", "lmstudio"} else 5.0,
+                    timeout=30.0 if prov in {
+                        "huggingface", "cerebras", "sambanova", "fireworks", "nvidia", "github",
+                        "cohere", "perplexity", "pollinations", "lmstudio",
+                        "google_vertex", "aws_bedrock", "runpod", "vastai", "lambda_labs", "modal", "coreweave", "custom_gpu",
+                    } else 5.0,
                 )
                 choices = data.get("choices") or []
                 reply = str(((choices[0].get("message") or {}).get("content") or "") if choices else "").strip()
@@ -3599,7 +3942,7 @@ class SabrinaDesktopBridge:
         probed_bare_by_prov: dict[str, set[str]] = {}
         try:
             pms = getattr(self.vault, "_probed_models", None) or (self.vault.get_probed_models() if hasattr(self.vault, "get_probed_models") else [])
-            for pm in pms[:60]:
+            for pm in pms:
                 pid = str(pm.get("id") or "").strip()
                 pprov = str(pm.get("provider") or "").strip().lower()
                 if pprov in unlocked and pid and not any(tok in pid.lower() for tok in non_chat_tokens):
@@ -3782,8 +4125,10 @@ class SabrinaDesktopBridge:
             )
             if res.get("ok"):
                 combined_errs = runtime_errors + [e for e in errors if e not in runtime_errors]
-                is_fallback = bool(combined_errs) or (
-                    _bare_key(prov, cand_model) != _bare_key(prov, model_id) if model_id else False
+                requested_provider = infer_model_provider(requested) if requested else ""
+                is_fallback = (
+                    (requested_provider != prov or _bare_key(prov, cand_model) != _bare_key(prov, requested))
+                    if requested else bool(runtime_errors)
                 )
                 if is_fallback:
                     res["used_fallback"] = True
@@ -3913,11 +4258,26 @@ class SabrinaDesktopBridge:
                 continue
             if is_rate_limit_err:
                 rate_limited_models.add(mkey)
-                rate_limited_models.add((prov, "*"))
+                model_scope = bool(re.search(
+                    rf"\b(?:for|on)\s+(?:the\s+)?model\s*[:=]?\s*['\"`]?"
+                    rf"(?:models/|{re.escape(prov)}/)?{re.escape(mkey[1])}(?![a-z0-9_.-])",
+                    err_low,
+                ))
+                if not model_scope:
+                    rate_limited_models.add((prov, "*"))
+                retry_after = 45.0
+                retry_match = re.search(r"\b(?:retry|try again)\s+(?:in|after)\s+((?:\d+(?:\.\d+)?\s*[hms]\s*)+)", err_low)
+                if retry_match:
+                    units = {"h": 3600.0, "m": 60.0, "s": 1.0}
+                    seconds = sum(float(value) * units[unit] for value, unit in re.findall(
+                        r"(\d+(?:\.\d+)?)\s*([hms])", retry_match.group(1)
+                    ))
+                    retry_after = max(1.0, min(86400.0, seconds))
                 with self._provider_cooldown_lock:
-                    until_rl = time.monotonic() + 45.0
+                    until_rl = time.monotonic() + retry_after
                     self._provider_cooldowns[mkey] = until_rl
-                    self._provider_cooldowns[prov] = until_rl
+                    if not model_scope:
+                        self._provider_cooldowns[prov] = until_rl
                 continue
             if prov == "ollama" and ("http 500" in err_low or "error loading model" in err_low or "llama-server process has terminated" in err_low):
                 # Crashing local Ollama model -> skip for the rest of the session
@@ -4034,6 +4394,7 @@ class SabrinaDesktopBridge:
     def clear_chat(self) -> dict[str, Any]:
         with self._chat_lock:
             self.chat_log.clear()
+            self._chat_log_revision += 1
         self._save_operator_chat_log()
         try:
             from tools.swarm_chat_portal import clear_chat_history
@@ -4114,9 +4475,15 @@ class SabrinaDesktopBridge:
         except Exception as exc:
             return {"ok": False, "error": str(exc), "providers": [], "unlocked_providers": []}
 
-    def set_vault_key(self, provider: str, api_key: str, probe: bool = True) -> dict[str, Any]:
+    def set_vault_key(
+        self,
+        provider: str,
+        api_key: str,
+        probe: bool = True,
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         try:
-            res = self.vault.set_key(provider, api_key)
+            res = self.vault.set_key(provider, api_key, config=config)
             probe_res: dict[str, Any] = {}
             if probe:
                 raw_probe = self.vault.probe_provider(provider)
@@ -4136,6 +4503,62 @@ class SabrinaDesktopBridge:
             }
         except Exception as exc:
             return {"ok": False, "error": str(exc), "provider": provider}
+
+    def set_vault_provider_config(self, provider: str, config: dict[str, Any]) -> dict[str, Any]:
+        try:
+            res = self.vault.set_provider_config(provider, config)
+            vault_status = self.get_vault_status()
+            return {"ok": True, "provider_status": res, **vault_status, "vault": vault_status}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "provider": provider}
+
+    def get_gpu_providers(self) -> dict[str, Any]:
+        try:
+            return {
+                "ok": True,
+                "providers": self.gpu_deployments.list_providers(),
+                "deployments": self.gpu_deployments.list_deployments(),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "providers": [], "deployments": []}
+
+    def list_gpu_deployments(self) -> dict[str, Any]:
+        try:
+            return {"ok": True, "deployments": self.gpu_deployments.list_deployments()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "deployments": []}
+
+    def deploy_swarm_to_gpu(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            res = self.gpu_deployments.deploy_swarm(payload)
+            if res.get("ok"):
+                self.registry.refresh_models(force=True)
+            return {**res, "deployments": self.gpu_deployments.list_deployments()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def check_gpu_deployment_status(self, deployment_id: str) -> dict[str, Any]:
+        try:
+            res = self.gpu_deployments.check_status(deployment_id)
+            return {**res, "deployments": self.gpu_deployments.list_deployments()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def terminate_gpu_deployment(self, deployment_id: str) -> dict[str, Any]:
+        try:
+            res = self.gpu_deployments.terminate_deployment(deployment_id)
+            return {**res, "deployments": self.gpu_deployments.list_deployments()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def register_gpu_deployment_model(self, deployment_id: str) -> dict[str, Any]:
+        try:
+            res = self.gpu_deployments.register_deployment_model(deployment_id)
+            if res.get("ok"):
+                self.registry.refresh_models(force=True)
+            return {**res, "deployments": self.gpu_deployments.list_deployments()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     def delete_vault_key(self, provider: str) -> dict[str, Any]:
         try:
@@ -4201,9 +4624,9 @@ class SabrinaDesktopBridge:
                 "Respond ONLY with valid JSON (no markdown fences) matching this JSON schema:\n"
                 + json.dumps(response_schema)
             )
-        result = self._call_private_swarm_llm("coordinator", "", sys_inst, prompt)
+        result = self._call_swarm_llm("coordinator", "", sys_inst, prompt)
         if not result.get("ok"):
-            raise RuntimeError(str(result.get("error") or "Private Ollama route unavailable."))
+            raise RuntimeError(str(result.get("error") or "LLM route unavailable."))
         raw = str(result.get("text") or "")
         cleaned = raw.strip()
         if cleaned.startswith("```"):
@@ -4260,7 +4683,7 @@ class SabrinaDesktopBridge:
             "'Enter a mission goal for the swarm...'. Reply ending with: RECOMMENDED_NEXT_GOAL: <single-line prompt>"
         )
         usr_p = f"Current Goal: {seed_goal}\n\nLatest Swarm Output:\n{report_excerpt}"
-        llm_res = self._call_private_swarm_llm("coordinator", "", sys_p, usr_p)
+        llm_res = self._call_swarm_llm("coordinator", "", sys_p, usr_p)
         rec_goal = extract_recommended_next_goal(
             str(llm_res.get("text") or "") if isinstance(llm_res, dict) else "",
             seed_goal,
@@ -4729,14 +5152,22 @@ class SabrinaDesktopBridge:
 
     def load_preset_swarm_schema(self, preset_name: str = "crypto_market_research") -> dict[str, Any]:
         """Load a predefined swarm schema preset (e.g. crypto_market_research or security_audit)."""
-        preset_clean = str(preset_name or "crypto_market_research").strip().lower()
-        candidates = [
-            self._swarm_schema_path.parent / "crypto_market_research_schema.json",
-            ROOT / "data" / "control" / "crypto_market_research_schema.json",
-        ] if preset_clean in ("crypto", "crypto_market", "crypto_market_research") else [
-            self._swarm_schema_path.parent / f"{preset_clean}_schema.json",
-            ROOT / "data" / "control" / f"{preset_clean}_schema.json",
-        ]
+        preset_clean = str(preset_name or "m_eulerian_rsi").strip().lower()
+        if preset_clean in ("crypto", "crypto_market", "crypto_market_research"):
+            candidates = [
+                self._swarm_schema_path.parent / "crypto_market_research_schema.json",
+                ROOT / "data" / "control" / "crypto_market_research_schema.json",
+            ]
+        elif preset_clean in ("m_eulerian", "m_eulerian_rsi", "eulerian", "rsi"):
+            candidates = [
+                self._swarm_schema_path.parent / "m_eulerian_rsi_schema.json",
+                ROOT / "data" / "control" / "m_eulerian_rsi_schema.json",
+            ]
+        else:
+            candidates = [
+                self._swarm_schema_path.parent / f"{preset_clean}_schema.json",
+                ROOT / "data" / "control" / f"{preset_clean}_schema.json",
+            ]
 
         schema_file = next((p for p in candidates if p.is_file()), candidates[0])
         if not schema_file.is_file():
@@ -4815,6 +5246,7 @@ class SabrinaDesktopBridge:
                     coordinator_count=topo.get("coordinator_count"),
                     workers_per_coordinator=topo.get("workers_per_coordinator"),
                     topology_mode=topo.get("topology_mode"),
+                    branching_order=topo.get("branching_order"),
                     quorum_split_threshold=topo.get("quorum_split_threshold"),
                     quorum_prune_threshold=topo.get("quorum_prune_threshold"),
                     enable_work_stealing=topo.get("enable_work_stealing"),
@@ -4851,19 +5283,20 @@ class SabrinaDesktopBridge:
         self,
         coordinator_count: int = 1,
         workers_per_coordinator: int = 4,
-        topology_mode: str = "elastic_stigmergy",
+        topology_mode: str = "m_eulerian_join_cut",
         quorum_split_threshold: int = 6,
         enable_work_stealing: bool = True,
+        branching_order: int = 3,
     ) -> dict[str, Any]:
-        """Configure and persist coordinator-to-worker ratio & elastic stigmergy settings."""
+        """Configure and persist coordinator-to-worker ratio & topology settings."""
         try:
             cfg = self.swarm_runner.configure_topology(
                 coordinator_count=coordinator_count,
                 workers_per_coordinator=workers_per_coordinator,
                 topology_mode=topology_mode,
+                branching_order=branching_order,
                 quorum_split_threshold=quorum_split_threshold,
                 enable_work_stealing=enable_work_stealing,
-                allow_workspace_writes=bool(allow_workspace_writes),
             )
             return {"ok": True, **cfg, "execution_authorized": False}
         except Exception as exc:
@@ -5266,11 +5699,166 @@ class SabrinaDesktopBridge:
         except WorkspaceSandboxError as exc:
             return {"ok": False, "error": str(exc)}
 
+    def _console_info(self, section: str, query: str = "", offset: int = 0) -> dict[str, Any]:
+        """Return bounded, read-only facts for the native agent's self-inspection tool."""
+        if section == "skill_detail":
+            if (not isinstance(query, str) or not query.strip() or len(query) > 200
+                    or isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset <= 32768):
+                return {"ok": False, "error": "An exact skill ID and a valid offset are required."}
+            skill_id = query.strip()
+            detail = self.registry.get_skill_detail(skill_id)
+            if detail is None:
+                self.registry.refresh_skills(force=True)
+                detail = self.registry.get_skill_detail(skill_id)
+            if detail is None:
+                return {"ok": False, "error": "Skill not found in the current registry."}
+            content = str(detail.get("content") or "")
+            if not content:
+                return {"ok": False, "error": "The skill's instructions could not be read."}
+            if offset > len(content):
+                return {"ok": False, "error": "The skill offset is past the available instructions."}
+            end = min(len(content), offset + 1800)
+            while True:
+                result = {"ok": True, "skill": {
+                    "id": str(detail.get("id") or "")[:200],
+                    "name": str(detail.get("name") or "")[:200],
+                    "instructions": content[offset:end],
+                    "offset": offset,
+                    "next_offset": end if end < len(content) else None,
+                    "available_characters": len(content),
+                    "registry_may_have_truncated": len(content) >= 32768,
+                }}
+                if len(json.dumps(result, ensure_ascii=False)) <= 3000 or end == offset:
+                    return result
+                end = offset + (end - offset) * 3 // 4
+        if section == "skills":
+            result = self.search_skills(query=query, limit=8)
+            return {"ok": bool(result.get("ok")), "total": result.get("total", 0),
+                    "skills": [{key: str(item.get(key) or "")[:limit]
+                                for key, limit in (("id", 100), ("name", 80), ("description", 80), ("source", 30))}
+                               for item in result.get("items", []) if isinstance(item, dict)],
+                    **({"error": result.get("error")} if result.get("error") else {})}
+        if section == "plugins":
+            from tools.plugin_console import discover
+            plugins, errors = discover()
+            matched = [p for name, p in sorted(plugins.items())
+                       if not query or query.lower() in (name + " " + str(p.get("description") or "")).lower()]
+            return {"ok": True, "total": len(matched),
+                    "plugins": [{"name": p["name"], "description": str(p.get("description") or "")[:160],
+                                 "access": p.get("access")} for p in matched[:10]],
+                    "discovery_error_count": len(errors),
+                    "execution": "Listing a plugin does not grant permission to run it. The /plugin command is available to the operator; agent requests require an explicitly scoped plugin request and the workspace policy."}
+
+        sandbox = self.workspace_sandbox
+        tool_states = []
+        for name in sorted(TOOL_INPUT_MODELS):
+            if sandbox is None:
+                state = "unavailable: no workspace attached"
+            else:
+                permitted, reason = sandbox.check_policy(name)
+                if not permitted:
+                    state = reason
+                elif name in MUTATING_TOOLS and self.workspace_mode == "read_only":
+                    state = "blocked: workspace is read-only"
+                elif name in MUTATING_TOOLS and self.workspace_mode == "approve_writes":
+                    state = "requires operator approval"
+                else:
+                    state = "available within the workspace"
+            tool_states.append({"name": name, "state": state})
+        with self._remote_lock:
+            checked = self._remote_last_ts > 0
+            api_ok = bool(self._remote_cache.get("api_ok"))
+            model_count = len(self._remote_cache.get("ollama_models") or [])
+            age = round(max(0.0, time.monotonic() - self._remote_last_ts), 1) if checked else None
+        return {
+            "ok": True,
+            "identity": "Sabrina Console's workspace agent",
+            "active_harness": self.harness_registry.active_harness_id,
+            "workspace": {"attached": sandbox is not None, "root": str(sandbox.root) if sandbox else None,
+                          "mode": self.workspace_mode,
+                          "policy": sandbox.policy_profile if sandbox else self.workspace_policy_profile},
+            "tools": tool_states,
+            "console_info_tool": "Read-only; can inspect overview, status, tools, plugins and skills.",
+            "plugin_access": "Plugin discovery is not plugin execution. Agent plugin requests require explicit scope and policy permission; the operator can use /plugin commands.",
+            "operator_commands": ["/status", "/skills", "/plugin", "/mission", "/research"],
+            "cached_connections": {"checked": checked, "age_seconds": age,
+                                   "swarm_api": ("reachable" if api_ok else "unreachable") if checked else "not checked",
+                                   "ollama_models_reported": model_count if checked else None},
+        }
+
+    def _chat_without_workspace(self, message: str, *, cancel_event: threading.Event | None = None) -> dict[str, Any]:
+        if cancel_event is not None and cancel_event.is_set():
+            return {"ok": False, "cancelled": True}
+        key = self._workspace_gemini_key() or os.environ.get("GEMINI_API_KEY", "").strip()
+        if not key:
+            error = "Sabrina chat needs an unlocked Gemini key. Select a direct model or council, or add a Gemini key."
+            self._append_chat("Sabrina", error)
+            return {"ok": False, "error": error}
+        facts = self._console_info("overview")
+        system = ("You are Sabrina, the assistant in Sabrina Console. Answer concisely and honestly. "
+                  "No workspace is attached and this chat has no callable tools. Do not claim to have acted. "
+                  "To use workspace tools, the operator can open a folder in the Workspace panel. "
+                  "Current console information: " + json.dumps(facts, ensure_ascii=False))
+        result = self._invoke_provider_text("gemini", DEFAULT_GEMINI_MODEL, system, message, api_key=key)
+        if cancel_event is not None and cancel_event.is_set():
+            return {"ok": False, "cancelled": True}
+        if not result.get("ok") or not str(result.get("text") or "").strip():
+            error = str(result.get("error") or "Sabrina returned an empty response.")
+            self._append_chat("Sabrina Error", error)
+            return {"ok": False, "error": error}
+        reply = str(result["text"]).strip()
+        self._append_chat("Sabrina", reply)
+        return {"ok": True, "reply": reply, "workspace_attached": False}
+
+    def _requested_workspace_skills(self, message: str) -> tuple[str, list[dict[str, Any]]]:
+        """Deliver expressly named registry skills without expanding tool authority."""
+        patterns = (
+            r"\b(?:use|apply|follow|using)\s+(?:the\s+)?[`'\"]?([a-z0-9][a-z0-9_-]{0,127})[`'\"]?\s+skill\b",
+            r"\b(?:use|apply|follow|using)\s+(?:the\s+)?skill\s+[`'\"]?([a-z0-9][a-z0-9_-]{0,127})\b",
+            r"\b(?:use|apply|follow|using)\s+(?:the\s+)?[`'\"]?([a-z0-9][a-z0-9_-]*[-_][a-z0-9_-]+)\b",
+            r"\b(?:and|with)\s+(?:the\s+)?[`'\"]?([a-z0-9][a-z0-9_-]{0,127})[`'\"]?\s+skill\b",
+            r"(?<!\w)\$([a-z0-9][a-z0-9_-]{0,127})\b",
+        )
+        matches = sorted((m for pattern in patterns for m in re.finditer(pattern, message, re.I)), key=lambda m: m.start())
+        parts: list[str] = []
+        loaded: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        forced_refresh = False
+        for match in matches:
+            if re.search(r"\b(?:do\s+not|don't|never|not)\s*$", message[max(0, match.start() - 20):match.start()], re.I):
+                continue
+            if re.match(r"(?:and|with)\b", match.group(0), re.I):
+                clause = re.split(r"[.!?;\n]", message[max(0, match.start() - 160):match.start()])[-1]
+                if re.search(r"\b(?:do\s+not|don't|never)\s+(?:use|apply|follow)\b", clause, re.I):
+                    continue
+            skill_id = match.group(1).lower()
+            if skill_id in seen or len(loaded) >= 4:
+                continue
+            seen.add(skill_id)
+            try:
+                detail = self.registry.get_skill_detail(skill_id)
+                if not detail and not forced_refresh:
+                    self.registry.refresh_skills(force=True)
+                    forced_refresh = True
+                    detail = self.registry.get_skill_detail(skill_id)
+            except Exception:
+                continue
+            content = str((detail or {}).get("content") or "")
+            if not content:
+                continue
+            excerpt = content[:8000]
+            truncated = len(content) > len(excerpt)
+            parts.append(f"<registry-skill id=\"{skill_id}\">\n{excerpt}\n</registry-skill>" +
+                         (f"\nSkill truncated; use get_console_info skill_detail for {skill_id} and its offsets." if truncated else ""))
+            loaded.append({"id": skill_id, "loaded_chars": len(excerpt), "truncated": truncated})
+        return "\n\n".join(parts), loaded
+
     def send_workspace_chat(
         self,
         message: str,
         model: str = DEFAULT_GEMINI_MODEL,
         effort: str = "medium",
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         try:
             with self._workspace_agent_lock:
@@ -5284,6 +5872,8 @@ class SabrinaDesktopBridge:
                 harness_id = self.harness_registry.active_harness_id
                 if harness_id != NATIVE_HARNESS_ID:
                     res = self.run_harness_turn(message, harness_id=harness_id)
+                    if cancel_event is not None and cancel_event.is_set():
+                        return {"ok": False, "cancelled": True}
                     label = res.get("run_meta", {}).get("harness_name", harness_id)
                     if res.get("ok"):
                         self._append_chat(label, res["reply"])
@@ -5304,7 +5894,15 @@ class SabrinaDesktopBridge:
                     self.workspace_agent = agent
                     self._workspace_agent_revision = profile.revision
                 revision = self._workspace_agent_revision
-                res = agent.send_message(message, model=model, thinking_level=effort)
+                agent.console_info_provider = lambda section, query, offset=0: {
+                    **self._console_info(section, query, offset), "model": model,
+                }
+                skill_guidance, registry_skills = self._requested_workspace_skills(message)
+                res = agent.send_message(message, model=model, thinking_level=effort, cancel_event=cancel_event,
+                                         skill_guidance=skill_guidance)
+                res["registry_skills"] = registry_skills
+                if res.get("cancelled") or (cancel_event is not None and cancel_event.is_set()):
+                    return {**res, "ok": False, "cancelled": True}
             for hev in res.get("harness_events") or []:
                 self.swarm_runner.record_harness_event(
                     {**hev, "harness_id": NATIVE_HARNESS_ID}
@@ -5313,9 +5911,13 @@ class SabrinaDesktopBridge:
             if events:
                 lines = [f"• {e['tool']} ({e['status']}): {e.get('arguments', {}).get('path', '.')}" for e in events]
                 self._append_chat("Workspace Tools", "\n".join(lines))
-            self.swarm_runner.workspace_tracker.scan_delta(force=True)
             self._append_chat(f"Workspace Agent ({res.get('model')})", res.get("reply", ""))
-            return {**res, "harness_id": NATIVE_HARNESS_ID, "harness_revision": revision, "workspace": self.get_workspace_status()}
+            if any(e.get("status") == "executed" and e.get("tool") in MUTATING_TOOLS for e in events):
+                self.swarm_runner.workspace_tracker.scan_delta(force=True)
+            result = {**res, "harness_id": NATIVE_HARNESS_ID, "harness_revision": revision}
+            if cancel_event is None:
+                result["workspace"] = self.get_workspace_status()
+            return result
         except GeminiCopilotError as exc:
             self._append_chat("Workspace Agent Error", str(exc))
             return {"ok": False, "error": str(exc), "code": exc.code}
@@ -5825,7 +6427,7 @@ class SabrinaDesktopBridge:
             try:
                 db_kw = {"db_path": self._evo_bench_db_path} if getattr(self, "_evo_bench_db_path", None) else {}
                 bench = SwarmEvoBenchmarkRunner(
-                    llm_caller=self._call_private_swarm_llm,
+                    llm_caller=self._call_swarm_llm,
                     max_llm_calls_per_task=eff_calls,
                     max_tokens_per_round=eff_budget,
                     progress_cb=_on_progress,
@@ -5995,5 +6597,9 @@ def run_desktop_ui() -> None:
 
 
 if __name__ == "__main__":
-    run_desktop_ui()
+    if sys.argv[1:2] == ["--followup-coordinator"] and len(sys.argv) == 3:
+        from followup_coordinator import run_worker
+        run_worker(sys.argv[2])
+    else:
+        run_desktop_ui()
 

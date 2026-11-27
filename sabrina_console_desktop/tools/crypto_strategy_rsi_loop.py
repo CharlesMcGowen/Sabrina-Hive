@@ -30,8 +30,12 @@ if str(REPO_ROOT / "sabrina_console_desktop") not in sys.path:
 
 from tools.gainers_signal_scorer import Market, validate_signals_json_text, score, load_market
 from tools.swarm_search_hydrator import SwarmSearchHydrator
+from tools.signal_promotion_gate import SignalGate
 
 logger = logging.getLogger(__name__)
+
+# Author label for the built-in template signals used when no model caller is configured.
+TEMPLATE_AUTHOR = "template_no_model"
 
 
 @dataclass
@@ -58,7 +62,11 @@ class CryptoStrategyRsiEngine:
         max_generations: int = 4,
         max_validation_retries: int = 3,
         cost_round_trip: float = 0.013,
+        model_id: str = "gemini-2.5-flash",
     ):
+        self.model_id = model_id
+        # Who actually wrote the last accepted proposal: "provider/model", or the template marker.
+        self.last_author = TEMPLATE_AUTHOR
         self.workspace_root = Path(workspace_root or REPO_ROOT).resolve()
         self.market = market
         self.llm_caller = llm_caller
@@ -73,6 +81,9 @@ class CryptoStrategyRsiEngine:
         self.disproven_file = self.artifacts_dir / "disproven_signals.jsonl"
         self.promoted_file = self.artifacts_dir / "promoted_signals.json"
         self.history_file = self.artifacts_dir / "rsi_run_history.jsonl"
+        # Every proposal is hashed into the ledger before it is scored, and only the gate's
+        # own scoring can promote one. See tools/signal_promotion_gate.py.
+        self.gate = SignalGate(root=self.artifacts_dir / "ledger", market=market, cost=cost_round_trip)
 
     def load_disproven_history(self) -> List[Dict[str, Any]]:
         if not self.disproven_file.is_file():
@@ -139,16 +150,29 @@ class CryptoStrategyRsiEngine:
             '      {"feature": "range_pos", "n": 60, "op": ">=", "value": 0.80},\n'
             '      {"feature": "usd_vol", "n": 96, "op": ">=", "value": 50000}\n'
             "    ],\n"
-            '    "barriers": {"up_pct": 5, "down_pct": 1, "max_hold_bars": 324},\n'
-            '    "cooldown_bars": 24\n'
+            '    "barriers": {"up_pct": 12, "down_pct": 6, "max_hold_bars": 384},\n'
+            '    "cooldown_bars": 96\n'
             "  }\n"
             "]\n"
+            "(The example shows the format only. Its thresholds are not a recommendation.)\n"
+            "\n"
+            "MEASURED FACTS (15-minute Kraken USD bars, July-September 2026 and 19-26 November 2026):\n"
+            "- Round-trip cost is about 1.3% (0.4% taker fee each side plus spread).\n"
+            "- Break-even hit rate = down_pct/(up_pct+down_pct) + 1.3/(up_pct+down_pct). With a 5% target and\n"
+            "  1% stop that is 38%, a 22-point lift over random entry; no signal has come close. Wider barriers\n"
+            "  need far less lift (12%/6%: 40.6% needed vs 33.3% random; 30%/10%: 28.3% vs 25%).\n"
+            "- Coins entering the 24h top-ten gainers list had already risen a median 13.7% in 24h and then fell\n"
+            "  on average (-2% over the next 24h). Entering after a coin has already risen has lost every test.\n"
+            "- Volume ratios did not lead price moves at 15-minute resolution.\n"
             "\n"
             "STRICT RULES:\n"
             "- 'drawdown_from_high' MUST BE NON-POSITIVE (e.g. <= -0.05 for 5% pullback, NEVER positive).\n"
             "- 'usd_vol' is total dollar volume summed over lookback n. MUST include at least one usd_vol >= 50000 liquidity floor per signal.\n"
             "- 'up_pct' and 'down_pct' are percentages (e.g. 5 and 1, NOT 0.05 or 0.01).\n"
             "- Available features: ret, vol_ratio, usd_vol, range_pos, drawdown_from_high, volatility, btc_ret, breadth.\n"
+            "- 'range_pos' and 'breadth' are shares from 0 to 1. 'ret', 'btc_ret' and 'drawdown_from_high' are fractions.\n"
+            "- up_pct 0.5-200, down_pct 0.5-50, max_hold_bars 1-672 (672 bars = 7 days), lookback n 1-400 bars.\n"
+            "- Do not resubmit a signal listed under Negative Lessons, or a small variation of one.\n"
         )
 
         user_parts = [
@@ -210,10 +234,17 @@ class CryptoStrategyRsiEngine:
 
         while retries <= self.max_validation_retries:
             if self.llm_caller:
-                resp = self.llm_caller("planner_architect", "gemini-2.5-flash", system_prompt, current_prompt)
-                raw_text = str(resp.get("text", "") or resp.get("response", ""))
+                resp = self.llm_caller("planner_architect", self.model_id, system_prompt, current_prompt)
+                raw_text = str(resp.get("text", "") or resp.get("reply", "") or resp.get("response", ""))
+                if resp.get("ok") is False or not raw_text.strip():
+                    # A failed call is not a validation error: stop instead of "repairing" nothing.
+                    return False, [], retries, f"Model call failed: {resp.get('error') or 'empty reply'}"
+                self.last_author = f"{resp.get('provider') or 'unknown'}/{resp.get('model') or self.model_id}"
+                if resp.get("used_fallback"):
+                    self.last_author += f" (fallback from {resp.get('requested_model') or self.model_id})"
             else:
                 raw_text = default_fallback_caller(system_prompt, current_prompt)
+                self.last_author = TEMPLATE_AUTHOR
 
             ok, parsed, err_msg = validate_signals_json_text(raw_text)
             if ok and parsed:
@@ -256,32 +287,34 @@ class CryptoStrategyRsiEngine:
             try:
                 self.market = load_market()
             except Exception as e:
-                logger.warning("Could not load full market: %s. Using mocked scoring.", e)
+                logger.warning("Could not load full market: %s. Signals will be registered but not scored.", e)
+        self.gate._market = self.market
 
         scored_results = []
         promoted = []
         disproven = []
+        unscored = 0
+        author = f"rsi_gen{generation}:{self.last_author}"
 
         for sig in signals:
-            if self.market:
-                try:
-                    res = score(sig, self.market, self.cost)
-                except Exception as e:
-                    res = {"name": sig.get("name"), "verdict": "error", "error": str(e)}
+            registered = self.gate.register(sig, author)
+            if not registered["ok"]:
+                # e.g. the same name re-proposed with different thresholds after its score is known
+                res = {"name": sig.get("name"), "verdict": "not_registered", "error": registered["error"]}
             else:
-                # Simulated score conforming to BarrierEdge condition
-                res = {
-                    "name": sig.get("name"),
-                    "verdict": "fails",
-                    "overall": {"hit_rate_pct": 21.0, "mean_net_pct": -0.85},
-                    "holdout_last_40pct": {"hit_rate_pct": 20.5, "mean_net_pct": -0.92},
-                    "required_hit_rate_pct": 38.33,
-                }
+                evaluated = self.gate.evaluate(registered["artifact_id"], author)
+                res = evaluated["score"]
+                if res is None:
+                    # Nothing was measured. Never invent a score, and never file it as disproven.
+                    unscored += 1
+                    scored_results.append({"name": sig.get("name"), "verdict": "unscored", "error": evaluated["error"]})
+                    continue
+                res = {**res, "signal_id": registered["artifact_id"], "candidate_finalized": evaluated["ok"]}
 
             scored_results.append(res)
 
             verdict = res.get("verdict")
-            if verdict == "clears_the_bar_on_this_sample":
+            if res.get("candidate_finalized"):
                 promoted.append(res)
             else:
                 disproven_item = {
@@ -297,9 +330,11 @@ class CryptoStrategyRsiEngine:
             self.record_promoted(promoted)
 
         # Stopping rule: halt if generation >= max_generations and no promoted candidates
-        stopping_rule = bool(generation >= self.max_generations and not promoted)
+        # An unscored generation proves nothing, so it cannot trigger the stopping rule.
+        stopping_rule = bool(generation >= self.max_generations and not promoted and not unscored)
         verdict = (
-            f"Gen {generation}: {len(promoted)} promoted, {len(disproven)} disproven."
+            f"Gen {generation}: {len(promoted)} promoted, {len(disproven)} disproven"
+            + (f", {unscored} unscored (no market data)." if unscored else ".")
             if not stopping_rule
             else f"STOPPING RULE REACHED at Gen {generation}. No pre-registered candidate cleared holdout bar. Falsification confirmed."
         )
@@ -328,6 +363,29 @@ class CryptoStrategyRsiEngine:
             if res.promoted or res.stopping_rule_triggered:
                 break
         return history
+
+
+def format_cycle_report(res: RsiGenerationResult, author: str) -> str:
+    """Plain-text summary of one generation for the console chat. Measured numbers only."""
+    lines = [
+        f"Signal research, generation {res.generation}. Proposed by: {author}.",
+        f"{res.verdict_summary} Format retries: {res.validation_retries}.",
+    ]
+    for s in res.scores:
+        overall = s.get("overall") or {}
+        if s.get("verdict") in ("unscored", "not_registered"):
+            lines.append(f"- {s.get('name')}: {s.get('verdict')} ({s.get('error')})")
+        else:
+            lines.append(
+                f"- {s.get('name')}: {s.get('verdict')}; {overall.get('trades')} trades; "
+                f"hit rate {overall.get('hit_rate_pct')}% vs required {s.get('required_hit_rate_pct')}%; "
+                f"mean net {overall.get('mean_net_pct')}% per trade"
+                + ("; FINALIZED AS CANDIDATE" if s.get("candidate_finalized") else "")
+            )
+    if author == TEMPLATE_AUTHOR:
+        lines.append("No model was used: these are the built-in template signals.")
+    lines.append("Research only. A candidate is a signal for the forward paper run, not an order. execution_authorized=false")
+    return "\n".join(lines)
 
 
 def main() -> None:

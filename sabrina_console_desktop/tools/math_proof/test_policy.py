@@ -72,6 +72,26 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "still exists"):
             recover_own_reservation(client)
 
+    def test_exited_previous_executor_releases_reservation(self):
+        import socket
+        import subprocess
+        import sys
+        from unittest.mock import Mock, patch
+        from .worker import recover_own_reservation
+        client = Mock()
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        with subprocess.Popen([sys.executable, "-c", "pass"], creationflags=flags) as child:
+            self.assertEqual(child.wait(timeout=10), 0)
+            client.request.return_value = {"leases": [{
+                "resource": "compute:lab", "state": "uncertain", "owner": "sabrina-math-proof:123",
+                "executor": {"pid": child.pid, "host": socket.gethostname()},
+            }]}
+            with patch("subprocess.check_output", return_value="") as docker_ps:
+                recover_own_reservation(client)
+        docker_ps.assert_called_once_with(["docker", "ps", "--format", "{{.Names}}"], text=True)
+        client.request.assert_called_with("/v1/leases/reconcile",
+                                          {"resource": "compute:lab", "confirmed_stopped": True})
+
 
 if __name__ == "__main__":
     unittest.main()

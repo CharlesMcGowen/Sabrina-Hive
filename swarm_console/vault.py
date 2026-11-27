@@ -20,6 +20,8 @@ from .registry import normalize_model_record, normalize_openrouter_catalog
 
 SUPPORTED_PROVIDERS: tuple[str, ...] = (
     "gemini",
+    "google_vertex",
+    "aws_bedrock",
     "openai",
     "anthropic",
     "openrouter",
@@ -36,6 +38,12 @@ SUPPORTED_PROVIDERS: tuple[str, ...] = (
     "groq",
     "mistral",
     "together",
+    "runpod",
+    "vastai",
+    "lambda_labs",
+    "modal",
+    "coreweave",
+    "custom_gpu",
     "pollinations",
     "lmstudio",
     "ollama",
@@ -44,120 +52,237 @@ SUPPORTED_PROVIDERS: tuple[str, ...] = (
 PROVIDER_METADATA: dict[str, dict[str, Any]] = {
     "gemini": {
         "label": "Google Gemini",
+        "category": "model_api",
         "env_vars": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         "endpoint": "https://generativelanguage.googleapis.com/v1beta/models",
         "auth_type": "x-goog-api-key",
     },
+    "google_vertex": {
+        "label": "Google Cloud / Vertex AI",
+        "category": "cloud_platform",
+        "env_vars": ("GOOGLE_CLOUD_API_KEY", "VERTEX_AI_API_KEY", "GCP_ACCESS_TOKEN"),
+        "endpoint": "https://{region}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{region}/endpoints/openapi/models",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "project_id", "label": "GCP Project ID", "placeholder": "my-gcp-project", "default": ""},
+            {"key": "region", "label": "Region", "placeholder": "us-central1", "default": "us-central1"},
+            {"key": "endpoint_url", "label": "Custom OpenAI/Inference URL (optional)", "placeholder": "https://us-central1-aiplatform.googleapis.com/v1beta1/...", "default": ""},
+        ),
+    },
+    "aws_bedrock": {
+        "label": "Amazon AWS (Bedrock & EC2 GPU)",
+        "category": "cloud_platform",
+        "env_vars": ("AWS_BEARER_TOKEN_BEDROCK", "AWS_SECRET_ACCESS_KEY", "AWS_BEDROCK_API_KEY"),
+        "endpoint": "https://bedrock-runtime.{region}.amazonaws.com/openai/v1/models",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "region", "label": "AWS Region", "placeholder": "us-east-1", "default": "us-east-1"},
+            {"key": "access_key_id", "label": "AWS Access Key ID (optional for EC2/IAM)", "placeholder": "AKIA...", "default": ""},
+            {"key": "endpoint_url", "label": "Custom Bedrock / vLLM Endpoint (optional)", "placeholder": "https://bedrock-runtime.us-east-1.amazonaws.com/openai/v1", "default": ""},
+        ),
+    },
     "openai": {
         "label": "OpenAI",
+        "category": "model_api",
         "env_vars": ("OPENAI_API_KEY",),
         "endpoint": "https://api.openai.com/v1/models",
         "auth_type": "bearer",
     },
     "anthropic": {
         "label": "Anthropic",
+        "category": "model_api",
         "env_vars": ("ANTHROPIC_API_KEY",),
         "endpoint": "https://api.anthropic.com/v1/models",
         "auth_type": "anthropic",
     },
     "openrouter": {
         "label": "OpenRouter",
+        "category": "model_api",
         "env_vars": ("OPENROUTER_API_KEY",),
         "endpoint": "https://openrouter.ai/api/v1/models",
         "auth_type": "bearer",
     },
     "huggingface": {
         "label": "HuggingFace Router & Inference",
+        "category": "model_api",
         "env_vars": ("HF_TOKEN", "HUGGINGFACE_API_KEY", "HUGGINGFACEHUB_API_TOKEN"),
         "endpoint": "https://router.huggingface.co/v1/models",
         "auth_type": "bearer",
     },
     "cerebras": {
         "label": "Cerebras (Wafer-Scale)",
+        "category": "model_api",
         "env_vars": ("CEREBRAS_API_KEY",),
         "endpoint": "https://api.cerebras.ai/v1/models",
         "auth_type": "bearer",
     },
     "sambanova": {
         "label": "SambaNova Cloud",
+        "category": "model_api",
         "env_vars": ("SAMBANOVA_API_KEY",),
         "endpoint": "https://api.sambanova.ai/v1/models",
         "auth_type": "bearer",
     },
     "fireworks": {
         "label": "Fireworks AI",
+        "category": "model_api",
         "env_vars": ("FIREWORKS_API_KEY",),
         "endpoint": "https://api.fireworks.ai/inference/v1/models",
         "auth_type": "bearer",
     },
     "nvidia": {
         "label": "NVIDIA NIM",
+        "category": "model_api",
         "env_vars": ("NVIDIA_API_KEY", "NGC_API_KEY"),
         "endpoint": "https://integrate.api.nvidia.com/v1/models",
         "auth_type": "bearer",
     },
     "github": {
         "label": "GitHub Models (Azure AI)",
+        "category": "model_api",
         "env_vars": ("GITHUB_MODELS_TOKEN",),
         "endpoint": "https://models.inference.ai.azure.com/models",
         "auth_type": "bearer",
     },
     "cohere": {
         "label": "Cohere",
+        "category": "model_api",
         "env_vars": ("COHERE_API_KEY", "CO_API_KEY"),
         "endpoint": "https://api.cohere.com/v1/models",
         "auth_type": "bearer",
     },
     "perplexity": {
         "label": "Perplexity Sonar",
+        "category": "model_api",
         "env_vars": ("PERPLEXITY_API_KEY", "PPLX_API_KEY"),
         "endpoint": "https://api.perplexity.ai/models",
         "auth_type": "bearer",
     },
     "xai": {
         "label": "xAI (Grok)",
+        "category": "model_api",
         "env_vars": ("XAI_API_KEY",),
         "endpoint": "https://api.x.ai/v1/models",
         "auth_type": "bearer",
     },
     "deepseek": {
         "label": "DeepSeek",
+        "category": "model_api",
         "env_vars": ("DEEPSEEK_API_KEY",),
         "endpoint": "https://api.deepseek.com/models",
         "auth_type": "bearer",
     },
     "groq": {
         "label": "Groq",
+        "category": "model_api",
         "env_vars": ("GROQ_API_KEY",),
         "endpoint": "https://api.groq.com/openai/v1/models",
         "auth_type": "bearer",
     },
     "mistral": {
         "label": "Mistral AI",
+        "category": "model_api",
         "env_vars": ("MISTRAL_API_KEY",),
         "endpoint": "https://api.mistral.ai/v1/models",
         "auth_type": "bearer",
     },
     "together": {
         "label": "Together AI",
+        "category": "model_api",
         "env_vars": ("TOGETHER_API_KEY",),
         "endpoint": "https://api.together.xyz/v1/models",
         "auth_type": "bearer",
     },
+    "runpod": {
+        "label": "RunPod (GPU Pods & Serverless)",
+        "category": "gpu_pod",
+        "env_vars": ("RUNPOD_API_KEY",),
+        "endpoint": "https://rest.runpod.io/v1/pods",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "endpoint_id", "label": "Serverless Endpoint ID (optional)", "placeholder": "e.g. vllm-abc123", "default": ""},
+            {"key": "endpoint_url", "label": "OpenAI-Compat Inference URL (optional)", "placeholder": "https://api.runpod.ai/v2/<endpoint_id>/openai/v1", "default": ""},
+            {"key": "gpu_type", "label": "Default GPU Type", "placeholder": "NVIDIA RTX 4090", "default": "NVIDIA RTX 4090"},
+            {"key": "cloud_type", "label": "Cloud Type", "placeholder": "SECURE or COMMUNITY", "default": "SECURE"},
+        ),
+    },
+    "vastai": {
+        "label": "Vast.ai (GPU Marketplace)",
+        "category": "gpu_pod",
+        "env_vars": ("VAST_API_KEY", "VASTAI_API_KEY"),
+        "endpoint": "https://console.vast.ai/api/v0/instances/",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "endpoint_url", "label": "OpenAI-Compat Inference URL (optional)", "placeholder": "https://<pod-host>:<port>/v1", "default": ""},
+            {"key": "gpu_type", "label": "Default GPU Type", "placeholder": "RTX 4090", "default": "RTX 4090"},
+            {"key": "disk_gb", "label": "Default Disk (GB)", "placeholder": "50", "default": "50"},
+        ),
+    },
+    "lambda_labs": {
+        "label": "Lambda Cloud (GPU Instances)",
+        "category": "gpu_pod",
+        "env_vars": ("LAMBDA_API_KEY", "LAMBDA_CLOUD_API_KEY"),
+        "endpoint": "https://cloud.lambdalabs.com/api/v1/instance-types",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "region", "label": "Default Region", "placeholder": "us-west-1", "default": "us-west-1"},
+            {"key": "ssh_key_name", "label": "SSH Key Name", "placeholder": "sabrina-swarm-key", "default": ""},
+            {"key": "endpoint_url", "label": "Lambda Inference / vLLM URL (optional)", "placeholder": "https://api.lambdalabs.com/v1", "default": "https://api.lambdalabs.com/v1"},
+        ),
+    },
+    "modal": {
+        "label": "Modal (Serverless GPU Containers)",
+        "category": "gpu_pod",
+        "env_vars": ("MODAL_TOKEN_SECRET", "MODAL_API_KEY"),
+        "endpoint": "https://api.modal.com/v1/apps",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "token_id", "label": "Modal Token ID", "placeholder": "ak-...", "default": ""},
+            {"key": "workspace", "label": "Workspace", "placeholder": "default", "default": ""},
+            {"key": "endpoint_url", "label": "Deployed vLLM / Swarm URL", "placeholder": "https://<workspace>--sabrina-vllm.modal.run/v1", "default": ""},
+        ),
+    },
+    "coreweave": {
+        "label": "CoreWeave (GPU Cluster)",
+        "category": "gpu_pod",
+        "env_vars": ("COREWEAVE_API_KEY",),
+        "endpoint": "https://api.coreweave.com/v1/models",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "region", "label": "Region / Zone", "placeholder": "ORD1", "default": "ORD1"},
+            {"key": "endpoint_url", "label": "Inference / Cluster URL", "placeholder": "https://<cluster>.coreweave.cloud/v1", "default": ""},
+            {"key": "gpu_type", "label": "Default GPU Type", "placeholder": "NVIDIA H100 80GB", "default": "NVIDIA H100 80GB"},
+        ),
+    },
+    "custom_gpu": {
+        "label": "Custom GPU Pod / Self-Hosted vLLM",
+        "category": "gpu_pod",
+        "env_vars": ("SABRINA_CUSTOM_GPU_API_KEY",),
+        "endpoint": "http://127.0.0.1:8000/v1/models",
+        "auth_type": "bearer",
+        "config_fields": (
+            {"key": "endpoint_url", "label": "OpenAI-Compat Base URL", "placeholder": "https://gpu-pod.example.com/v1", "default": "http://127.0.0.1:8000/v1"},
+            {"key": "gpu_type", "label": "GPU Hardware Label", "placeholder": "NVIDIA A100 80GB", "default": "Custom GPU"},
+            {"key": "ssh_host", "label": "SSH / Control Host (optional)", "placeholder": "root@gpu-pod.example.com", "default": ""},
+        ),
+    },
     "pollinations": {
         "label": "Pollinations AI (Open Text & Image)",
+        "category": "model_api",
         "env_vars": ("POLLINATIONS_API_KEY", "SABRINA_ENABLE_POLLINATIONS"),
         "endpoint": "https://text.pollinations.ai/models",
         "auth_type": "none",
     },
     "lmstudio": {
         "label": "LM Studio / Local vLLM (:1234)",
+        "category": "local",
         "env_vars": ("SABRINA_LOCAL_OPENAI_URL", "LMSTUDIO_API_KEY"),
         "endpoint": "http://127.0.0.1:1234/v1/models",
         "auth_type": "none",
     },
     "ollama": {
         "label": "Ollama (Local)",
+        "category": "local",
         "env_vars": (),
         "endpoint": "http://127.0.0.1:11434/api/tags",
         "auth_type": "none",
@@ -166,6 +291,16 @@ PROVIDER_METADATA: dict[str, dict[str, Any]] = {
 
 _PROVIDER_ALIASES: dict[str, str] = {
     "google": "gemini",
+    "vertex": "google_vertex",
+    "vertexai": "google_vertex",
+    "gcp": "google_vertex",
+    "aws": "aws_bedrock",
+    "amazon": "aws_bedrock",
+    "bedrock": "aws_bedrock",
+    "vast": "vastai",
+    "vast.ai": "vastai",
+    "lambda": "lambda_labs",
+    "lambdalabs": "lambda_labs",
     "x-ai": "xai",
     "hf": "huggingface",
     "hf-router": "huggingface",
@@ -373,6 +508,70 @@ def _normalize_probed_payload(provider: str, payload: Any) -> list[dict[str, Any
                 models.append(norm)
         return models
 
+    # GPU Pod / Cloud compute providers that return pods/instances/offers rather than LLM model lists
+    if provider == "runpod":
+        items = payload if isinstance(payload, list) else (payload.get("data") if isinstance(payload, dict) else [])
+        if isinstance(items, list):
+            for entry in items:
+                if not isinstance(entry, dict):
+                    continue
+                pod_id = str(entry.get("id") or entry.get("name") or "").strip()
+                if not pod_id:
+                    continue
+                display = str(entry.get("name") or pod_id).strip()
+                norm = normalize_model_record(
+                    {
+                        "id": f"runpod/{pod_id}",
+                        "name": f"RunPod: {display}",
+                        "provider": "runpod",
+                        "source": "live_probe",
+                    }
+                )
+                if norm:
+                    norm["unlocked"] = True
+                    models.append(norm)
+        return models
+
+    if provider == "lambda_labs" and isinstance(payload, dict) and isinstance(payload.get("data"), dict):
+        for sku_id, entry in payload["data"].items():
+            if not isinstance(entry, dict):
+                continue
+            it = entry.get("instance_type") if isinstance(entry.get("instance_type"), dict) else {}
+            display = str(it.get("description") or sku_id).strip()
+            norm = normalize_model_record(
+                {
+                    "id": f"lambda_labs/{sku_id}",
+                    "name": f"Lambda GPU: {display}",
+                    "provider": "lambda_labs",
+                    "source": "live_probe",
+                }
+            )
+            if norm:
+                norm["unlocked"] = True
+                models.append(norm)
+        return models
+
+    if provider == "vastai" and isinstance(payload, dict) and isinstance(payload.get("instances"), list):
+        for entry in payload["instances"]:
+            if not isinstance(entry, dict):
+                continue
+            inst_id = str(entry.get("id") or "").strip()
+            if not inst_id:
+                continue
+            gpu = str(entry.get("gpu_name") or "GPU Pod").strip()
+            norm = normalize_model_record(
+                {
+                    "id": f"vastai/{inst_id}",
+                    "name": f"Vast.ai: {gpu} (#{inst_id})",
+                    "provider": "vastai",
+                    "source": "live_probe",
+                }
+            )
+            if norm:
+                norm["unlocked"] = True
+                models.append(norm)
+        return models
+
     # Cohere: {"models": [...]}
     if provider == "cohere" and isinstance(payload, dict) and isinstance(payload.get("models"), list):
         raw_list = payload["models"]
@@ -425,6 +624,7 @@ class ProviderKeyVault:
             "version": 1,
             "encryption": "dpapi",
             "keys": {},
+            "configs": {},
             "probes": {},
             "ignored_env": [],
         }
@@ -439,12 +639,14 @@ class ProviderKeyVault:
         if not isinstance(raw, dict):
             return self._empty_state()
         keys = raw.get("keys")
+        configs = raw.get("configs")
         probes = raw.get("probes")
         ignored_env = raw.get("ignored_env")
         return {
             "version": 1,
             "encryption": "dpapi",
             "keys": dict(keys) if isinstance(keys, dict) else {},
+            "configs": dict(configs) if isinstance(configs, dict) else {},
             "probes": dict(probes) if isinstance(probes, dict) else {},
             "ignored_env": [str(p).strip().lower() for p in ignored_env if str(p).strip()]
             if isinstance(ignored_env, list)
@@ -514,6 +716,46 @@ class ProviderKeyVault:
             return self._get_env_key(prov)
         return None
 
+    def get_provider_config(self, provider: str) -> dict[str, str]:
+        """Return non-secret configuration fields for `provider` merged with defaults."""
+        prov = self._validate_provider(provider)
+        meta = PROVIDER_METADATA[prov]
+        defaults: dict[str, str] = {}
+        for field in meta.get("config_fields") or ():
+            defaults[str(field["key"])] = str(field.get("default") or "")
+        with self._lock:
+            stored = self._state.get("configs", {}).get(prov)
+            if isinstance(stored, dict):
+                for k, v in stored.items():
+                    if v is not None:
+                        defaults[str(k)] = str(v).strip()
+        return defaults
+
+    def set_provider_config(self, provider: str, config: dict[str, Any]) -> dict[str, Any]:
+        """Persist non-secret configuration fields (region, project_id, endpoint_url, etc.) for `provider`."""
+        prov = self._validate_provider(provider)
+        if not isinstance(config, dict):
+            raise ValueError("Provider config must be a dictionary.")
+        meta = PROVIDER_METADATA[prov]
+        allowed_keys = {str(f["key"]) for f in (meta.get("config_fields") or ())}
+        with self._lock:
+            configs = self._state.setdefault("configs", {})
+            existing = dict(configs.get(prov) or {}) if isinstance(configs.get(prov), dict) else {}
+            for k, v in config.items():
+                key = str(k).strip()
+                if not key:
+                    continue
+                if allowed_keys and key not in allowed_keys:
+                    continue
+                val = str(v or "").strip()
+                if val:
+                    existing[key] = val
+                else:
+                    existing.pop(key, None)
+            configs[prov] = existing
+            self._save_state()
+            return self._provider_status(prov)
+
     def _provider_status(self, provider: str) -> dict[str, Any]:
         meta = PROVIDER_METADATA[provider]
         entry = self._state["keys"].get(provider)
@@ -556,9 +798,11 @@ class ProviderKeyVault:
 
         probed_models = probe.get("models")
         unlocked_count = int(probe.get("unlocked_count", len(probed_models) if isinstance(probed_models, list) else 0))
+        config_fields = [dict(f) for f in (meta.get("config_fields") or ())]
         return {
             "provider": provider,
             "label": meta["label"],
+            "category": str(meta.get("category") or "model_api"),
             "configured": configured,
             "unlocked": unlocked,
             "source": source,
@@ -567,6 +811,8 @@ class ProviderKeyVault:
             "verified": bool(probe.get("verified", False)),
             "unlocked_count": unlocked_count,
             "last_error": last_error,
+            "config": self.get_provider_config(provider),
+            "config_fields": config_fields,
         }
 
     def list_providers(self) -> dict[str, Any]:
@@ -580,8 +826,13 @@ class ProviderKeyVault:
                 "encryption": "dpapi",
             }
 
-    def set_key(self, provider: str, api_key: str) -> dict[str, Any]:
-        """Encrypt and persist an API key for `provider`, returning masked status."""
+    def set_key(
+        self,
+        provider: str,
+        api_key: str,
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Encrypt and persist an API key (and optional non-secret config) for `provider`, returning masked status."""
         prov = self._validate_provider(provider)
         cleaned = (api_key or "").strip()
         if not cleaned:
@@ -594,6 +845,21 @@ class ProviderKeyVault:
                 "ciphertext": ciphertext,
                 "updated_at": _utc_now_iso(),
             }
+            if isinstance(config, dict) and config:
+                meta = PROVIDER_METADATA[prov]
+                allowed_keys = {str(f["key"]) for f in (meta.get("config_fields") or ())}
+                configs = self._state.setdefault("configs", {})
+                existing = dict(configs.get(prov) or {}) if isinstance(configs.get(prov), dict) else {}
+                for k, v in config.items():
+                    key = str(k).strip()
+                    if not key or (allowed_keys and key not in allowed_keys):
+                        continue
+                    val = str(v or "").strip()
+                    if val:
+                        existing[key] = val
+                    else:
+                        existing.pop(key, None)
+                configs[prov] = existing
             ignored = [p for p in (self._state.get("ignored_env") or []) if p != prov]
             self._state["ignored_env"] = ignored
             # Reset stale error on new key entry
@@ -652,9 +918,19 @@ class ProviderKeyVault:
 
     def _build_probe_request(self, provider: str, raw_key: str | None) -> tuple[str, dict[str, str]]:
         meta = PROVIDER_METADATA[provider]
+        cfg = self.get_provider_config(provider)
         url = meta["endpoint"]
         if provider == "ollama":
             url = os.environ.get("SWARM_OLLAMA_TAGS_URL", url)
+        else:
+            custom_url = cfg.get("endpoint_url", "").strip()
+            if custom_url:
+                base = custom_url.rstrip("/")
+                url = base if base.endswith("/models") else f"{base}/models"
+            elif "{region}" in url or "{project_id}" in url:
+                region = cfg.get("region") or ("us-central1" if provider == "google_vertex" else "us-east-1")
+                project_id = cfg.get("project_id") or "default"
+                url = url.format(region=region, project_id=project_id)
 
         auth_type = meta["auth_type"]
         headers: dict[str, str] = {"Accept": "application/json"}
@@ -665,6 +941,10 @@ class ProviderKeyVault:
         elif auth_type == "anthropic" and raw_key:
             headers["x-api-key"] = raw_key
             headers["anthropic-version"] = "2023-06-01"
+        if provider == "modal" and cfg.get("token_id"):
+            headers["Modal-Key"] = cfg["token_id"]
+            if raw_key:
+                headers["Modal-Secret"] = raw_key
         return url, headers
 
     def probe_provider(

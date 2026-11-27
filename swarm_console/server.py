@@ -27,6 +27,7 @@ from .protocol import (
     SwarmStore,
     guard_safe_path,
 )
+from .gpu_providers import SwarmGpuDeploymentManager
 from .registry import ModelSkillRegistry
 from .vault import ProviderKeyVault
 
@@ -85,6 +86,11 @@ class SwarmHTTPServer(ThreadingHTTPServer):
         self.swarm_command = SwarmCommand(
             blackboard=self.blackboard,
             console_bridge=SwarmConsoleBridge(SwarmClient(store.swarm_dir)),
+        )
+        self.gpu_deployments = SwarmGpuDeploymentManager(
+            vault=self.vault,
+            deployments_path=store.swarm_dir / "gpu_deployments.json",
+            model_registry=self.registry,
         )
         super().__init__(server_address, RequestHandlerClass)
 
@@ -172,6 +178,23 @@ class SwarmRequestHandler(BaseHTTPRequestHandler):
         if route == "/api/vault/status":
             vault: ProviderKeyVault = self.server.vault  # type: ignore[attr-defined]
             self._send_json(HTTPStatus.OK, {"ok": True, **vault.list_providers()})
+            return
+
+        if route == "/api/gpu/providers":
+            gpu_mgr: SwarmGpuDeploymentManager = self.server.gpu_deployments  # type: ignore[attr-defined]
+            self._send_json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "providers": gpu_mgr.list_providers(),
+                    "deployments": gpu_mgr.list_deployments(),
+                },
+            )
+            return
+
+        if route == "/api/gpu/deployments":
+            gpu_mgr = self.server.gpu_deployments  # type: ignore[attr-defined]
+            self._send_json(HTTPStatus.OK, {"ok": True, "deployments": gpu_mgr.list_deployments()})
             return
 
         if route == "/api/registry/models":
@@ -536,8 +559,9 @@ class SwarmRequestHandler(BaseHTTPRequestHandler):
             provider = str(payload.get("provider", "")).strip()
             api_key = str(payload.get("api_key", ""))
             do_probe = bool(payload.get("probe", False))
+            config = payload.get("config") if isinstance(payload.get("config"), dict) else None
             try:
-                status_dict = vault.set_key(provider, api_key)
+                status_dict = vault.set_key(provider, api_key, config=config)
             except ValueError as exc:
                 self._send_json(
                     HTTPStatus.BAD_REQUEST,
@@ -555,6 +579,64 @@ class SwarmRequestHandler(BaseHTTPRequestHandler):
                     registry.refresh_models(force=True)
             response_data.update(vault.list_providers())
             self._send_json(HTTPStatus.OK, response_data)
+            return
+
+        if route == "/api/vault/config":
+            vault = self.server.vault  # type: ignore[attr-defined]
+            provider = str(payload.get("provider", "")).strip()
+            config = payload.get("config")
+            if not isinstance(config, dict):
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"ok": False, "error": "invalid_vault_request", "message": "`config` must be a JSON object."},
+                )
+                return
+            try:
+                status_dict = vault.set_provider_config(provider, config)
+            except ValueError as exc:
+                self._send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"ok": False, "error": "invalid_vault_request", "message": str(exc)},
+                )
+                return
+            self._send_json(HTTPStatus.OK, {"ok": True, "provider_status": status_dict, **vault.list_providers()})
+            return
+
+        if route == "/api/gpu/deploy":
+            gpu_mgr: SwarmGpuDeploymentManager = self.server.gpu_deployments  # type: ignore[attr-defined]
+            registry = self.server.registry  # type: ignore[attr-defined]
+            result = gpu_mgr.deploy_swarm(payload)
+            if result.get("ok"):
+                registry.refresh_models(force=True)
+            status_code = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+            self._send_json(status_code, {**result, "deployments": gpu_mgr.list_deployments()})
+            return
+
+        if route == "/api/gpu/status":
+            gpu_mgr = self.server.gpu_deployments  # type: ignore[attr-defined]
+            dep_id = str(payload.get("deployment_id", "")).strip()
+            result = gpu_mgr.check_status(dep_id)
+            status_code = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+            self._send_json(status_code, {**result, "deployments": gpu_mgr.list_deployments()})
+            return
+
+        if route == "/api/gpu/terminate":
+            gpu_mgr = self.server.gpu_deployments  # type: ignore[attr-defined]
+            dep_id = str(payload.get("deployment_id", "")).strip()
+            result = gpu_mgr.terminate_deployment(dep_id)
+            status_code = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+            self._send_json(status_code, {**result, "deployments": gpu_mgr.list_deployments()})
+            return
+
+        if route == "/api/gpu/register-model":
+            gpu_mgr = self.server.gpu_deployments  # type: ignore[attr-defined]
+            registry = self.server.registry  # type: ignore[attr-defined]
+            dep_id = str(payload.get("deployment_id", "")).strip()
+            result = gpu_mgr.register_deployment_model(dep_id)
+            if result.get("ok"):
+                registry.refresh_models(force=True)
+            status_code = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+            self._send_json(status_code, {**result, "deployments": gpu_mgr.list_deployments()})
             return
 
         if route == "/api/vault/delete":

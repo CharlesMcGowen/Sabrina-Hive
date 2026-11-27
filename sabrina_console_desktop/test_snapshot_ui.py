@@ -26,7 +26,11 @@ PROBE = """
 <output id="snapshot-test-result">pending</output>
 <script>
 (async () => {
-  const element = id => document.getElementById(id);
+  const element = id => {
+    const node = document.getElementById(id);
+    if (!node) throw new Error(`Missing test element: ${id}`);
+    return node;
+  };
   const check = (condition, message) => { if (!condition) throw new Error(message); };
   const nextTurn = () => new Promise(resolve => setTimeout(resolve, 0));
   const refresh = async () => { element("btn-refresh").click(); await nextTurn(); };
@@ -44,14 +48,48 @@ PROBE = """
   };
   window.pywebview = {api};
   try {
+    element("swarm-monitor-detail").open = true;
     await refresh();
     check(element("sync-time").textContent.includes("test time"), "Snapshot did not finish rendering");
+    check(element("monitor-running-card").open, "Running should be visible by default");
+    check(!element("monitor-attention-card").open && !element("monitor-recent-card").open,
+          "Inactive monitor sections should start compact");
+    const loops = Array.from({length: 5}, (_, index) => ({
+      id: `loop-${index}`, name: `Automation ${index}`, enabled: true, status: "idle", next_run: null,
+    }));
+    snapshot = {...good, swarm: {...good.swarm, mission_outputs: []},
+                automations: {loops, pending_approvals: [], connectors: []}};
+    await refresh();
+    check(element("monitor-running-count").textContent === "0 active", "Idle automations appeared to be running");
+    check(element("monitor-automation-summary").textContent.replace(/\u00a0/g, " ") === "5 automations enabled · 0 scheduled",
+          "Enabled and scheduled automation counts were not distinguished");
+    loops[0].status = "running";
+    loops[1].status = "waiting_approval";
+    loops[2].next_run = Date.now() / 1000 + 3600;
+    snapshot.automations.pending_approvals = [{loop_id: "loop-1", pending_approval: {reason: "Approval required"}}];
+    element("monitor-attention-card").open = true;
+    await refresh();
+    check(element("monitor-running-count").textContent === "1 active" &&
+          element("monitor-running").textContent.includes("Automation 0"), "A running automation was not shown");
+    check(element("monitor-automation-summary").textContent.replace(/\u00a0/g, " ") === "5 automations enabled · 1 scheduled",
+          "The next scheduled automation was not counted");
+    check(element("monitor-attention-count").textContent === "1" &&
+          element("monitor-attention").textContent.includes("Automation 1"), "Automation approval was not shown");
+    check(element("monitor-attention-card").open, "Refreshing closed a section opened by the operator");
+    element("monitor-attention").querySelector('[data-monitor-automation="attention"]').click();
+    check(element("view-automations").classList.contains("active"), "Automation approval did not open Automations");
+    window.__openView("swarm");
+    snapshot = good;
+    await refresh();
+    check(element("monitor-automation-summary").textContent === "Automation status unavailable",
+          "Missing automation status was reported as an empty list");
     const card = element("topo-svg").querySelector(".svg-node-clickable");
     check(card, "The worker graph did not render");
     card.dispatchEvent(new MouseEvent("click", {bubbles: true}));
     check(element("topo-svg").querySelector('.dag-card[stroke-width="2.4"]'), "Node selection did not render");
 
     const graph = element("topo-svg");
+    element("btn-swarm-a2a-edit-mode").click();
     const theme = element("topo-sprite-theme");
     const backdrop = element("topo-backdrop");
     const motion = element("topo-motion");
@@ -134,7 +172,11 @@ PROBE = """
     const renderKeptConnection = element("api-status").textContent.includes("Connected");
     snapshot = {...snapshot, ui_dirty: true};
     await refresh();
-    check(reloads === 1, "A render error blocked loading the updated UI");
+    check(reloads === 0, "A changed file reloaded the UI without opt-in");
+    snapshot = {...snapshot, ui_auto_reload: true};
+    await refresh();
+    await nextTurn();
+    check(reloads === 1, "The opt-in reload did not recover a render error");
     check(renderKeptConnection, "A render error was reported as a lost API connection");
     snapshot = good;
     await refresh();
@@ -155,10 +197,21 @@ PROBE = """
     const branch = window.__sabrinaCollectiveApi.getLiveDag().edges.find(edge => edge.rule_id === "RECOVERY");
     check(branch?.from === failedParent.id && branch?.to === recovery.id, "Recovery is detached from the failed worker");
     check(element("topo-svg").textContent.includes("RECOVERY · recovering"), "Recovery edge wasn't labeled");
-    check(element("lmb-step-executor-status").textContent.includes("RECOVERING"), "Executor recovery wasn't visible");
+    check(element("lmb-stepper").textContent.includes("RECOVERING"), "Executor recovery wasn't visible");
     recovery.status = "DONE";
     await refresh();
-    check(element("lmb-step-executor-status").textContent.includes("RECOVERED"), "Recovery didn't update the stage");
+    check(element("lmb-stepper").textContent.includes("RECOVERED"), "Recovery didn't update the stage");
+
+    const interrupted = {mission_id:"m-12345678", state:"INTERRUPTED", goal:"Saved mission",
+                         summary:"The runner exited before recording a final status."};
+    snapshot = {...good, swarm:{...good.swarm, saved_run_attention:[interrupted]}};
+    api.get_mission_output = async id => ({ok:id === interrupted.mission_id, output:interrupted});
+    await refresh();
+    const savedRunButton = element("monitor-attention").querySelector('[data-monitor-run="m-12345678"]');
+    check(savedRunButton, "Interrupted mission was missing from Needs Attention");
+    savedRunButton.click();
+    await nextTurn();
+    check(element("mission-output-body").textContent.includes(interrupted.summary), "Saved status did not open");
 
     api.get_snapshot = async () => { throw new Error("test bridge error"); };
     await refresh();

@@ -6,7 +6,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from test_signal_promotion_gate import SIGNAL, market
 from tools.swarm_search_hydrator import SwarmSearchHydrator, SearchResult
 from tools.crypto_strategy_rsi_loop import CryptoStrategyRsiEngine, RsiGenerationResult
 
@@ -89,15 +91,20 @@ class TestCryptoStrategyRsiLoop(unittest.TestCase):
         engine = CryptoStrategyRsiEngine(
             workspace_root=self.tmp_path,
             max_generations=2,
+            market=market(winning=False),
+            llm_caller=lambda *args: {"ok": True, "text": json.dumps([SIGNAL])},
         )
 
-        # Run cycle 1
-        res1 = engine.run_cycle(generation=1)
+        with patch.object(engine.hydrator, "search_and_hydrate", return_value={"hydration_prompt": ""}):
+            res1 = engine.run_cycle(generation=1)
+            res2 = engine.run_cycle(generation=2)
+
+        self.assertEqual(res1.scores[0]["verdict"], "fails")
+        self.assertGreater(res1.scores[0]["overall"]["trades"], 0)
         self.assertFalse(res1.stopping_rule_triggered)
         self.assertGreater(len(res1.disproven), 0)
 
-        # Run cycle 2 (reaches max_generations)
-        res2 = engine.run_cycle(generation=2)
+        self.assertEqual(res2.scores[0]["verdict"], "fails")
         self.assertTrue(res2.stopping_rule_triggered)
         self.assertIn("STOPPING RULE REACHED", res2.verdict_summary)
 

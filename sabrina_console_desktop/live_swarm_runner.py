@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
+import logging
 import os
 import re
+import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
+from contextlib import contextmanager
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -42,6 +47,7 @@ from sabrina_console_desktop.context_first_coordinator import (
 )
 from sabrina_console_desktop.desktop_browser_action import BrowserOpenRequest, dispatch_browser_open
 from sabrina_console_desktop.recovery_policy import RecoveryPolicy
+from sabrina_console_desktop.tools.worker_identity import executor_identity, stopped_evidence
 from sabrina_console_desktop.recovery_worker_release import (
     PreparedContext,
     RecoveryWorkerReleases,
@@ -78,9 +84,17 @@ from swarm_command.role_binding import (
 )
 from swarm_command.router import SwarmCommand
 from swarm_command.runtime import ScopedToolManifest, ToolRegistry
+from swarm_console.eulerian_topology import (
+    EulerianSwarmTopology,
+    LogFinPromotionGate,
+    SharingPolicy,
+)
 from swarm_console.harness_collective import HarnessEvent, HarnessRegistry
 from swarm_console.protocol import PathIsolationError, guard_safe_path
 from sabrina_console_desktop.join_cut_swarm import M as JOIN_CUT_M, ROOT as JOIN_CUT_ROOT, DeduplicationRegistry
+from sabrina_console_desktop.join_cut_registry import JoinCutRegistry
+
+_logger = logging.getLogger(__name__)
 
 DEFAULT_ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts" / "missions"
 
@@ -157,8 +171,8 @@ _ROLE_COLORS: dict[str, str] = {
     "subagent": "#38bdf8",
 }
 
-_MAX_FEED_ITEMS = 80
-_MAX_SPINDOWNS = 32
+_MAX_FEED_ITEMS = 400
+_MAX_SPINDOWNS = 128
 _MAX_OBJECTIVES = 24
 _MAX_OUTPUTS = 20
 _MAX_SCAN_FILES = 140
@@ -459,12 +473,36 @@ def _settle_outcome(rec: dict[str, Any], *, cancelled: bool) -> str:
     """
     if cancelled:
         return "cancelled"
-    if str(rec.get("status") or "").upper() != "FAILED":
+    status = str(rec.get("status") or "").upper()
+    if status == "DONE":
         return "completed"
+    if status != "FAILED":
+        return "transient_failure"
     err = str(rec.get("llm_error") or "").lower()
     if not err or any(marker in err for marker in _INFRA_FAILURE_MARKERS):
         return "transient_failure"
     return "semantic_failure"
+
+
+@dataclass
+class _JoinCutLease:
+    registry: JoinCutRegistry
+    path: str
+    owner_id: str
+    epoch: int
+    outcome: str | None = None
+    retrying: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+def _join_cut_inputs(mission_id: str, ws: dict[str, Any]) -> dict[str, Any]:
+    payload = {"mission": mission_id, "role": ws.get("role"), "task": ws.get("title")}
+    for key in ("target_files", "depends_on"):
+        if ws.get(key):
+            payload[key] = sorted(set(ws[key]))
+    if ws.get("allow_writes"):
+        payload["allow_writes"] = True
+    return payload
 
 
 def _clip_prompt(text: Any, limit: int) -> str:
@@ -477,6 +515,100 @@ def _clip_prompt(text: Any, limit: int) -> str:
     _HANDOFF_TRUNCATIONS.append({"limit": limit, "omitted": omitted})
     del _HANDOFF_TRUNCATIONS[:-200]
     return f"{s[:limit]}\n[... {omitted} chars omitted at handoff limit {limit} ...]"
+
+
+# Characters of goal-named files handed to the executor in full (about 6k tokens).
+GOAL_NAMED_FILE_CHARS = 24_000
+GOAL_TEST_TIMEOUT_S = 120
+
+
+def _goal_named_test_files(root: Path, goal: str, limit: int = 3) -> list[Path]:
+    """Existing test_*.py files inside root that the mission goal names by path."""
+    found: list[Path] = []
+    try:
+        root_resolved = root.resolve()
+    except OSError:
+        return found
+    for raw in re.findall(r"[A-Za-z0-9_./\\-]*\btest_[A-Za-z0-9_]+\.py\b", str(goal or "")):
+        try:
+            cand = (root_resolved / raw.replace("\\", "/").lstrip("./")).resolve()
+        except (OSError, ValueError):
+            continue
+        if cand.is_file() and cand.is_relative_to(root_resolved) and cand not in found:
+            found.append(cand)
+    return found[:limit]
+
+
+def _run_goal_named_tests(root: Path, goal: str) -> tuple[int, list[str]]:
+    """Run the tests a goal names. Returns (files run, one error per file that did not pass).
+
+    A mission that says "so that the tests in X pass" is only done when X passes, so this is
+    the check, not the Critic's opinion. A run that executes no test counts as a failure.
+    """
+    errors: list[str] = []
+    files = _goal_named_test_files(root, goal)
+    for test_file in files:
+        rel = test_file.relative_to(root.resolve()).as_posix()
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "unittest", test_file.stem],
+                cwd=str(test_file.parent),
+                capture_output=True,
+                text=True,
+                timeout=GOAL_TEST_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            errors.append(f"Goal-named tests {rel}: timed out after {GOAL_TEST_TIMEOUT_S}s")
+            continue
+        except OSError as exc:
+            errors.append(f"Goal-named tests {rel}: could not run ({exc})")
+            continue
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        ran = re.search(r"Ran (\d+) tests?", out)
+        skipped = re.search(r"skipped=(\d+)", out)
+        executed = (int(ran.group(1)) if ran else 0) - (int(skipped.group(1)) if skipped else 0)
+        if proc.returncode != 0:
+            errors.append(f"Goal-named tests {rel} FAILED (exit {proc.returncode}):\n{out[-1500:]}")
+        elif executed <= 0:
+            errors.append(f"Goal-named tests {rel}: no test executed ({out[-200:]})")
+    return len(files), errors
+
+
+class _PathRWLock:
+    """Per-path reader-writer lock: concurrent readers never block each other; writers are exclusive per file."""
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition(threading.Lock())
+        self._readers = 0
+        self._writer = False
+
+    @contextmanager
+    def read_lock(self) -> Iterator[None]:
+        with self._cond:
+            while self._writer:
+                self._cond.wait()
+            self._readers += 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._readers -= 1
+                if self._readers == 0:
+                    self._cond.notify_all()
+
+    @contextmanager
+    def write_lock(self) -> Iterator[None]:
+        with self._cond:
+            while self._writer or self._readers > 0:
+                self._cond.wait()
+            self._writer = True
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._writer = False
+                self._cond.notify_all()
+
 
 class LiveSwarmRunner:
     """Thread-safe live mission execution engine with dynamic child worker lifecycle.
@@ -509,6 +641,9 @@ class LiveSwarmRunner:
         web_grounding_fn: Callable[[str, str], dict[str, Any]] | None = None,
         capability_manifest_fn: Callable[[bool], dict[str, Any]] | None = None,
         max_refinement_rounds: int = 2,
+        join_cut_enabled: bool | None = None,
+        join_cut_registry: JoinCutRegistry | None = None,
+        join_cut_db_path: Path | str | None = None,
     ) -> None:
         self.workspace_root = Path(workspace_root).resolve() if workspace_root is not None else REPO_ROOT
         self.artifacts_dir = (
@@ -524,7 +659,11 @@ class LiveSwarmRunner:
         self.web_grounding_fn = web_grounding_fn
         self.capability_manifest_fn = capability_manifest_fn
         self.max_refinement_rounds = max(0, min(5, int(max_refinement_rounds)))
+        self.allow_readonly_refinement: bool = False
         self._write_file_lock = threading.Lock()
+        self._path_locks_guard = threading.Lock()
+        self._path_locks: dict[Path, _PathRWLock] = {}
+        self._file_writers_lock = threading.Lock()
         self._file_conflict_lock = threading.Lock()
         self._write_context = threading.local()
         self._file_writers: dict[Path, dict[str, Any]] = {}
@@ -561,18 +700,33 @@ class LiveSwarmRunner:
         self.coordinator_count: int = 1
         self.workers_per_coordinator: int = 4
         self.topology_mode: str = "elastic_stigmergy"
+        self.branching_order: int = 3
         self.quorum_split_threshold: int = 6
         self.quorum_prune_threshold: int = 2
+        self._mission_topologies: dict[str, EulerianSwarmTopology] = {}
+        self._mission_promotion_gates: dict[str, LogFinPromotionGate] = {}
         self.enable_work_stealing: bool = True
         self.max_total_agents: int | None = None
         self.max_concurrency: int | None = None
-        self.subagent_excerpt_chars: int = 3200
-        self.executor_excerpt_chars: int = 3200
+        self.subagent_excerpt_chars: int = 12000
+        self.executor_excerpt_chars: int = 16000
         self._rejected_adaptations: list[dict[str, Any]] = []
-        # Join-cut dedup for dynamic sub-agents (see join_cut_swarm.py). Fails open on registry errors.
-        self.join_cut_enabled: bool = True
-        self._join_cut_registries: dict[str, DeduplicationRegistry] = {}
+        # Join-cut recursive tree & dedup backed by shared dnd_rsi_blackboard.sqlite3. Fails open on errors.
+        self.join_cut_enabled: bool = True if join_cut_enabled is None else bool(join_cut_enabled)
+        self.join_cut_registry: JoinCutRegistry | None = join_cut_registry
+        # An explicit opt-in selects per-mission sidecars. The default uses the shared blackboard.
+        self._join_cut_sidecars: dict[str, JoinCutRegistry] | None = {} if join_cut_enabled else None
+        if join_cut_db_path is not None:
+            self._join_cut_db_path: Path = Path(join_cut_db_path)
+        elif artifacts_dir is None:
+            self._join_cut_db_path = Path(self._telemetry_bb.db_path)
+        else:
+            self._join_cut_db_path = self.artifacts_dir / "dnd_rsi_blackboard.sqlite3"
+        self._join_cut_shared_registry: DeduplicationRegistry | None = None
         self._join_cut_nodes: dict[str, str] = {}
+        self._join_cut_leases: dict[str, _JoinCutLease] = {}
+        self._join_cut_retry_stop = threading.Event()
+        self._join_cut_spheres: dict[str, dict[str, float]] = {}
         self._join_cut_lock = threading.Lock()
         self._adaptation_history: list[dict[str, Any]] = []
         self._a2a_links: list[dict[str, Any]] = []
@@ -692,6 +846,7 @@ class LiveSwarmRunner:
         coordinator_count: int | None = None,
         workers_per_coordinator: int | None = None,
         topology_mode: str | None = None,
+        branching_order: int | None = None,
         quorum_split_threshold: int | None = None,
         quorum_prune_threshold: int | None = None,
         enable_work_stealing: bool | None = None,
@@ -699,15 +854,18 @@ class LiveSwarmRunner:
         max_concurrency: int | None = None,
         subagent_excerpt_chars: int | None = None,
         executor_excerpt_chars: int | None = None,
+        allow_readonly_refinement: bool | None = None,
     ) -> dict[str, Any]:
         """Update default coordinator-to-worker ratio and elastic stigmergy settings."""
         with self._lock:
             if coordinator_count is not None:
-                self.coordinator_count = max(1, min(8, int(coordinator_count)))
+                self.coordinator_count = max(1, min(256, int(coordinator_count)))
             if workers_per_coordinator is not None:
-                self.workers_per_coordinator = max(1, min(32, int(workers_per_coordinator)))
+                self.workers_per_coordinator = max(1, min(1024, int(workers_per_coordinator)))
             if topology_mode is not None and str(topology_mode).strip():
                 self.topology_mode = str(topology_mode).strip()
+            if branching_order is not None:
+                self.branching_order = max(2, min(6, int(branching_order)))
             if quorum_split_threshold is not None:
                 self.quorum_split_threshold = max(2, int(quorum_split_threshold))
             if quorum_prune_threshold is not None:
@@ -719,14 +877,17 @@ class LiveSwarmRunner:
             if max_concurrency is not None:
                 self.max_concurrency = max(1, int(max_concurrency))
             if subagent_excerpt_chars is not None:
-                self.subagent_excerpt_chars = max(400, min(16000, int(subagent_excerpt_chars)))
+                self.subagent_excerpt_chars = max(400, min(64000, int(subagent_excerpt_chars)))
             if executor_excerpt_chars is not None:
-                self.executor_excerpt_chars = max(400, min(16000, int(executor_excerpt_chars)))
+                self.executor_excerpt_chars = max(400, min(64000, int(executor_excerpt_chars)))
+            if allow_readonly_refinement is not None:
+                self.allow_readonly_refinement = bool(allow_readonly_refinement)
             return {
                 "coordinator_count": self.coordinator_count,
                 "workers_per_coordinator": self.workers_per_coordinator,
                 "ratio": f"{self.coordinator_count}:{self.workers_per_coordinator}",
                 "topology_mode": self.topology_mode,
+                "branching_order": self.branching_order,
                 "quorum_split_threshold": self.quorum_split_threshold,
                 "quorum_prune_threshold": self.quorum_prune_threshold,
                 "enable_work_stealing": self.enable_work_stealing,
@@ -735,6 +896,12 @@ class LiveSwarmRunner:
                 "subagent_excerpt_chars": self.subagent_excerpt_chars,
                 "executor_excerpt_chars": self.executor_excerpt_chars,
             }
+
+    def get_mission_topology_snapshot(self, mission_id: str) -> dict[str, Any] | None:
+        """Return the m-Eulerian topology & planar closure snapshot for a mission, if active."""
+        with self._lock:
+            topo = self._mission_topologies.get(mission_id)
+            return topo.snapshot() if topo is not None else None
 
     def _next_dyn_agent_id(self, role: str) -> str:
         """Format dynamic on-demand child ID with provenance dyn-<role>-<seq>."""
@@ -957,6 +1124,15 @@ class LiveSwarmRunner:
         ".mp3", ".wav", ".ogg", ".flac", ".mp4", ".webm", ".pdf",
     })
 
+    def _rwlock_for_path(self, target: Path) -> "_PathRWLock":
+        resolved = target.resolve()
+        with self._path_locks_guard:
+            lock = self._path_locks.get(resolved)
+            if lock is None:
+                lock = _PathRWLock()
+                self._path_locks[resolved] = lock
+            return lock
+
     def _read_workspace_write_base(self, target: Path) -> tuple[Any, ...]:
         try:
             stat = target.stat()
@@ -978,7 +1154,8 @@ class LiveSwarmRunner:
             return
         current = self._read_workspace_write_base(target)
         expected = getattr(self._write_context, "reads", {}).get(target)
-        prior = self._file_writers.get(target)
+        with self._file_writers_lock:
+            prior = self._file_writers.get(target)
         started = self._missions.get(mission_id, {}).get("write_started_ns")
         same_writer = prior and (prior["mission_id"], prior["worker_id"]) == (mission_id, worker_id)
         if expected is not None:
@@ -1013,10 +1190,11 @@ class LiveSwarmRunner:
 
     def _note_workspace_write(self, target: Path, mission_id: str, worker_id: str, worker_name: str) -> None:
         version = self._read_workspace_write_base(target)
-        self._file_writers[target] = {
-            "mission_id": mission_id, "worker_id": worker_id, "worker_name": worker_name or worker_id,
-            "version": version, "committed_ns": time.monotonic_ns(),
-        }
+        with self._file_writers_lock:
+            self._file_writers[target] = {
+                "mission_id": mission_id, "worker_id": worker_id, "worker_name": worker_name or worker_id,
+                "version": version, "committed_ns": time.monotonic_ns(),
+            }
         reads = getattr(self._write_context, "reads", None)
         if reads is not None:
             reads[target] = version
@@ -1092,18 +1270,21 @@ class LiveSwarmRunner:
                 (REPO_ROOT / "sabrina_desktop_ui.html").resolve(),
                 (REPO_ROOT / "Launch_Sabrina_Console.bat").resolve(),
             }
-            allowed_engine_out = (REPO_ROOT / "sabrina_console_desktop" / "outputs").resolve()
+            allowed_engine_outs = (
+                (REPO_ROOT / "sabrina_console_desktop" / "outputs").resolve(),
+                (REPO_ROOT / "sabrina_console_desktop" / "skills" / "proposed").resolve(),
+            )
             if (
                 cand_resolved in protected_files
                 or (
                     any(cand_resolved == pr or cand_resolved.is_relative_to(pr) for pr in protected_roots)
-                    and not cand_resolved.is_relative_to(allowed_engine_out)
+                    and not any(cand_resolved.is_relative_to(ao) for ao in allowed_engine_outs)
                 )
             ):
                 if rejected_out is not None:
                     rejected_out.append(
                         f"{rel_posix}: blocked by Sabrina Engine Self-Protection Guard "
-                        "(write project deliverables under outputs/<project>/ or attach a dedicated project workspace)"
+                        "(write project deliverables under outputs/<project>/ or sabrina_console_desktop/skills/proposed/<skill>/)"
                     )
                 continue
 
@@ -1125,7 +1306,7 @@ class LiveSwarmRunner:
 
             try:
                 target = guard_safe_path(candidate)
-                with self._write_file_lock:
+                with self._rwlock_for_path(target).write_lock():
                     self._check_workspace_write_base(target, root_resolved, mission_id, worker_id, worker_name)
                     before_snap = self.workspace_tracker.snapshot_before_write(target)
                     _atomic_write_text(target, content)
@@ -1342,7 +1523,7 @@ class LiveSwarmRunner:
                         outputs.append(f"=== TOOL read_file({rel_disp}) ===\nBLOCKED: secret/database file")
                         continue
                     guard_safe_path(cand)
-                    with self._write_file_lock:
+                    with self._rwlock_for_path(cand).read_lock():
                         self._remember_workspace_read(cand)
                         lines = cand.read_text(encoding="utf-8", errors="replace").splitlines()
                     slice_lines = [f"{i}: {lines[i - 1]}" for i in range(start_ln, min(len(lines), end_ln) + 1)]
@@ -1427,7 +1608,12 @@ class LiveSwarmRunner:
                 aspect = str(parsed_args.get("aspect_ratio") or "16:9").strip()
                 voice = str(parsed_args.get("voice") or "Puck").strip()
                 try:
-                    with self._write_file_lock:
+                    media_lock_ctx = (
+                        self._rwlock_for_path((root_resolved / out_rel).resolve()).write_lock()
+                        if out_rel
+                        else self._write_file_lock
+                    )
+                    with media_lock_ctx:
                         if out_rel:
                             media_target = (root_resolved / out_rel).resolve()
                             if not media_target.is_relative_to(root_resolved):
@@ -1645,8 +1831,8 @@ class LiveSwarmRunner:
                 "mission_id": mission_id,
             },
         )
-        if len(self._deliberations) > 60:
-            del self._deliberations[60:]
+        if len(self._deliberations) > 400:
+            del self._deliberations[400:]
 
     def record_harness_event(
         self,
@@ -1688,8 +1874,8 @@ class LiveSwarmRunner:
         }
         with self._lock:
             self._harness_events.insert(0, entry)
-            if len(self._harness_events) > 80:
-                del self._harness_events[80:]
+            if len(self._harness_events) > 400:
+                del self._harness_events[400:]
             self._record_feed_locked(
                 badge=badge_map.get(kind, "HARNESS"),
                 actor=f"{actor} [{harness_id}]",
@@ -1866,8 +2052,14 @@ class LiveSwarmRunner:
         *,
         max_files: int = 6,
         context_lines: int = 28,
+        full_budget: int = 0,
+        excerpt_budget: int | None = None,
     ) -> str:
-        """Read exact line-numbered excerpts for any workspace file paths & symbols mentioned in a workstream."""
+        """Read exact line-numbered excerpts for any workspace file paths & symbols mentioned in a workstream.
+
+        With full_budget > 0 the named files are returned whole, sharing that many characters
+        (smallest files first), so a spec or test file named in the goal is not cut to its header.
+        """
         root = self.workspace_root
         if not root.is_dir():
             return ""
@@ -1901,9 +2093,11 @@ class LiveSwarmRunner:
         ]
         seen_paths: set[Path] = set()
         blocks: list[str] = []
+        full_files: list[tuple[str, int, str]] = []
         target_file_count = max(1, min(max_files, len(path_candidates) or 1))
-        max_excerpt_budget = max(self.subagent_excerpt_chars, self.executor_excerpt_chars)
-        per_file_char_budget = max(750, max_excerpt_budget // target_file_count)
+        budget = self.subagent_excerpt_chars if excerpt_budget is None else excerpt_budget
+        separator_chars = 2 * (target_file_count - 1)
+        per_file_char_budget = max(0, (budget - separator_chars) // target_file_count)
         for rel in path_candidates:
             if len(blocks) >= max_files:
                 break
@@ -1936,7 +2130,7 @@ class LiveSwarmRunner:
                 resolved = candidate.resolve()
                 if resolved in seen_paths:
                     continue
-                with self._write_file_lock:
+                with self._rwlock_for_path(resolved).read_lock():
                     self._remember_workspace_read(resolved)
                     contents = _read_workspace_excerpt(root, candidate)
             except (OSError, ValueError, PathIsolationError):
@@ -1945,6 +2139,12 @@ class LiveSwarmRunner:
                 continue
             seen_paths.add(resolved)
             lines = contents.splitlines()
+            if full_budget > 0:
+                whole = "\n".join(f"{n}: {ln}" for n, ln in enumerate(lines, 1))
+                full_files.append((display_rel, len(lines), whole))
+                if len(full_files) >= max_files:
+                    break
+                continue
             # Prefer lines matching any mentioned symbol (e.g. `def _call_gemini_interactions`)
             hit_idx: int | None = None
             for sym in symbols:
@@ -1963,6 +2163,13 @@ class LiveSwarmRunner:
                 end = min(len(lines), max(22, per_file_char_budget // 48))
             numbered = "\n".join(f"{ln_no}: {lines[ln_no - 1]}" for ln_no in range(start + 1, end + 1))
             blocks.append(f"=== REAL FILE EXCERPT: {display_rel} (lines {start + 1}-{end}) ===\n{numbered}"[:per_file_char_budget])
+        remaining = full_budget
+        for pos, (rel_name, n_lines, whole) in enumerate(sorted(full_files, key=lambda f: len(f[2]))):
+            share = max(0, remaining // (len(full_files) - pos))
+            body = whole[:share]
+            note = "" if len(body) == len(whole) else f" — TRUNCATED to {len(body)} of {len(whole)} chars"
+            blocks.append(f"=== REAL FILE: {rel_name} ({n_lines} lines{note}) ===\n{body}")
+            remaining -= len(body)
         return "\n\n".join(blocks)
 
     def _inspect_workspace_readonly(self, goal: str) -> dict[str, Any]:
@@ -2474,6 +2681,65 @@ class LiveSwarmRunner:
             return False
         return False
 
+    def _save_run_status_locked(self, mission_id: str, owner: dict[str, Any] | None = None) -> None:
+        mission = self._missions.get(mission_id)
+        if mission is None:
+            return
+        output = self._mission_outputs.get(mission_id) or {}
+        status = {key: mission.get(key) for key in ("goal", "mode", "state", "completed_at")}
+        status.update(mission_id=mission_id, owner=owner or executor_identity(mission_id), updated_at=time.time(),
+                      summary=output.get("error") or mission.get("last_event") or output.get("summary"))
+        path = self.artifacts_dir / "run_status" / f"{mission_id}.json"
+        try:
+            if path.resolve().parent != path.parent:
+                raise OSError("Run status path escapes the status directory")
+            _atomic_write_text(path, json.dumps(status, ensure_ascii=False))
+        except (OSError, RuntimeError):
+            _logger.exception("Could not save run status for mission %s", mission_id)
+
+    def _start_mission_thread_locked(
+        self, mission_id: str, target: Callable[..., None], args: tuple[Any, ...],
+        done_event: threading.Event, name: str,
+    ) -> None:
+        owner = executor_identity(mission_id)
+        self._save_run_status_locked(mission_id, owner)
+
+        def run() -> None:
+            failure = "Mission worker exited without recording a final status."
+            try:
+                target(*args)
+            except Exception as exc:
+                failure = f"Mission worker failed unexpectedly: {type(exc).__name__}: {exc}"
+                _logger.exception("Mission worker %s failed", mission_id)
+            finally:
+                try:
+                    with self._lock:
+                        mission = self._missions.get(mission_id)
+                        if mission and mission.get("state") == "ACTIVE (RUNNING)":
+                            now = time.time()
+                            plugin_access = self._plugin_access.pop(mission_id, None)
+                            if plugin_access is not None:
+                                plugin_access.cancel()
+                            mission.update(state="FAILED", completed_at=now, last_event=failure)
+                            self._mission_outputs[mission_id].update(state="FAILED", error=failure,
+                                                                    summary=failure, updated_str=_clock_str(now))
+                        self._save_run_status_locked(mission_id, owner)
+                finally:
+                    done_event.set()
+
+        thread = threading.Thread(target=run, name=name, daemon=True)
+        try:
+            thread.start()
+        except RuntimeError as exc:
+            now = time.time()
+            failure = f"Could not start mission worker: {exc}"
+            self._missions[mission_id].update(state="FAILED", completed_at=now, last_event=failure)
+            self._mission_outputs[mission_id].update(state="FAILED", error=failure, summary=failure)
+            self._save_run_status_locked(mission_id, owner)
+            done_event.set()
+            raise
+        self._threads.append(thread)
+
     def _write_mission_report(
         self,
         mission_id: str,
@@ -2682,70 +2948,244 @@ class LiveSwarmRunner:
 
     # ---------------------------------------------------------------- join-cut dedup (I1-I4)
 
-    def _join_cut_registry(self, mission_id: str) -> DeduplicationRegistry:
-        """One registry per mission: the root can take at most M children, so missions must not share one."""
+    def _join_cut_registry(self, mission_id: str | None = None) -> DeduplicationRegistry:
+        """Return the single shared join-cut registry hosted in dnd_rsi_blackboard.sqlite3."""
         with self._join_cut_lock:
-            reg = self._join_cut_registries.get(mission_id)
-            if reg is None:
-                safe = re.sub(r"[^A-Za-z0-9_.-]", "_", mission_id)[:80] or "mission"
-                reg = DeduplicationRegistry(self.artifacts_dir / "join_cut" / f"{safe}.sqlite3")
-                self._join_cut_registries[mission_id] = reg
-            return reg
+            if self._join_cut_shared_registry is None:
+                self._join_cut_shared_registry = DeduplicationRegistry(self._join_cut_db_path)
+            return self._join_cut_shared_registry
 
-    def _join_cut_claim(self, mission_id: str, ws: dict[str, Any], sub_wid: str) -> tuple[bool, str]:
-        """Reserve a dynamic sub-agent's node before it is created. Returns (allowed, reason).
+    def _resolve_join_cut_parent(self, parent_node_id: str | None, ws: dict[str, Any]) -> str:
+        """Resolve an explicit parent Cantor path or parent worker ID; defaults to ROOT."""
+        raw = str(parent_node_id or ws.get("parent_node_id") or "").strip()
+        is_sidecar = self.join_cut_registry is not None or self._join_cut_sidecars is not None
+        default_root = "" if is_sidecar else JOIN_CUT_ROOT
+        if not raw:
+            return default_root
+        with self._join_cut_lock:
+            mapped = self._join_cut_nodes.get(raw)
+        if mapped is not None:
+            return mapped
+        if is_sidecar:
+            return raw
+        if raw == JOIN_CUT_ROOT or raw.startswith(f"{JOIN_CUT_ROOT}."):
+            return raw
+        return default_root
 
-        Fails open: a registry error is returned as a reason and the sub-agent still runs.
+    def _join_cut_claim(
+        self,
+        mission_id: str,
+        ws: dict[str, Any],
+        sub_wid: str,
+        *,
+        parent_node_id: str | None = None,
+        budget_share: float | None = None,
+    ) -> tuple[bool, str]:
+        """Reserve a dynamic sub-agent's node in the recursive join-cut tree before it is created.
+
+        Supports explicit parent_node_id branching and automatic recursive routing under eligible
+        open children when a parent hits its degree cap M. Fails open on registry errors.
         """
         if not self.join_cut_enabled:
             return True, "disabled"
+        if self.join_cut_registry is not None or self._join_cut_sidecars is not None:
+            try:
+                reg = self.join_cut_registry
+                if reg is None:
+                    with self._join_cut_lock:
+                        reg = self._join_cut_sidecars.get(mission_id)
+                        if reg is None:
+                            safe = re.sub(r"[^A-Za-z0-9_.-]", "_", mission_id)[:80] or "mission"
+                            reg = JoinCutRegistry(self.artifacts_dir / "join_cut_registry" / f"{safe}.sqlite3")
+                            self._join_cut_sidecars[mission_id] = reg
+                pref_p = self._resolve_join_cut_parent(parent_node_id, ws)
+                res = reg.try_cut(
+                    "dynamic_subagent",
+                    _join_cut_inputs(mission_id, ws),
+                    owner_id=sub_wid,
+                    request_id=ws.get("request_id"),
+                    preferred_parent=pref_p or None,
+                )
+                if res.allowed and res.cantor_path is not None:
+                    sphere_dict: dict[str, float] | None = None
+                    try:
+                        n_rec = reg.get_node(res.cantor_path)
+                        if n_rec is not None:
+                            sphere_dict = {
+                                "cx": round(n_rec.sphere.cx, 5),
+                                "cy": round(n_rec.sphere.cy, 5),
+                                "cz": round(n_rec.sphere.cz, 5),
+                                "r": round(n_rec.sphere.radius, 5),
+                            }
+                    except Exception:
+                        sphere_dict = None
+                    with self._join_cut_lock:
+                        self._join_cut_nodes[sub_wid] = res.cantor_path
+                        self._join_cut_leases[sub_wid] = _JoinCutLease(reg, res.cantor_path, sub_wid, res.lease_epoch)
+                        if sphere_dict is not None:
+                            self._join_cut_spheres[sub_wid] = sphere_dict
+                    return True, res.reason
+                if res.is_dedup:
+                    _logger.info(
+                        "JOIN_CUT_DEDUP mission=%s sub_wid=%s status=%s path=%s reason=%s",
+                        mission_id,
+                        sub_wid,
+                        res.status,
+                        res.cantor_path,
+                        res.reason,
+                    )
+                return False, res.reason
+            except Exception as exc:  # noqa: BLE001 - fail open by design
+                _logger.warning("JOIN_CUT fail-open on try_cut for %s: %s", sub_wid, exc)
+                return True, f"registry_error: {exc}"
         try:
             reg = self._join_cut_registry(mission_id)
-            payload = {"mission": mission_id, "role": ws.get("role"), "task": ws.get("title")}
-            attempt = f"{sub_wid}#{uuid.uuid4().hex}"  # unique per attempt, so a retry is never a stale replay
-            # Leaves live under structural branch nodes that never run work. Each branch takes up to M
-            # leaves and the root takes up to M branches, so a mission can hold M * M leaves. A leaf's
-            # failure therefore never prunes a sibling sub-agent.
-            for branch in [p for p in reg.open_parent_paths() if p.count(".") == 1]:
-                res = reg.cut_branch(branch, [payload], request_id=attempt)
-                if res.ok:
-                    return self._record_spawn(sub_wid, res.results[0])
-            branch_index = reg.child_count(JOIN_CUT_ROOT)
-            if branch_index < JOIN_CUT_M:
-                made = reg.cut_branch(JOIN_CUT_ROOT, [{"mission": mission_id, "branch": branch_index}],
-                                      request_id=f"{attempt}:branch")
-                if made.ok and made.results and made.results[0].created:
-                    res = reg.cut_branch(made.results[0].cantor_path, [payload], request_id=attempt)
-                    if res.ok:
-                        return self._record_spawn(sub_wid, res.results[0])
-            return False, "capacity: mission has used every branch and leaf slot"
+            payload = _join_cut_inputs(mission_id, ws)
+            explicit_req_id = ws.get("request_id")
+            attempt = str(explicit_req_id) if explicit_req_id else f"{sub_wid}#{uuid.uuid4().hex}"
+            preferred_parent = self._resolve_join_cut_parent(parent_node_id, ws)
+            res = reg.cut_branch(
+                preferred_parent,
+                [payload],
+                request_id=attempt,
+                auto_route=True,
+                budget_share=budget_share,
+            )
+            if res.ok and res.results:
+                return self._record_spawn(sub_wid, res.results[0])
+            return False, res.reason or "capacity: no open node available in join-cut tree"
         except Exception as exc:  # noqa: BLE001 - fail open by design
+            _logger.warning("JOIN_CUT fail-open on claim for %s: %s", sub_wid, exc)
             return True, f"registry_error: {exc}"
+
+    def _join_cut_mark_started(self, sub_wid: str) -> None:
+        """Thin hook: mark a leased join-cut node as started (fail-open)."""
+        if not self.join_cut_enabled:
+            return
+        with self._join_cut_lock:
+            lease = self._join_cut_leases.get(sub_wid)
+        if lease is None:
+            return
+        try:
+            lease.registry.mark_started(lease.path, lease.owner_id, lease.epoch)
+        except Exception as exc:  # noqa: BLE001 - fail open by design
+            _logger.warning("JOIN_CUT fail-open on mark_started for %s: %s", sub_wid, exc)
 
     def _record_spawn(self, sub_wid: str, spawn: Any) -> tuple[bool, str]:
         if spawn.created and spawn.cantor_path:
             self._join_cut_nodes[sub_wid] = spawn.cantor_path
         return spawn.created, spawn.reason
 
-    def _join_cut_settle(self, mission_id: str, sub_wid: str, *, outcome: str) -> None:
-        """Settle a sub-agent's leaf by outcome. Never raises: a missing node is a no-op (fail open).
+    def _join_cut_settle(
+        self,
+        mission_id: str,
+        sub_wid: str,
+        *,
+        outcome: str,
+        output: Any = None,
+        spent: float = 0.0,
+        earned: float = 0.0,
+    ) -> None:
+        """Settle a sub-agent's node by outcome. Never raises: a missing node is a no-op (fail open).
 
-        completed        -> finalize (tombstone: the work is done and must not repeat)
-        semantic_failure -> join (tombstone: the task itself is bad, so retrying is pointless)
-        transient_failure, cancelled -> release (free the task so a retry can spawn it)
+        completed        -> join_branch (fold output into parent, return remaining/earned budget, tombstone hash)
+        semantic_failure -> join_branch (tombstone hash without folding failed output, return remaining budget)
+        transient_failure, cancelled -> release_leaf (free slot & hash for retry, return unspent budget)
         """
+        if not self.join_cut_enabled:
+            return
+        if self.join_cut_registry is not None or self._join_cut_sidecars is not None:
+            with self._join_cut_lock:
+                lease = self._join_cut_leases.get(sub_wid)
+                if lease is None:
+                    return
+                if lease.outcome is None:
+                    lease.outcome = outcome
+
+            def settle() -> bool:
+                """Return False while the original outcome needs an automatic retry."""
+                with lease.lock:
+                    if lease.outcome is None:
+                        return True
+                    try:
+                        result = lease.registry.settle_or_join(
+                            lease.path, owner_id=lease.owner_id, lease_epoch=lease.epoch, outcome=lease.outcome,
+                        )
+                        if not result.ok:
+                            reason = getattr(result, "status", None) or result.error
+                            if reason not in ("ERR_LEASE_MISMATCH", "ERR_NOT_FOUND"):
+                                _logger.warning("JOIN_CUT settlement pending for %s: %s", sub_wid, reason)
+                                return reason not in ("ERR_OPEN_WAIT_EDGES", "ERR_INVALID_STATE", "ERR_INVALID_STATE:SPLIT")
+                    except Exception as exc:  # noqa: BLE001 - settling must never break the mission
+                        _logger.warning("JOIN_CUT fail-open on settle_or_join for %s: %s", sub_wid, exc)
+                        code = getattr(exc, "sqlite_errorcode", 0) & 0xFF
+                        return not (isinstance(exc, sqlite3.OperationalError) and code in (
+                            sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_IOERR,
+                        ))
+                    with self._join_cut_lock:
+                        confirmed_outcome = lease.outcome
+                        lease.outcome = None
+                        if self._join_cut_leases.get(sub_wid) is lease:
+                            self._join_cut_leases.pop(sub_wid)
+                            self._join_cut_nodes.pop(sub_wid, None)
+                            self._join_cut_spheres.pop(sub_wid, None)
+                if not result.ok:
+                    return True
+                try:
+                    stage_name = "JOIN_CUT_JOIN" if confirmed_outcome in ("completed", "semantic_failure") else "JOIN_CUT_RELEASE"
+                    action_label = "JOINED" if confirmed_outcome == "completed" else ("PRUNED" if confirmed_outcome == "semantic_failure" else "RELEASED")
+                    with self._lock:
+                        self._record_feed_locked(
+                            badge="JOIN_CUT",
+                            actor="Join-Cut Swarm",
+                            summary=f"[{mission_id}] {action_label} Cantor path '{lease.path}' ({sub_wid}, outcome={confirmed_outcome}).",
+                            mission_id=mission_id,
+                        )
+                        self._record_deliberation_locked(
+                            from_agent="Join-Cut Registry",
+                            to_agent=sub_wid,
+                            stage=stage_name,
+                            summary=f"[{mission_id}] {action_label} path '{lease.path}' (outcome={confirmed_outcome}).",
+                            detail=f"Result: {result}",
+                            mission_id=mission_id,
+                        )
+                except Exception as exc:
+                    _logger.warning("JOIN_CUT fail-open on settlement telemetry for %s: %s", sub_wid, exc)
+                return True
+
+            if not settle():
+                with lease.lock:
+                    if lease.retrying or lease.outcome is None:
+                        return
+                    lease.retrying = True
+
+                def retry() -> None:
+                    delay = 0.1
+                    try:
+                        while True:
+                            stopped = self._join_cut_retry_stop.wait(delay)
+                            if settle() or stopped:
+                                return
+                            delay = min(5.0, delay * 2)
+                    finally:
+                        with lease.lock:
+                            lease.retrying = False
+
+                threading.Thread(target=retry, daemon=True).start()
+            return
         path = self._join_cut_nodes.pop(sub_wid, None)
         if path is None:
             return
         try:
             reg = self._join_cut_registry(mission_id)
             if outcome == "completed":
-                reg.finalize_node(path)
+                reg.join_branch(path, reason="completed", output=output, spent=spent, earned=earned)
             elif outcome == "semantic_failure":
-                reg.join_branch(path, reason="semantic_failure")
+                reg.join_branch(path, reason="semantic_failure", output=None, spent=spent)
             else:
-                reg.release_leaf(path, reason=outcome)
-        except Exception:  # noqa: BLE001 - settling must never break the mission
+                reg.release_leaf(path, reason=outcome, spent=spent)
+        except Exception as exc:  # noqa: BLE001 - settling must never break the mission
+            _logger.warning("JOIN_CUT fail-open on settle for %s: %s", sub_wid, exc)
             return
 
     def _run_mission_pipeline(
@@ -2756,11 +3196,12 @@ class LiveSwarmRunner:
         physical_input: bool,
         worker_ids: dict[str, str],
         cancel_event: threading.Event,
-        done_event: threading.Event,
         review: release.ReleaseReview | None = None,
         windows_workspace: Path | None = None,
     ) -> None:
         self._write_context.reads = {}
+        _core_jc_wids: list[str] = []
+        unstarted_claims: set[str] = set()
         try:
             invoke_stage = review.call if review else self._invoke_stage_llm
             # Phase 0: brief SPAWNING visibility window
@@ -2972,6 +3413,44 @@ class LiveSwarmRunner:
                 "Scanning safe workspace files & gathering citations...",
                 status="WORKING",
             )
+            # Claim Cantor paths for core mission dispatch workers when JoinCutRegistry is active
+            if self.join_cut_enabled and (self.join_cut_registry is not None or self._join_cut_sidecars is not None):
+                for core_role, core_wid in (("planner_architect", planner_id), ("research_scout", scout_id)):
+                    c_allowed, _ = self._join_cut_claim(
+                        mission_id,
+                        {"role": core_role, "title": f"{mission_id}:{core_role}:{goal[:80]}"},
+                        core_wid,
+                    )
+                    if c_allowed:
+                        self._join_cut_mark_started(core_wid)
+                        _core_jc_wids.append(core_wid)
+                        with self._join_cut_lock:
+                            c_path = self._join_cut_nodes.get(core_wid)
+                            c_sphere = self._join_cut_spheres.get(core_wid)
+                        if c_path is not None:
+                            with self._lock:
+                                if core_wid in self._workers:
+                                    self._workers[core_wid]["cantor_path"] = c_path
+                                    self._workers[core_wid]["bounding_sphere"] = c_sphere
+                                sphere_txt = (
+                                    f" S({c_sphere['cx']},{c_sphere['cy']},{c_sphere['cz']}, r={c_sphere['r']})"
+                                    if c_sphere
+                                    else ""
+                                )
+                                self._record_feed_locked(
+                                    badge="JOIN_CUT",
+                                    actor="Join-Cut Swarm",
+                                    summary=f"[{mission_id}] CUT allocated '{c_path}' for {core_role}{sphere_txt}.",
+                                    mission_id=mission_id,
+                                )
+                                self._record_deliberation_locked(
+                                    from_agent="Join-Cut Registry",
+                                    to_agent=core_wid,
+                                    stage="JOIN_CUT_CUT",
+                                    summary=f"[{mission_id}] CUT path '{c_path}' -> {core_role}.",
+                                    detail=f"Disjoint 3D bounding sphere{sphere_txt}",
+                                    mission_id=mission_id,
+                                )
             with self._lock:
                 self._record_feed_locked(
                     badge="WORKING",
@@ -3419,6 +3898,8 @@ class LiveSwarmRunner:
             eff_stealing = bool(m_meta.get("enable_work_stealing", self.enable_work_stealing))
             target_total_workers = eff_c * eff_w
             base_unique_workers = len({v for k, v in worker_ids.items() if not str(k).startswith("coord_")})
+            if self.max_total_agents is not None and self.max_total_agents > base_unique_workers:
+                target_total_workers = max(target_total_workers, self.max_total_agents)
             max_fanout = max(0, target_total_workers - base_unique_workers) if target_total_workers > base_unique_workers else (4 if eff_w >= 4 else 0)
 
             if review or live_contract or windows_skill or (self.llm_caller is not None and live_llm_calls == 0):
@@ -3438,13 +3919,13 @@ class LiveSwarmRunner:
                 f"Verified fetch {source['url']}\n{source['text']}" for source in verified_sources[:3]
             )
             verified_scout_context = (
-                f"Workspace scan: {workspace_info.get('scanned_files', 0)} files.\n{_clip_prompt(excerpts_blob, 2000)}\n\n"
+                f"Workspace scan: {workspace_info.get('scanned_files', 0)} files.\n{_clip_prompt(excerpts_blob, 8000)}\n\n"
                 + (source_excerpts or "No verified external source was retrieved. Treat hosted service choices as undecided.")
             )
             scout_context = _clip_prompt(verified_scout_context if scout_web_hint or offline_checkout else (
                 f"Scout status: {scout_result.get('status', 'unknown')}\n"
                 f"{scout_result.get('llm_output') or scout_result.get('summary') or ''}"
-            ), 5200)
+            ), 16000)
             should_run_carbon = (
                 max_fanout > 0
                 and self.llm_caller is not None
@@ -3473,8 +3954,8 @@ class LiveSwarmRunner:
                     + offline_instruction
                 )
                 carbon_user = (
-                    f"Mission Goal:\n{_clip_prompt(goal, 1000)}\n\n"
-                    f"Planner Plan:\n{_clip_prompt(str(subtask_results['planner'].get('llm_output') or ''), 800)}\n\n"
+                    f"Mission Goal:\n{_clip_prompt(goal, 4000)}\n\n"
+                    f"Planner Plan:\n{_clip_prompt(str(subtask_results['planner'].get('llm_output') or ''), 4000)}\n\n"
                     f"Research Scout Findings:\n{verified_scout_context}\n\n"
                     f"Budget: max_subagents={max_fanout}, coordinators={eff_c}, workers_per_coord={eff_w}."
                 )
@@ -3526,13 +4007,19 @@ class LiveSwarmRunner:
                     })
                     shard_idx += 1
 
-            # Ensure every workstream has default inner-communication peer_targets if none specified
+            # Ensure every workstream has default inner-communication peer_targets if none specified.
+            # Under m_eulerian_join_cut, avoid closing a ring (which would violate genus g=0 acyclicity).
+            is_eulerian_mode = str(m_meta.get("topology_mode") or self.topology_mode) == "m_eulerian_join_cut"
             if len(dynamic_workstreams) > 1:
                 for idx_ws, ws in enumerate(dynamic_workstreams):
                     if not ws.get("peer_targets"):
-                        nxt = dynamic_workstreams[(idx_ws + 1) % len(dynamic_workstreams)]["key"]
-                        if nxt != ws["key"]:
-                            ws["peer_targets"] = [nxt]
+                        if is_eulerian_mode:
+                            if idx_ws + 1 < len(dynamic_workstreams):
+                                ws["peer_targets"] = [dynamic_workstreams[idx_ws + 1]["key"]]
+                        else:
+                            nxt = dynamic_workstreams[(idx_ws + 1) % len(dynamic_workstreams)]["key"]
+                            if nxt != ws["key"]:
+                                ws["peer_targets"] = [nxt]
 
             planner_mission_mode, planner_media_choices = _parse_planner_directives(
                 str(subtask_results["planner"].get("llm_output") or "")
@@ -3546,7 +4033,9 @@ class LiveSwarmRunner:
             subagent_written_files: list[str] = []
             if dynamic_workstreams and not cancel_event.is_set():
                 spawned_subs: list[tuple[dict[str, str], str]] = []
-                bud_cid: str | None = None
+                workstream_aliases: dict[str, str] = {}
+                bud_entries: list[tuple[str, str | None, str | None]] = []
+                mission_topo = self._mission_topologies.get(mission_id) if is_eulerian_mode else None
                 prune_thresh = int(m_meta.get("quorum_prune_threshold") or self.quorum_prune_threshold)
                 with self._lock:
                     now_sub = time.time()
@@ -3554,30 +4043,115 @@ class LiveSwarmRunner:
                         wid_val for k_name, wid_val in worker_ids.items() if str(k_name).startswith("coord_")
                     ]
                     planned_active = len(coord_pool) + base_unique_workers + len(dynamic_workstreams)
-                    can_bud_slot = (self.max_total_agents is None) or ((planned_active + 1) <= self.max_total_agents)
                     wants_coord = any(
                         bool(ws.get("needs_coordinator")) or str(ws.get("role", "")).lower() == "coordinator"
                         for ws in dynamic_workstreams
                     )
-                    if not coord_pool and (len(dynamic_workstreams) >= eff_quorum or wants_coord):
-                        if can_bud_slot:
-                            bud_cid = f"{mission_id}-dyn-coord-bud"
-                            coord_model = self._resolve_model_for_role("coordinator")
-                            worker_ids["coord_bud"] = bud_cid
+                    manifest_dict = m_meta.get("preflight_manifest") or {}
+                    cand_models = list(m_meta.get("candidate_models") or manifest_dict.get("candidate_models") or [])
+                    portal_candidates = [m for m in cand_models if str(m).startswith("portal:")]
+                    if not portal_candidates:
+                        try:
+                            from harnesses.external.collective_pool import KindCollectivePool
+                            p_pool = KindCollectivePool()
+                            p_flash = p_pool.get_tier_candidates("flash")
+                            p_deep = p_pool.get_tier_candidates("deep_reasoning")
+                            portal_candidates = [f"portal:{p}" for p in [*p_flash, *p_deep]]
+                        except Exception:
+                            portal_candidates = []
+
+                    should_bud = (len(dynamic_workstreams) >= eff_quorum or wants_coord)
+                    if should_bud:
+                        target_buds = max(1, (len(dynamic_workstreams) + eff_quorum - 1) // eff_quorum)
+                        if eff_c > 1:
+                            target_buds = max(target_buds, eff_c - 1)
+                        for bud_idx in range(1, target_buds + 1):
+                            can_bud_slot = (self.max_total_agents is None) or (
+                                (planned_active + 1) <= self.max_total_agents
+                            )
+                            if not can_bud_slot:
+                                self._record_deliberation_locked(
+                                    from_agent="Sabrina Coordinator",
+                                    to_agent="INV-03 Guardrail",
+                                    stage="ELASTIC_BUD_CAPPED",
+                                    summary=f"[{mission_id}] Skipped ELASTIC_BUD ({planned_active + 1} > max_total_agents={self.max_total_agents}).",
+                                    detail="Strictly bounded by INV-03 max_total_agents cap.",
+                                    mission_id=mission_id,
+                                )
+                                break
+
+                            bud_cid = (
+                                f"{mission_id}-dyn-coord-bud"
+                                if bud_idx == 1
+                                else f"{mission_id}-dyn-coord-bud-{bud_idx}"
+                            )
+                            coord_key = "coord_bud" if bud_idx == 1 else f"coord_bud_{bud_idx}"
+                            bud_bridge_id: str | None = None
+                            parent_hub_id: str | None = None
+                            parent_worker_id = "coordinator"
+                            bud_depth = 1
+
+                            if mission_topo is not None:
+                                avail_ports = sorted(mission_topo.log_fin_ports())
+                                if not avail_ports:
+                                    break
+                                target_port = avail_ports[0]
+                                parent_hub_id = mission_topo.nodes[target_port].neighbors[0]
+                                parent_worker_id = (
+                                    mission_topo.nodes[parent_hub_id].owner_worker_id or "coordinator"
+                                )
+                                bud_depth = (
+                                    1
+                                    if parent_worker_id == "coordinator"
+                                    else int(self._workers.get(parent_worker_id, {}).get("depth") or 1) + 1
+                                )
+                                _bud_hub, bud_bridge_id = mission_topo.graft_new_hub(
+                                    target_port,
+                                    policy=SharingPolicy(max_excerpt_chars=self.subagent_excerpt_chars),
+                                    hub_label=bud_cid,
+                                    bridge_label=f"bridge:{bud_cid}",
+                                    hub_worker_id=bud_cid,
+                                )
+
+                            if portal_candidates:
+                                bud_portal = portal_candidates[(bud_idx - 1) % len(portal_candidates)]
+                                coord_model = self._resolve_model_for_role("coordinator", explicit_model=bud_portal)
+                            else:
+                                coord_model = self._resolve_model_for_role("coordinator")
+
+                            bud_payload = {"key": bud_cid, "role": "coordinator", "title": f"Sub-Coordinator {bud_cid}"}
+                            self._join_cut_claim(mission_id, bud_payload, bud_cid, parent_node_id=parent_worker_id)
+                            with self._join_cut_lock:
+                                bud_jc_path = self._join_cut_nodes.get(bud_cid)
+                                bud_jc_sphere = self._join_cut_spheres.get(bud_cid)
+
+                            worker_ids[coord_key] = bud_cid
                             coord_pool.append(bud_cid)
+                            planned_active += 1
+                            bud_entries.append((bud_cid, bud_bridge_id, parent_hub_id))
                             self._workers[bud_cid] = {
                                 "id": bud_cid,
                                 "agent_id": bud_cid,
-                                "name": "Dynamic Sub-Coordinator (Bud)",
+                                "name": (
+                                    "Dynamic Sub-Coordinator (Bud)"
+                                    if bud_idx == 1
+                                    else f"Dynamic Sub-Coordinator (Bud {bud_idx})"
+                                ),
                                 "role": "coordinator",
                                 "model": coord_model,
                                 "status": "WORKING",
-                                "parent_node": "coordinator",
-                                "parent_id": "coordinator",
-                                "depth": 1,
+                                "parent_node": parent_worker_id,
+                                "parent_id": parent_worker_id,
+                                "depth": bud_depth,
                                 "mission_id": mission_id,
-                                "task": f"Quorum-budded branch lead (>= {eff_quorum} queued workstreams)",
-                                "detail": f"Physarum quorum gate triggered ({len(dynamic_workstreams)} >= {eff_quorum})",
+                                "task": f"Quorum-budded branch lead #{bud_idx} (>= {eff_quorum} queued workstreams)",
+                                "detail": (
+                                    f"m-Eulerian Join-Cut sub-hub grafted via {bud_bridge_id}"
+                                    if bud_bridge_id
+                                    else f"Physarum quorum gate triggered ({len(dynamic_workstreams)} >= {eff_quorum})"
+                                ),
+                                "cantor_path": bud_jc_path,
+                                "bounding_sphere": bud_jc_sphere,
                                 "locks": [],
                                 "color": _ROLE_COLORS.get("coordinator", "#38bdf8"),
                                 "manual": False,
@@ -3590,28 +4164,44 @@ class LiveSwarmRunner:
                                 "progress_pct": 33,
                             }
                             self._record_deliberation_locked(
-                                from_agent="Sabrina Coordinator",
+                                from_agent=parent_worker_id if parent_worker_id != "coordinator" else "Sabrina Coordinator",
                                 to_agent=bud_cid,
                                 stage="ELASTIC_BUD",
                                 summary=f"[{mission_id}] Quorum-budded sub-coordinator {bud_cid} ({len(dynamic_workstreams)} >= {eff_quorum}).",
-                                detail="Sharp threshold gate triggered hierarchical branch coordination.",
-                                mission_id=mission_id,
-                            )
-                        else:
-                            self._record_deliberation_locked(
-                                from_agent="Sabrina Coordinator",
-                                to_agent="INV-03 Guardrail",
-                                stage="ELASTIC_BUD_CAPPED",
-                                summary=f"[{mission_id}] Skipped ELASTIC_BUD ({planned_active + 1} > max_total_agents={self.max_total_agents}).",
-                                detail="Strictly bounded by INV-03 max_total_agents cap.",
+                                detail=(
+                                    f"Grafted sub-hub onto LOG_fin port via Join-Cut bridge {bud_bridge_id}."
+                                    if bud_bridge_id
+                                    else "Sharp threshold gate triggered hierarchical branch coordination."
+                                ),
                                 mission_id=mission_id,
                             )
 
                     theta_sq = carbon_theta ** 2
                     for idx_ws, ws in enumerate(dynamic_workstreams):
                         sub_wid = f"{mission_id}-{ws['key']}"
-                        allowed, jc_reason = self._join_cut_claim(mission_id, ws, sub_wid)
+                        parent_for_sub = (
+                            coord_pool[idx_ws % len(coord_pool)]
+                            if coord_pool
+                            else planner_id
+                        )
+                        allowed, jc_reason = self._join_cut_claim(
+                            mission_id,
+                            ws,
+                            sub_wid,
+                            parent_node_id=parent_for_sub,
+                        )
                         if not allowed:
+                            identity = _join_cut_inputs(mission_id, ws)
+                            for previous_ws, _ in spawned_subs:
+                                if _join_cut_inputs(mission_id, previous_ws) == identity:
+                                    workstream_aliases[ws["key"]] = previous_ws["key"]
+                                    break
+                            self._record_feed_locked(
+                                badge="JOIN_CUT_DEDUP",
+                                actor="Join-Cut Swarm",
+                                summary=f"[{mission_id}] Dedup skipped '{ws['title'][:48]}' ({jc_reason}).",
+                                mission_id=mission_id,
+                            )
                             self._record_deliberation_locked(
                                 from_agent="Join-Cut Registry",
                                 to_agent=ws["key"],
@@ -3621,13 +4211,42 @@ class LiveSwarmRunner:
                                 mission_id=mission_id,
                             )
                             continue
-                        sub_model = self._resolve_model_for_role(ws["role"])
+                        unstarted_claims.add(sub_wid)
+                        with self._join_cut_lock:
+                            jc_path = self._join_cut_nodes.get(sub_wid)
+                            jc_sphere = self._join_cut_spheres.get(sub_wid)
+                        jc_tag = ""
+                        if jc_path is not None:
+                            if jc_sphere is not None:
+                                jc_tag = f" | Cantor '{jc_path}' S({jc_sphere['cx']},{jc_sphere['cy']},{jc_sphere['cz']}, r={jc_sphere['r']})"
+                            else:
+                                jc_tag = f" | Cantor '{jc_path}'"
+                            if self.join_cut_registry is not None or self._join_cut_sidecars is not None:
+                                self._record_feed_locked(
+                                    badge="JOIN_CUT",
+                                    actor="Join-Cut Swarm",
+                                    summary=f"[{mission_id}] CUT allocated '{jc_path}' for '{ws['title'][:44]}'{jc_tag}.",
+                                    mission_id=mission_id,
+                                )
+                                self._record_deliberation_locked(
+                                    from_agent="Join-Cut Registry",
+                                    to_agent=sub_wid,
+                                    stage="JOIN_CUT_CUT",
+                                    summary=f"[{mission_id}] CUT path '{jc_path}' -> '{ws['title'][:48]}'.",
+                                    detail=f"Disjoint 3D bounding sphere{jc_tag}",
+                                    mission_id=mission_id,
+                                )
+                        if portal_candidates:
+                            ws_portal = portal_candidates[idx_ws % len(portal_candidates)]
+                            sub_model = self._resolve_model_for_role(ws["role"], explicit_model=ws_portal)
+                        else:
+                            sub_model = self._resolve_model_for_role(ws["role"])
                         worker_ids[ws["key"]] = sub_wid
                         dynamic_subagent_keys.append(ws["key"])
-                        parent_for_sub = (
-                            coord_pool[idx_ws % len(coord_pool)]
-                            if coord_pool
-                            else planner_id
+                        sub_depth = (
+                            int(self._workers.get(parent_for_sub, {}).get("depth") or 1) + 1
+                            if parent_for_sub in self._workers
+                            else (2 if coord_pool else 1)
                         )
                         stimulus = round(float(ws.get("stimulus") or (1.0 + 0.12 * idx_ws)), 3)
                         pull_prob = round((stimulus ** 2) / ((stimulus ** 2) + theta_sq), 3) if eff_stealing else 1.0
@@ -3640,10 +4259,12 @@ class LiveSwarmRunner:
                             "status": "WORKING",
                             "parent_node": parent_for_sub,
                             "parent_id": parent_for_sub,
-                            "depth": 2 if coord_pool else 1,
+                            "depth": sub_depth,
                             "mission_id": mission_id,
                             "task": ws["title"],
-                            "detail": f"Dynamic sub-agent spawned (S={stimulus}, P_steal={pull_prob}): {ws['title'][:100]}",
+                            "detail": f"Dynamic sub-agent spawned (S={stimulus}, P_steal={pull_prob}{jc_tag}): {ws['title'][:100]}",
+                            "cantor_path": jc_path,
+                            "bounding_sphere": jc_sphere,
                             "locks": [],
                             "color": _ROLE_COLORS.get(ws["role"], "#38bdf8"),
                             "manual": False,
@@ -3696,29 +4317,33 @@ class LiveSwarmRunner:
 
                 def _maybe_prune_bud_locked() -> None:
                     nonlocal bud_pruned
-                    if bud_cid is None or bud_pruned:
+                    if not bud_entries or bud_pruned:
                         return
                     remaining = sum(1 for item in shared_queue if not item["claimed"])
                     if remaining <= prune_thresh:
                         bud_pruned = True
                         with self._lock:
-                            self._update_worker_locked(
-                                bud_cid,
-                                status="DONE",
-                                current_step="folded",
-                                completed_steps=3,
-                                total_steps=3,
-                                progress_pct=100,
-                                detail=f"Hysteresis pruned (remaining={remaining} <= {prune_thresh}); folded back to Sabrina Coordinator.",
-                            )
-                            self._record_deliberation_locked(
-                                from_agent=bud_cid,
-                                to_agent="Sabrina Coordinator",
-                                stage="ELASTIC_PRUNE",
-                                summary=f"[{mission_id}] Folded {bud_cid} back to root coordinator (queue={remaining} <= {prune_thresh}).",
-                                detail="Hysteresis lower gate prevented coordinator thrashing.",
-                                mission_id=mission_id,
-                            )
+                            for b_cid, b_bridge_id, b_parent_hub_id in reversed(bud_entries):
+                                self._update_worker_locked(
+                                    b_cid,
+                                    status="DONE",
+                                    current_step="folded",
+                                    completed_steps=3,
+                                    total_steps=3,
+                                    progress_pct=100,
+                                    detail=f"Hysteresis pruned (remaining={remaining} <= {prune_thresh}); folded back to Sabrina Coordinator.",
+                                )
+                                self._record_deliberation_locked(
+                                    from_agent=b_cid,
+                                    to_agent="Sabrina Coordinator",
+                                    stage="ELASTIC_PRUNE",
+                                    summary=f"[{mission_id}] Folded {b_cid} back to root coordinator (queue={remaining} <= {prune_thresh}).",
+                                    detail="Hysteresis lower gate prevented coordinator thrashing.",
+                                    mission_id=mission_id,
+                                )
+                                if mission_topo is not None and b_bridge_id and b_parent_hub_id:
+                                    if b_bridge_id in mission_topo.nodes and b_parent_hub_id in mission_topo.nodes:
+                                        mission_topo.compact_branch(b_bridge_id, b_parent_hub_id)
 
                 def _claim_next_task(sub_wid: str, worker_role: str, worker_branch: str) -> tuple[dict[str, str], bool, float] | None:
                     now_q = time.monotonic()
@@ -3755,12 +4380,12 @@ class LiveSwarmRunner:
                     self._write_context.reads = {}
                     if cancel_event.is_set():
                         return
-                    dependencies = ws.get("depends_on") or []
-                    dependency_context = "".join(
-                        f"\n\nCompleted prerequisite {key}:\n"
-                        f"{_clip_prompt((subtask_results[key].get('llm_output') or subtask_results[key]['summary']), 2500)}"
-                        for key in dependencies
-                    )
+                    dependency_sections = []
+                    for key in ws.get("depends_on") or []:
+                        result = subtask_results[workstream_aliases.get(key, key)]
+                        excerpt = _clip_prompt(result.get("llm_output") or result["summary"], 2500)
+                        dependency_sections.append(f"\n\nCompleted prerequisite {key}:\n{excerpt}")
+                    dependency_context = "".join(dependency_sections)
                     with sub_queue_lock:
                         peer_msgs = list(inner_bus.get(ws["key"]) or []) + list(inner_bus.get("broadcast") or [])
                     peer_comm_blob = (
@@ -3809,8 +4434,8 @@ class LiveSwarmRunner:
                             f"Assigned Workstream:\n{ws['title']}\n"
                             f"{target_scope_note}"
                             f"Mission Mode: {planner_mission_mode} · Distribution Algorithm: {carbon_algo}\n"
-                            f"Overall Mission Goal:\n{_clip_prompt(goal, 1200)}\n\n"
-                            f"Planner Context:\n{_clip_prompt((subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary']), 900)}\n\n"
+                            f"Overall Mission Goal:\n{_clip_prompt(goal, 4000)}\n\n"
+                            f"Planner Context:\n{_clip_prompt((subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary']), 4000)}\n\n"
                             f"Research Scout Findings:\n{scout_context}{dependency_context}"
                             f"{peer_comm_blob}"
                             f"{excerpt_section}\n\n"
@@ -3829,8 +4454,8 @@ class LiveSwarmRunner:
                         sub_user_prompt = (
                             f"Assigned Workstream:\n{ws['title']}\n\n"
                             f"Distribution Algorithm: {carbon_algo} (protocol={carbon_proto})\n"
-                            f"Overall Mission Goal:\n{_clip_prompt(goal, 1200)}\n\n"
-                            f"Planner Context:\n{_clip_prompt((subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary']), 600)}\n\n"
+                            f"Overall Mission Goal:\n{_clip_prompt(goal, 4000)}\n\n"
+                            f"Planner Context:\n{_clip_prompt((subtask_results['planner'].get('llm_output') or subtask_results['planner']['summary']), 4000)}\n\n"
                             f"Research Scout Findings:\n{scout_context}{dependency_context}"
                             f"{peer_comm_blob}"
                             f"{excerpt_section}\n\n"
@@ -3975,18 +4600,43 @@ class LiveSwarmRunner:
                     peer_payload = (sub_llm.get("text") or sub_summary)[:240]
                     peer_targets = list(ws.get("peer_targets") or [])
                     if peer_payload and peer_targets:
+                        delivered_targets: list[str] = []
                         with sub_queue_lock:
                             for p_tgt in peer_targets[:3]:
+                                if mission_topo is not None:
+                                    src_branch = str(self._workers.get(sub_result_id, {}).get("parent_node") or "coordinator")
+                                    dst_wid = worker_ids.get(p_tgt)
+                                    dst_branch = str(self._workers.get(dst_wid or "", {}).get("parent_node") or "coordinator")
+                                    if src_branch != dst_branch:
+                                        allowed, reason = mission_topo.can_cross_seam(
+                                            src_branch,
+                                            dst_branch,
+                                            "summary",
+                                            payload_chars=len(peer_payload),
+                                        )
+                                        if not allowed:
+                                            with self._lock:
+                                                self._record_deliberation_locked(
+                                                    from_agent=sub_result_id,
+                                                    to_agent=p_tgt,
+                                                    stage="SHARING_POLICY_BLOCKED",
+                                                    summary=f"[{mission_id}] Blocked cross-sphere handoff {ws['key']} -> {p_tgt} ({reason}).",
+                                                    detail="Enforced by m-Eulerian Join-Cut bridge SharingPolicy.",
+                                                    mission_id=mission_id,
+                                                )
+                                            continue
                                 inner_bus.setdefault(p_tgt, []).append({"from": ws["key"], "msg": peer_payload})
-                        with self._lock:
-                            self._record_deliberation_locked(
-                                from_agent=sub_result_id,
-                                to_agent=", ".join(peer_targets[:3]),
-                                stage="INNER_COMM",
-                                summary=f"[{mission_id}] {ws['key']} -> {', '.join(peer_targets[:3])}: {peer_payload[:100]}",
-                                detail=f"Protocol={carbon_proto}; algo={carbon_algo}",
-                                mission_id=mission_id,
-                            )
+                                delivered_targets.append(p_tgt)
+                        if delivered_targets:
+                            with self._lock:
+                                self._record_deliberation_locked(
+                                    from_agent=sub_result_id,
+                                    to_agent=", ".join(delivered_targets),
+                                    stage="INNER_COMM",
+                                    summary=f"[{mission_id}] {ws['key']} -> {', '.join(delivered_targets)}: {peer_payload[:100]}",
+                                    detail=f"Protocol={carbon_proto}; algo={carbon_algo}",
+                                    mission_id=mission_id,
+                                )
                     with self._lock:
                         self._update_worker_locked(
                             sub_result_id,
@@ -4003,6 +4653,40 @@ class LiveSwarmRunner:
                             llm_output=sub_llm.get("text", ""),
                             llm_error=sub_err,
                             output_preview=sub_preview,
+                        )
+
+                def _run_claimed_workstream(ws: dict[str, Any], worker_id: str, stolen: bool, probability: float) -> None:
+                    claim_id = f"{mission_id}-{ws['key']}"
+                    with sub_queue_lock:
+                        unstarted_claims.discard(claim_id)
+                    outcome = "transient_failure"
+                    try:
+                        if not cancel_event.is_set():
+                            self._join_cut_mark_started(claim_id)
+                            _execute_single_workstream(ws, worker_id, stolen, probability)
+                        outcome = _settle_outcome(subtask_results.get(ws["key"]) or {}, cancelled=cancel_event.is_set())
+                    except asyncio.CancelledError:
+                        outcome = "cancelled"
+                        raise
+                    finally:
+                        sub_rec = subtask_results.get(ws["key"]) or {}
+                        folded_out = (
+                            {
+                                "worker_id": claim_id,
+                                "key": ws["key"],
+                                "title": ws.get("title", ""),
+                                "summary": sub_rec.get("summary") or "",
+                                "citations": list(sub_rec.get("citations") or []),
+                            }
+                            if outcome == "completed"
+                            else None
+                        )
+                        self._join_cut_settle(
+                            mission_id,
+                            claim_id,
+                            outcome=outcome,
+                            output=folded_out,
+                            spent=float(sub_rec.get("tokens_used") or 0.0),
                         )
 
                 def _run_dynamic_subagent(_ws_init: dict[str, str], sub_wid: str) -> None:
@@ -4029,18 +4713,14 @@ class LiveSwarmRunner:
                                     detail=f"Response-threshold migration (S^2 / (S^2 + theta^2) = {p_steal}).",
                                     mission_id=mission_id,
                                 )
-                        _execute_single_workstream(ws_item, sub_wid, was_stolen, p_steal)
+                        _run_claimed_workstream(ws_item, sub_wid, was_stolen, p_steal)
                         with self._lock:
-                            if self._workers.get(sub_wid, {}).get("status") == "FAILED":
+                            final_rec = (subtask_results.get(ws_item["key"]) if self.join_cut_enabled
+                                         else self._workers.get(sub_wid))
+                            if final_rec and final_rec.get("status") == "FAILED":
                                 break
-                    with self._lock:
-                        final_rec = dict(self._workers.get(sub_wid) or {})
-                    self._join_cut_settle(
-                        mission_id, sub_wid,
-                        outcome=_settle_outcome(final_rec, cancelled=cancel_event.is_set()),
-                    )
 
-                pool_cap = min(len(spawned_subs), self.max_concurrency) if self.max_concurrency else len(spawned_subs)
+                pool_cap = min(len(spawned_subs), self.max_concurrency) if self.max_concurrency else min(len(spawned_subs), 32)
                 with ThreadPoolExecutor(max_workers=max(1, pool_cap)) as sub_pool:
                     if any(ws.get("depends_on") for ws, _ in spawned_subs):
                         pending = {ws["key"]: (ws, wid) for ws, wid in spawned_subs}
@@ -4048,16 +4728,18 @@ class LiveSwarmRunner:
                         while pending and not cancel_event.is_set():
                             ready = [
                                 key for key, (ws, _) in pending.items()
-                                if set(ws.get("depends_on") or []) <= completed
+                                if all(workstream_aliases.get(dep, dep) in completed for dep in ws.get("depends_on") or [])
                             ]
                             if not ready:
                                 for key, (ws, wid) in pending.items():
-                                    missing = sorted(set(ws.get("depends_on") or []) - completed)
+                                    missing = sorted(dep for dep in ws.get("depends_on") or [] if workstream_aliases.get(dep, dep) not in completed)
                                     reason = f"Blocked by failed, missing, or cyclic prerequisite(s): {', '.join(missing)}"
                                     subtask_results[key] = {
                                         "worker_id": wid, "name": ws["title"], "task": ws["title"],
                                         "role": ws["role"], "status": "FAILED", "summary": reason, "llm_error": reason,
                                     }
+                                    self._join_cut_settle(mission_id, wid, outcome="transient_failure")
+                                    unstarted_claims.discard(wid)
                                     with self._lock:
                                         self._update_worker_locked(wid, status="FAILED", current_step="dependency_blocked", detail=reason)
                                         self._record_feed_locked(
@@ -4068,7 +4750,7 @@ class LiveSwarmRunner:
                             futures = {}
                             for key in ready:
                                 ws, wid = pending.pop(key)
-                                futures[key] = sub_pool.submit(_execute_single_workstream, ws, wid, False, 1.0)
+                                futures[key] = sub_pool.submit(_run_claimed_workstream, ws, wid, False, 1.0)
                             for key, future in futures.items():
                                 future.result()
                                 result = subtask_results.get(key) or {}
@@ -4080,6 +4762,84 @@ class LiveSwarmRunner:
 
                 if cancel_event.is_set():
                     return
+
+                # Hierarchical Sub-Sphere Verification & Branch Folding:
+                # Each budded branch coordinator verifies and folds its children's outputs before Stage 2.
+                if bud_entries and spawned_subs:
+                    branch_digests: list[str] = []
+                    branch_children: dict[str, list[tuple[dict[str, Any], str]]] = {}
+                    for ws_item, s_wid in spawned_subs:
+                        with self._lock:
+                            p_node = str(self._workers.get(s_wid, {}).get("parent_node") or "coordinator")
+                        branch_children.setdefault(p_node, []).append((ws_item, s_wid))
+
+                    promo_gate = self._mission_promotion_gates.get(mission_id) if is_eulerian_mode else None
+                    for b_cid, _b_bridge, _b_parent_hub in bud_entries:
+                        children = branch_children.get(b_cid) or []
+                        if not children:
+                            continue
+                        passed_cnt = 0
+                        failed_cnt = 0
+                        branch_citations: list[str] = []
+                        child_summaries: list[str] = []
+                        for ws_c, _c_wid in children:
+                            rec_c = subtask_results.get(ws_c["key"]) or {}
+                            st_c = str(rec_c.get("status") or "DONE").upper()
+                            if st_c == "FAILED":
+                                failed_cnt += 1
+                            else:
+                                passed_cnt += 1
+                            for cit in (rec_c.get("citations") or []):
+                                if cit not in branch_citations:
+                                    branch_citations.append(cit)
+                            sum_c = str(rec_c.get("summary") or ws_c.get("title") or "")[:160]
+                            child_summaries.append(f"{ws_c['key']}({st_c}): {sum_c}")
+                        branch_ok = failed_cnt == 0 and passed_cnt > 0
+                        branch_status = "PASS" if branch_ok else "PARTIAL"
+                        digest_line = (
+                            f"[Branch {b_cid} | {branch_status} | {passed_cnt}/{len(children)} ok] "
+                            + "; ".join(child_summaries[:6])
+                        )
+                        branch_digests.append(digest_line)
+                        if promo_gate is not None and mission_topo is not None:
+                            try:
+                                hub_slot = mission_topo.node_for_worker(b_cid) or mission_topo.node_for_worker("coordinator")
+                                if hub_slot and hub_slot in mission_topo.nodes:
+                                    promo_gate.checkers.setdefault(
+                                        "branch_digest",
+                                        lambda payload: (bool(payload.get("passed_count", 0) > 0), "branch digest check"),
+                                    )
+                                    aid = promo_gate.append_log_da(
+                                        "branch_digest",
+                                        {
+                                            "branch_id": b_cid,
+                                            "status": branch_status,
+                                            "passed_count": passed_cnt,
+                                            "failed_count": failed_cnt,
+                                            "citations": branch_citations[:12],
+                                        },
+                                        author=b_cid,
+                                        slot=hub_slot,
+                                    )
+                                    ports_now = sorted(mission_topo.log_fin_ports())
+                                    if ports_now:
+                                        promo_gate.promote_via_log_fin(aid, port_id=ports_now[0])
+                            except Exception:
+                                pass
+                        with self._lock:
+                            self._record_deliberation_locked(
+                                from_agent=b_cid,
+                                to_agent="Execution Specialist",
+                                stage="BRANCH_VERIFIED",
+                                summary=f"[{mission_id}] Branch {b_cid} verified ({branch_status}: {passed_cnt}/{len(children)} workstreams).",
+                                detail="; ".join(child_summaries[:4])[:220],
+                                mission_id=mission_id,
+                            )
+                    if branch_digests:
+                        dynamic_subagent_notes = [
+                            "Branch-Verified Sub-Sphere Digests:\n" + "\n".join(branch_digests),
+                            *dynamic_subagent_notes,
+                        ]
 
             # Stage 2: Execution Specialist produces the real deliverable & prepares report
             _set_worker_milestone(
@@ -4112,9 +4872,13 @@ class LiveSwarmRunner:
             scout_notes = subtask_results["scout"].get("llm_output") or subtask_results["scout"]["summary"]
             useful_sub_notes = [n for n in dynamic_subagent_notes if "INSUFFICIENT_CONTEXT" not in n]
             subagents_blob = ("\n\nDynamic Sub-Agent Findings:\n" + "\n".join(useful_sub_notes)) if useful_sub_notes else ""
-            exec_file_excerpts = "" if windows_skill else (review.excerpts() if review else self._read_targeted_file_excerpts(goal))
+            # Files the operator named in the goal reach the executor whole, not as 28-line headers.
+            exec_file_excerpts = "" if windows_skill else (
+                review.excerpts() if review
+                else self._read_targeted_file_excerpts(goal, full_budget=GOAL_NAMED_FILE_CHARS)
+            )
             exec_excerpts_blob = (
-                f"\n\nREAL WORKSPACE FILE EXCERPTS (ground truth):\n{exec_file_excerpts[:self.executor_excerpt_chars]}"
+                f"\n\nREAL WORKSPACE FILE EXCERPTS (ground truth):\n{exec_file_excerpts[:max(self.executor_excerpt_chars, GOAL_NAMED_FILE_CHARS)]}"
                 if exec_file_excerpts
                 else ""
             )
@@ -4410,8 +5174,17 @@ class LiveSwarmRunner:
                                         errs.append(str(err_item))
                 except Exception:
                     pass
+                # Tests the goal names are the definition of done: run them, do not ask the Critic.
+                if allow_writes and files_list and not review:
+                    ran_count, test_errs = _run_goal_named_tests(self.workspace_root, goal)
+                    goal_tests["ran"] = ran_count
+                    goal_tests["passed"] = bool(ran_count) and not test_errs
+                    if test_errs:
+                        passed = False
+                        errs.extend(test_errs)
                 return passed, errs
 
+            goal_tests: dict[str, Any] = {"ran": 0, "passed": False}
             harness_diag_passed, harness_diag_errors = _run_workspace_diagnostics_check(written_files, rejected_write_errors)
 
             # Bounded Stage 2 <-> Stage 3 Critic / Diagnostics Self-Correction Loop
@@ -4419,7 +5192,7 @@ class LiveSwarmRunner:
             eff_max_refinement = (
                 max(0, min(5, int(raw_max_ref)))
                 if raw_max_ref is not None
-                else (self.max_refinement_rounds if allow_writes else 0)
+                else (self.max_refinement_rounds if (allow_writes or self.allow_readonly_refinement) else 0)
             )
             if review or live_contract or windows_skill:
                 eff_max_refinement = 0
@@ -4754,6 +5527,21 @@ class LiveSwarmRunner:
                         verdict["issues"] = list(verdict.get("issues") or []) + [
                             f"Harness diagnostics failed: {'; '.join(harness_diag_errors[:3])}"
                         ]
+                    # A fallback model's own PASS is not evidence. Written work that the requested
+                    # model neither produced nor verified passes only if goal-named tests passed.
+                    fallback_stages = [
+                        f"{label} wanted {llm.get('requested_model') or 'primary'}, ran on {llm.get('provider')}/{llm.get('model')}"
+                        for label, llm in (("Execution Specialist", exec_llm), ("Critic Verifier", critic_llm))
+                        if llm.get("used_fallback")
+                    ]
+                    if allow_writes and written_files and fallback_stages:
+                        note = "Model fallback: " + "; ".join(fallback_stages)
+                        if goal_tests["passed"]:
+                            note += f" (accepted: {goal_tests['ran']} goal-named test file(s) passed)"
+                        else:
+                            verdict["passed"] = False
+                            note += ". No goal-named test passed, so the fallback model's PASS is not accepted."
+                        verdict["issues"] = list(verdict.get("issues") or []) + [note]
 
                 offline_issues = offline_storefront.audit(self.workspace_root, written_files) if offline_checkout and allow_writes else []
                 if offline_issues:
@@ -4778,7 +5566,7 @@ class LiveSwarmRunner:
 
                 # Critic returned REVIEW/FAIL with refinement budget remaining -> feed Critic feedback back to Execution Specialist!
                 refinement_rounds_used += 1
-                critic_feedback = _clip_prompt(str(critic_llm.get("text") or "").strip(), 1800)
+                critic_feedback = _clip_prompt(str(critic_llm.get("text") or "").strip(), 4000)
                 with self._lock:
                     self._record_feed_locked(
                         badge="REPAIR",
@@ -4812,7 +5600,11 @@ class LiveSwarmRunner:
                     + f"Your Previous Deliverable:\n{_clip_prompt(str(exec_llm.get('text') or ''), 2000)}\n\n"
                     + ("Offline checkout violations:\n" + "\n".join(offline_issues) + "\n" if offline_issues else "")
                     + f"{write_instruction}{ide_tools_instruction}{offline_instruction}\n"
-                    "Emit any `tool:generate_image` / `write_file:` updates needed to resolve every Critic bullet point and achieve `PASS:`."
+                    + (
+                        "Emit any `tool:generate_image` / `write_file:` updates needed to resolve every Critic bullet point and achieve `PASS:`."
+                        if allow_writes
+                        else "Address every Critic bullet point with verified citations and evidence (read-only analysis; do not emit `write_file:` blocks) to achieve `PASS:`."
+                    )
                 )
                 refined_llm = invoke_stage(AgentRole.EXECUTION_SPECIALIST.value, exec_model, exec_sys_prompt, refine_prompt)
                 for _ref_tool_idx in range(2):
@@ -5227,6 +6019,7 @@ class LiveSwarmRunner:
                 )
 
         except Exception as exc:
+            _logger.exception("Mission pipeline %s failed", mission_id)
             now = time.time()
             with self._lock:
                 mission = self._missions.get(mission_id)
@@ -5252,6 +6045,16 @@ class LiveSwarmRunner:
                     mission_id=mission_id,
                 )
         finally:
+            for c_wid in _core_jc_wids:
+                with self._lock:
+                    c_rec = dict(self._workers.get(c_wid) or {})
+                self._join_cut_settle(
+                    mission_id,
+                    c_wid,
+                    outcome=_settle_outcome(c_rec, cancelled=cancel_event.is_set()),
+                )
+            for wid in unstarted_claims:
+                self._join_cut_settle(mission_id, wid, outcome="cancelled")
             if self.auto_spindown:
                 with self._lock:
                     mission_workers = [wid for wid, worker in self._workers.items() if worker.get("mission_id") == mission_id]
@@ -5260,7 +6063,6 @@ class LiveSwarmRunner:
                 plugin_access = self._plugin_access.pop(mission_id, None)
                 if plugin_access is not None:
                     plugin_access.cancel()
-            done_event.set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -5268,7 +6070,7 @@ class LiveSwarmRunner:
 
     def _run_home_depot_order_mission(
         self, mission_id: str, house_count: int, worker_ids: dict[str, str],
-        cancel_event: threading.Event, done_event: threading.Event,
+        cancel_event: threading.Event,
         replay_cart: bool = False,
     ) -> None:
         builder = worker_ids["executor"]
@@ -5352,7 +6154,6 @@ class LiveSwarmRunner:
                 plugin_access = self._plugin_access.pop(mission_id, None)
                 if plugin_access is not None:
                     plugin_access.cancel()
-            done_event.set()
 
     def _finish_home_depot_order_locked(
         self, mission_id: str, status: str, summary: str, changes: dict[str, Any],
@@ -5376,7 +6177,7 @@ class LiveSwarmRunner:
 
     def _run_browser_mission(
         self, mission_id: str, goal: str, request: BrowserOpenRequest, worker_id: str,
-        cancel_event: threading.Event, done_event: threading.Event,
+        cancel_event: threading.Event,
     ) -> None:
         attempts: list[dict[str, Any]] = []
         recovery: list[dict[str, Any]] = []
@@ -5487,7 +6288,6 @@ class LiveSwarmRunner:
                 plugin_access = self._plugin_access.pop(mission_id, None)
                 if plugin_access is not None:
                     plugin_access.cancel()
-            done_event.set()
 
     def launch_mission(
         self,
@@ -5507,6 +6307,7 @@ class LiveSwarmRunner:
         max_refinement_rounds: int | None = None,
         parent_mission_id: str = "",
         plugin_capabilities: list[str] | None = None,
+        candidate_models: list[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
         """Decompose goal, dynamically spawn child workers respecting coordinator-to-worker ratio, and execute."""
         if parent_mission_id:
@@ -5590,8 +6391,8 @@ class LiveSwarmRunner:
                 eff_w_val = 4
             elif re.search(r"\b(lean|1:2)\b", clean_goal, re.I):
                 eff_w_val = 2
-        eff_c = max(1, min(8, int(eff_c_val if eff_c_val is not None else self.coordinator_count)))
-        eff_w = max(1, min(32, int(eff_w_val if eff_w_val is not None else self.workers_per_coordinator)))
+        eff_c = max(1, min(256, int(eff_c_val if eff_c_val is not None else self.coordinator_count)))
+        eff_w = max(1, min(1024, int(eff_w_val if eff_w_val is not None else self.workers_per_coordinator)))
         eff_quorum = max(2, int(quorum_split_threshold if quorum_split_threshold is not None else self.quorum_split_threshold))
         eff_stealing = bool(enable_work_stealing if enable_work_stealing is not None else self.enable_work_stealing)
         now = time.time()
@@ -5811,8 +6612,10 @@ class LiveSwarmRunner:
                 "active_coordinator_count": eff_c,
                 "ratio": f"{eff_c}:{eff_w}",
                 "topology_mode": self.topology_mode,
+                "branching_order": self.branching_order,
                 "quorum_split_threshold": eff_quorum,
                 "enable_work_stealing": eff_stealing,
+                "candidate_models": list(candidate_models or []),
                 "allow_auto_limit_adapt": bool(allow_auto_limit_adapt),
                 "max_refinement_rounds": max_refinement_rounds,
                 "verdict": None,
@@ -5826,6 +6629,11 @@ class LiveSwarmRunner:
                 )
             from tools.coordinator_plugin_access import CoordinatorPluginAccess, scope_from_goal
             self._plugin_access[mission_id] = CoordinatorPluginAccess(mission_id, plugin_scope)
+            if self.topology_mode == "m_eulerian_join_cut":
+                topo = EulerianSwarmTopology(m=self.branching_order)
+                topo.create_sphere(label=f"{mission_id}:root", owner_worker_id="coordinator")
+                self._mission_topologies[mission_id] = topo
+                self._mission_promotion_gates[mission_id] = LogFinPromotionGate(topo)
             self._mission_order.insert(0, mission_id)
             if len(self._mission_order) > _MAX_OBJECTIVES:
                 stale_ids = self._mission_order[_MAX_OBJECTIVES:]
@@ -5879,39 +6687,24 @@ class LiveSwarmRunner:
             )
 
             if browser_request:
-                thread = threading.Thread(
-                    target=self._run_browser_mission,
-                    args=(mission_id, clean_goal, browser_request, worker_ids["executor"], cancel_event, done_event),
-                    name=f"swarm-browser-{mission_id}",
-                    daemon=True,
+                self._start_mission_thread_locked(
+                    mission_id, self._run_browser_mission,
+                    (mission_id, clean_goal, browser_request, worker_ids["executor"], cancel_event),
+                    done_event, f"swarm-browser-{mission_id}",
                 )
             elif house_count is not None:
-                thread = threading.Thread(
-                    target=self._run_home_depot_order_mission,
-                    args=(mission_id, house_count, worker_ids, cancel_event, done_event,
-                          clean_goal.startswith(home_depot_order.REPLAY_PREFIX)),
-                    name=f"swarm-home-depot-{mission_id}",
-                    daemon=True,
+                self._start_mission_thread_locked(
+                    mission_id, self._run_home_depot_order_mission,
+                    (mission_id, house_count, worker_ids, cancel_event, clean_goal.startswith(home_depot_order.REPLAY_PREFIX)),
+                    done_event, f"swarm-home-depot-{mission_id}",
                 )
             else:
-                thread = threading.Thread(
-                    target=self._run_mission_pipeline,
-                    args=(
-                        mission_id,
-                        clean_goal,
-                        clean_mode,
-                        bool(physical_input),
-                        worker_ids,
-                        cancel_event,
-                        done_event,
-                        review,
-                        windows_workspace,
-                    ),
-                    name=f"swarm-mission-{mission_id}",
-                    daemon=True,
+                self._start_mission_thread_locked(
+                    mission_id, self._run_mission_pipeline,
+                    (mission_id, clean_goal, clean_mode, bool(physical_input), worker_ids, cancel_event,
+                     review, windows_workspace),
+                    done_event, f"swarm-mission-{mission_id}",
                 )
-            self._threads.append(thread)
-            thread.start()
             active_count = len(self._workers)
 
         spawned_worker_ids = [ws[1] for ws in worker_specs]
@@ -5996,13 +6789,13 @@ class LiveSwarmRunner:
         blueprint: SwarmBlueprint,
         worker_ids: dict[str, str],
         cancel_event: threading.Event,
-        done_event: threading.Event,
         allow_workspace_writes: bool,
         coord_telemetry: dict[str, Any],
         browser_session: BrowserSession | None = None,
     ) -> None:
         """Layer 3: Deterministically execute the Coordinator's chosen SwarmBlueprint playbook."""
         self._write_context.reads = {}
+        _bp_jc_wids: list[str] = []
         try:
             if self.step_delay_sec > 0 and cancel_event.wait(self.step_delay_sec):
                 return
@@ -6011,6 +6804,43 @@ class LiveSwarmRunner:
 
             playbook = blueprint.playbook
             required_roles = PLAYBOOK_REQUIRED_ROLES[playbook]
+            if self.join_cut_enabled and (self.join_cut_registry is not None or self._join_cut_sidecars is not None):
+                for role_key, bp_wid in worker_ids.items():
+                    bp_allowed, _ = self._join_cut_claim(
+                        mission_id,
+                        {"role": role_key, "title": f"{mission_id}:{playbook}:{role_key}:{goal[:80]}"},
+                        bp_wid,
+                    )
+                    if bp_allowed:
+                        self._join_cut_mark_started(bp_wid)
+                        _bp_jc_wids.append(bp_wid)
+                        with self._join_cut_lock:
+                            bp_path = self._join_cut_nodes.get(bp_wid)
+                            bp_sphere = self._join_cut_spheres.get(bp_wid)
+                        if bp_path is not None:
+                            with self._lock:
+                                if bp_wid in self._workers:
+                                    self._workers[bp_wid]["cantor_path"] = bp_path
+                                    self._workers[bp_wid]["bounding_sphere"] = bp_sphere
+                                sphere_txt = (
+                                    f" S({bp_sphere['cx']},{bp_sphere['cy']},{bp_sphere['cz']}, r={bp_sphere['r']})"
+                                    if bp_sphere
+                                    else ""
+                                )
+                                self._record_feed_locked(
+                                    badge="JOIN_CUT",
+                                    actor="Join-Cut Swarm",
+                                    summary=f"[{mission_id}] CUT allocated '{bp_path}' for {role_key} ({playbook}){sphere_txt}.",
+                                    mission_id=mission_id,
+                                )
+                                self._record_deliberation_locked(
+                                    from_agent="Join-Cut Registry",
+                                    to_agent=bp_wid,
+                                    stage="JOIN_CUT_CUT",
+                                    summary=f"[{mission_id}] CUT path '{bp_path}' -> {role_key} ({playbook}).",
+                                    detail=f"Disjoint 3D bounding sphere{sphere_txt}",
+                                    mission_id=mission_id,
+                                )
             live_llm_calls = int(coord_telemetry.get("llm_calls") or 0)
             total_tokens_used = int(coord_telemetry.get("tokens_used") or 0)
             llm_errors: list[str] = []
@@ -6045,6 +6875,21 @@ class LiveSwarmRunner:
             workspace_info = {} if browser_session else self._inspect_workspace_readonly(goal)
             blackboard = SessionBlackboard(session_id=mission_id, checkpoint_path=None)
             registry = self._build_scoped_registry(workspace_info)
+            matched_skills: list[dict[str, str]] = []
+            if self.skill_lookup_fn is not None:
+                try:
+                    matched_skills = list(self.skill_lookup_fn(goal, 2) or [])[:2]
+                except Exception:
+                    matched_skills = []
+            skill_guidance = (
+                "\n\nMATCHED WORKSPACE SKILLS (task guidance; existing permissions still apply):\n"
+                + "\n\n".join(
+                    f"### Skill: {skill.get('name') or skill.get('id')}\n"
+                    f"{str(skill.get('excerpt') or skill.get('description') or '')[:1600]}"
+                    for skill in matched_skills
+                )
+                if matched_skills else ""
+            )
 
             # 1. Optional Planner Stage (only in parallel_research_swarm)
             planner_notes = ""
@@ -6065,7 +6910,8 @@ class LiveSwarmRunner:
                     planner_model,
                     "You are Sabrina's Planner Architect. Produce a concise numbered execution plan grounded in the workspace and stop condition.",
                     f"Mission Goal:\n{goal}\n\nPlaybook: {playbook}\nStop Condition: {blueprint.stop_condition}\n"
-                    + (f"Browser origin: {browser_session.origin}" if browser_session else f"Workspace Root: {self.workspace_root}"),
+                    + (f"Browser origin: {browser_session.origin}" if browser_session else f"Workspace Root: {self.workspace_root}")
+                    + skill_guidance,
                 )
                 with subtask_lock:
                     _record_llm_outcome(plan_llm)
@@ -6167,7 +7013,7 @@ class LiveSwarmRunner:
                         f"Mission Goal:\n{goal}\n\n"
                         f"Top entries: {', '.join(workspace_info.get('top_entries', [])[:15])}\n"
                         f"Matched files ({matched_n}): {', '.join(m['path'] for m in (workspace_info.get('matched_files') or [])[:8])}\n\n"
-                        f"File excerpts:\n{excerpts_blob}"
+                        f"File excerpts:\n{excerpts_blob}{skill_guidance}"
                     ),
                 )
                 with subtask_lock:
@@ -6253,7 +7099,9 @@ class LiveSwarmRunner:
                     progress_pct=35,
                     detail=f"Running {playbook} Execution Specialist ({exec_model})...",
                 )
-            exec_file_excerpts = "" if browser_session else (self._read_targeted_file_excerpts(goal) or excerpts_blob)
+            exec_file_excerpts = "" if browser_session else (
+                self._read_targeted_file_excerpts(goal, excerpt_budget=self.executor_excerpt_chars) or excerpts_blob
+            )
             shed_list = ", ".join(manifest.available_tool_shed)
             tool_instructions = (
                 f"\nPermitted tools from Pre-Flight Manifest: [{shed_list}]\n"
@@ -6279,6 +7127,7 @@ class LiveSwarmRunner:
                 + f"\nWorkspace Excerpts:\n{exec_file_excerpts[:self.executor_excerpt_chars]}\n"
                 + write_instruction
                 + tool_instructions
+                + skill_guidance
             )
             max_tool_rounds = 4 if playbook == "iterative_debug_loop" else 3
             if browser_session:
@@ -6307,6 +7156,8 @@ class LiveSwarmRunner:
                     '{"action":"finish","summary":"<observed result or blocker>"}\n'
                     "Each action already returns a page snapshot. Take refs from the latest visible snapshot. "
                     "If a snapshot has multiple pages and the needed items are not shown, read later snapshot pages. "
+                    "Before finishing, compare your summary with every distinct requested fact or action; "
+                    "inspect further if any part is missing, or report the unverified part explicitly. "
                     "Resolve a failed step before taking an action that depends on it. "
                     "Never enter passwords, security codes, or payment data. Purchase, publish, and send only with separate explicit authorization. "
                     "Report access denial and any missing verification. Include a site-provided permanent link if available. "
@@ -6344,6 +7195,7 @@ class LiveSwarmRunner:
                         "Send messages, publish, or make purchases only with explicit authorization. "
                         "Report what you observed and what remains unverified."
                     )
+                browser_base_prompt += skill_guidance
                 exec_prompt = browser_base_prompt + ('\n\nStart with {"action":"snapshot"}.' if is_desktop else '\n\nStart with {"action":"open"}.')
             exec_llm = self._invoke_stage_llm(AgentRole.EXECUTION_SPECIALIST.value, exec_model, exec_sys, exec_prompt)
             tool_rounds_executed = 0
@@ -6610,13 +7462,16 @@ class LiveSwarmRunner:
                     'Return a single JSON object {"passed":true or false,"reason":"explain the evidence"}. '
                     "Set passed to true only if the site evidence confirms the user's requested outcome. "
                     "Set passed to false for access errors, incomplete actions, or claims without visible evidence. "
-                    "Check every part of the goal, including whether the user personally performed any requested action. "
+                    "In the reason, check each requested fact and action separately against both the executor summary "
+                    "and observed evidence. An accurate answer to only part of the goal is not a pass. "
+                    "Check whether the user personally performed any requested action. "
                     "A browser observation marked user_completed_handoff means the user was given control. "
                     "The handoff alone does not prove a particular action occurred. Use the observed page evidence. "
                     "Agent actions alone do not prove that the user performed an action."
                 )
                 critic_prompt = (
-                    f"Mission Goal:\n{goal}\n\nExecutor summary:\n{str(exec_llm.get('text') or '')[:1500]}"
+                    f"Mission Goal:\n{goal}\n\nStop Condition: {blueprint.stop_condition}\n\n"
+                    f"Executor summary:\n{str(exec_llm.get('text') or '')[:1500]}"
                     + ("\n\nDesktop observations (from the runtime):\n" if getattr(browser_session, "is_desktop", False)
                        else "\n\nBrowser observations (from the runtime):\n")
                     + json.dumps(dispatched_browser_actions[-2:], ensure_ascii=False)
@@ -6872,6 +7727,7 @@ class LiveSwarmRunner:
                     mission_id=mission_id,
                 )
         except Exception as exc:
+            _logger.exception("Blueprint mission %s failed", mission_id)
             with self._lock:
                 message = f"Mission failed unexpectedly: {type(exc).__name__}: {exc}"
                 for item in (self._missions.get(mission_id), self._mission_outputs.get(mission_id)):
@@ -6882,6 +7738,14 @@ class LiveSwarmRunner:
                     mission_id=mission_id,
                 )
         finally:
+            for bp_wid in _bp_jc_wids:
+                with self._lock:
+                    bp_rec = dict(self._workers.get(bp_wid) or {})
+                self._join_cut_settle(
+                    mission_id,
+                    bp_wid,
+                    outcome=_settle_outcome(bp_rec, cancelled=cancel_event.is_set()),
+                )
             if browser_session:
                 browser_session.close()
             if self.auto_spindown:
@@ -6892,7 +7756,6 @@ class LiveSwarmRunner:
                 plugin_access = self._plugin_access.pop(mission_id, None)
                 if plugin_access is not None:
                     plugin_access.cancel()
-            done_event.set()
 
     def launch_context_first_mission(
         self,
@@ -7194,25 +8057,21 @@ class LiveSwarmRunner:
                 mission_id=mission_id,
             )
 
-            thread = threading.Thread(
-                target=self._run_blueprint_mission_pipeline,
-                args=(
+            self._start_mission_thread_locked(
+                mission_id, self._run_blueprint_mission_pipeline,
+                (
                     mission_id,
                     clean_goal,
                     eff_manifest,
                     eff_blueprint,
                     worker_ids,
                     cancel_event,
-                    done_event,
                     bool(allow_workspace_writes),
                     coord_telemetry,
                     browser_session,
                 ),
-                name=f"swarm-blueprint-{mission_id}",
-                daemon=True,
+                done_event, f"swarm-blueprint-{mission_id}",
             )
-            self._threads.append(thread)
-            thread.start()
             active_count = len(self._workers)
 
         spawned_list = list(worker_ids.values())
@@ -7324,6 +8183,8 @@ class LiveSwarmRunner:
                         ep["updated_str"] = _clock_str(now)
                 to_remove = list(self._workers.keys())
 
+            for mid in stopped_missions:
+                self._save_run_status_locked(mid)
             for wid in to_remove:
                 removed = self._remove_worker_locked(wid, reason="stopped", final_status="STOPPED")
                 if removed is not None:
@@ -7715,6 +8576,32 @@ class LiveSwarmRunner:
             if (evidence := self._completed_run_evidence(path.stem)) is not None
         ]
 
+    def _read_run_status(self, mission_id: str) -> dict[str, Any] | None:
+        if not re.fullmatch(r"m-[0-9a-f]{8}", mission_id):
+            return None
+        try:
+            path = self.artifacts_dir / "run_status" / f"{mission_id}.json"
+            if path.resolve().parent != path.parent:
+                return None
+            status = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(status, dict) or status.get("mission_id") != mission_id:
+                return None
+            if status.get("state") == "ACTIVE (RUNNING)":
+                if not stopped_evidence(status.get("owner"))["stopped"]:
+                    return None
+                status.update(state="INTERRUPTED", summary="The runner exited before recording a final status.")
+        except (OSError, RuntimeError, ValueError, TypeError, OverflowError):
+            return None
+        return {key: status.get(key) for key in
+                ("mission_id", "goal", "mode", "state", "summary", "completed_at", "updated_at")}
+
+    def list_run_attention(self) -> list[dict[str, Any]]:
+        paths = sorted((self.artifacts_dir / "run_status").glob("m-*.json"),
+                       key=lambda path: path.stat().st_mtime, reverse=True)
+        return [status for path in paths[:40]
+                if (status := self._read_run_status(path.stem)) is not None
+                and status.get("state") in {"FAILED", "ERROR", "BLOCKED", "INTERRUPTED"}]
+
     def get_next_step_draft(self, mission_id: str) -> dict[str, Any]:
         evidence = self._completed_run_evidence(mission_id)
         if not evidence:
@@ -7744,16 +8631,78 @@ class LiveSwarmRunner:
         with self._lock:
             if not target:
                 if not self._mission_order:
-                    return {
-                        "ok": True,
-                        "mission_id": None,
-                        "output": None,
-                        "report_markdown": "",
-                        "artifact_path": "",
-                        "execution_authorized": False,
-                    }
-                target = self._mission_order[0]
+                    if self.artifacts_dir and self.artifacts_dir.is_dir():
+                        md_candidates = sorted(
+                            [f for f in self.artifacts_dir.glob("*.md") if f.is_file() and f.stem.startswith("m-")],
+                            key=lambda x: x.stat().st_mtime,
+                            reverse=True,
+                        )
+                        if md_candidates:
+                            target = md_candidates[0].stem
+                    if not target:
+                        return {
+                            "ok": True,
+                            "mission_id": None,
+                            "output": None,
+                            "report_markdown": "",
+                            "artifact_path": "",
+                            "execution_authorized": False,
+                        }
+                else:
+                    target = self._mission_order[0]
             output = self._mission_outputs.get(target)
+            saved_status = self._read_run_status(target) if output is None else None
+            if output is None and self.artifacts_dir and self.artifacts_dir.is_dir():
+                md_path = self.artifacts_dir / f"{target}.md"
+                if md_path.is_file():
+                    try:
+                        md_text = md_path.read_text(encoding="utf-8")
+                        parsed_subtasks: list[dict[str, Any]] = []
+                        cur: dict[str, Any] | None = None
+                        for line in md_text.splitlines():
+                            if line.startswith("### ") and "(`" in line and "`)" in line:
+                                if cur:
+                                    parsed_subtasks.append(cur)
+                                head = line[4:].strip()
+                                name_part, rest = head.split("(`", 1)
+                                role_model = rest.split("`)", 1)[0]
+                                parts = [p.strip().strip("`") for p in role_model.split("·")]
+                                role = parts[0] if parts else ""
+                                model = parts[1] if len(parts) > 1 else ""
+                                cur = {
+                                    "name": name_part.strip(),
+                                    "role": role,
+                                    "model": model,
+                                    "latency_ms": 0.0,
+                                    "status": "DONE",
+                                    "llm_used": False,
+                                    "summary": "",
+                                }
+                            elif cur:
+                                if line.startswith("- **Execution:**"):
+                                    cur["llm_used"] = "LIVE LLM" in line
+                                    m_lat = re.search(r"(\d+(?:\.\d+)?)\s*ms", line)
+                                    if m_lat:
+                                        cur["latency_ms"] = float(m_lat.group(1))
+                                elif line.startswith("- **Status:**"):
+                                    cur["status"] = line.split(":", 1)[1].strip()
+                                elif line.startswith("- **Summary:**"):
+                                    cur["summary"] = line.split(":", 1)[1].strip()
+                        if cur:
+                            parsed_subtasks.append(cur)
+                        output = {
+                            "mission_id": target,
+                            "state": "DONE",
+                            "summary": f"Mission {target} complete.",
+                            "report_markdown": md_text,
+                            "artifact_path": str(md_path),
+                            "subtasks": parsed_subtasks,
+                            "execution_authorized": False,
+                        }
+                    except Exception:
+                        output = None
+            if saved_status:
+                output = {**(output or {}), **saved_status}
             if output is None:
                 return {
                     "ok": False,
@@ -8028,6 +8977,7 @@ class LiveSwarmRunner:
             "workers_per_coordinator": self.workers_per_coordinator,
             "ratio": f"{self.coordinator_count}:{self.workers_per_coordinator}",
             "topology_mode": self.topology_mode,
+            "branching_order": self.branching_order,
             "active_ratio": f"{active_coords}:{non_coord_workers}" if is_active else f"1:0",
             "max_budget": f"{self.coordinator_count}:{self.coordinator_count * self.workers_per_coordinator}",
             "subagent_excerpt_chars": self.subagent_excerpt_chars,
@@ -8162,6 +9112,7 @@ class LiveSwarmRunner:
     def shutdown(self) -> None:
         """Cancel all active missions, spin down workers, and cancel any pending timers."""
         self.stop_mission(None)
+        self._join_cut_retry_stop.set()
         with self._lock:
             timers = list(self._spindown_timers.values())
             self._spindown_timers.clear()

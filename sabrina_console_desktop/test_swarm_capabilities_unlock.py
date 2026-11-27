@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from sabrina_console_desktop.context_first_coordinator import (
     BlueprintValidationError,
@@ -48,6 +50,98 @@ class _UnlockFakeVault:
 
 
 class TestSwarmCapabilitiesUnlock(unittest.TestCase):
+    def test_router_uses_selected_model_after_first_sixty_catalog_entries(self) -> None:
+        catalog = [{"id": f"openai/gpt-5-mini-fixture-{n}", "provider": "openai"} for n in range(60)]
+        selected = "openai/gpt-4.1-mini"
+        catalog.append({"id": selected, "provider": "openai"})
+        vault = _UnlockFakeVault(unlocked=["openai"], probed=catalog)
+        self.assertIn(selected, build_preflight_manifest(vault=vault).healthy_model_ids)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bridge = SabrinaDesktopBridge(role_bindings_path=root / "roles.json", vault=vault,
+                                          swarm_artifacts_dir=root / "reports", step_delay_sec=0)
+            self.addCleanup(bridge.swarm_runner.shutdown)
+            bridge.role_bindings.set_binding("execution_specialist", selected, [])
+            attempts = []
+            def invoke(provider, model_id, system_prompt, user_prompt, api_key=None, **kwargs):
+                attempts.append(model_id)
+                return {"ok": True, "provider": provider, "model": model_id, "text": "fixture"}
+            bridge._invoke_provider_text = invoke
+            result = bridge._call_swarm_llm_inner("execution_specialist", selected, "system", "task")
+            self.assertTrue(result["ok"])
+            self.assertEqual(attempts, [selected])
+            self.assertFalse(result.get("used_fallback", False))
+
+    def test_model_specific_rate_limit_uses_another_model_from_same_provider(self) -> None:
+        primary, alternate = "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"
+        vault = _UnlockFakeVault(unlocked=["gemini"], probed=[
+            {"id": primary, "provider": "gemini"}, {"id": alternate, "provider": "gemini"}])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bridge = SabrinaDesktopBridge(role_bindings_path=root / "roles.json", vault=vault,
+                                          swarm_artifacts_dir=root / "reports", step_delay_sec=0)
+            self.addCleanup(bridge.swarm_runner.shutdown)
+            bridge.role_bindings.set_binding("execution_specialist", primary, [alternate])
+            attempts = []
+            def invoke(provider, model_id, system_prompt, user_prompt, api_key=None, **kwargs):
+                attempts.append(model_id)
+                if model_id == primary:
+                    return {"ok": False, "provider": provider, "model": model_id,
+                            "error": "HTTP 429: Rate limit exceeded for model gemini-3.5-flash-lite (limit: 500 requests per day). Please retry in 7h35m37s"}
+                return {"ok": True, "provider": provider, "model": model_id, "text": "fixture"}
+            bridge._invoke_provider_text = invoke
+            started = time.monotonic()
+            result = bridge._call_swarm_llm_inner("execution_specialist", primary, "system", "task")
+            self.assertTrue(result["ok"], result.get("error"))
+            self.assertEqual(attempts, [primary, alternate])
+            self.assertTrue(result.get("used_fallback"))
+            self.assertNotIn("gemini", bridge._provider_cooldowns)
+            self.assertGreaterEqual(bridge._provider_cooldowns[("gemini", primary)] - started, 27337)
+            manifest = build_preflight_manifest(vault=vault, cooldowns=bridge._provider_cooldowns)
+            self.assertNotIn("gemini/" + primary, manifest.healthy_model_ids)
+            self.assertIn("gemini/" + alternate, manifest.healthy_model_ids)
+
+    def test_router_does_not_report_fallback_when_primary_succeeds(self) -> None:
+        primary = "gemini-3.5-flash-lite"
+        vault = _UnlockFakeVault(unlocked=["gemini"], probed=[{"id": primary, "provider": "gemini"}])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bridge = SabrinaDesktopBridge(role_bindings_path=root / "roles.json", vault=vault,
+                                          swarm_artifacts_dir=root / "reports", step_delay_sec=0)
+            self.addCleanup(bridge.swarm_runner.shutdown)
+            bridge.role_bindings.set_binding("execution_specialist", primary, ["openai/gpt-5"])
+            bridge._invoke_provider_text = lambda provider, model_id, *args, **kwargs: {
+                "ok": True, "provider": provider, "model": model_id, "text": "fixture"}
+            result = bridge._call_swarm_llm_inner("execution_specialist", primary, "system", "task")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["model"], primary)
+            self.assertFalse(result.get("used_fallback", False))
+
+    def test_unspecified_provider_rate_limit_skips_the_rest_of_that_provider(self) -> None:
+        primary, alternate, other = "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "openai/gpt-5-mini"
+        vault = _UnlockFakeVault(unlocked=["gemini", "openai"], probed=[
+            {"id": primary, "provider": "gemini"}, {"id": alternate, "provider": "gemini"},
+            {"id": other, "provider": "openai"}])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bridge = SabrinaDesktopBridge(role_bindings_path=root / "roles.json", vault=vault,
+                                          swarm_artifacts_dir=root / "reports", step_delay_sec=0)
+            self.addCleanup(bridge.swarm_runner.shutdown)
+            bridge.role_bindings.set_binding("execution_specialist", primary, [alternate, other])
+            attempts = []
+            def invoke(provider, model_id, system_prompt, user_prompt, api_key=None, **kwargs):
+                attempts.append(model_id)
+                if provider == "gemini":
+                    return {"ok": False, "provider": provider, "model": model_id,
+                            "error": "HTTP 429: provider rate limit; retry in 2m"}
+                return {"ok": True, "provider": provider, "model": model_id, "text": "fixture"}
+            bridge._invoke_provider_text = invoke
+            start = time.monotonic()
+            result = bridge._call_swarm_llm_inner("execution_specialist", primary, "system", "task")
+            self.assertTrue(result["ok"], result.get("error"))
+            self.assertEqual(attempts, [primary, other])
+            self.assertGreaterEqual(bridge._provider_cooldowns["gemini"] - start, 120)
+
     # ------------------------------------------------------------------
     # Tier 1: Multimodal Capability Manifest, Blueprint & Media Helpers
     # ------------------------------------------------------------------
@@ -490,13 +584,17 @@ class TestSwarmCapabilitiesUnlock(unittest.TestCase):
             self.assertEqual(len(openai_attempts), 1, f"Expected exactly 1 OpenAI attempt before inf cooldown, got {attempted_models}")
             self.assertEqual(bridge._provider_cooldowns.get("openai"), float("inf"))
 
-            # Verify permanent LLM_WARN self-healing: execution_specialist primary_model was gemini-4-hydrogen (unprobed/deferred)
-            # or if bound to openai/gpt-5-mini (zero credits), _call_swarm_llm auto-promotes the working model in role_bindings
-            # so the next stage call has used_fallback=False (no perpetual LLM_WARN)!
+            # An isolated bridge reports the fallback and preserves its configured binding.
             bridge.role_bindings.set_binding("planner_architect", "openai/gpt-5-mini", ["gemini-3.5-flash-lite"])
             r_warn = bridge._call_swarm_llm("planner_architect", "gemini-3.5-flash-lite", "sys", "plan 1")
             self.assertTrue(r_warn["ok"])
             self.assertTrue(r_warn.get("used_fallback"))
+            self.assertEqual(bridge.role_bindings.get_binding("planner_architect").primary_model, "openai/gpt-5-mini")
+
+            # Exercise production binding recovery with the same temporary store and scripted providers.
+            with patch.object(bridge, "_isolated_test_mode", False):
+                healed = bridge._call_swarm_llm("planner_architect", "gemini-3.5-flash-lite", "sys", "plan 1")
+            self.assertTrue(healed["ok"])
             self.assertEqual(bridge.role_bindings.get_binding("planner_architect").primary_model, "gemini-3.5-flash-lite")
 
             # Subsequent call using resolved role binding no longer triggers LLM_WARN!
@@ -514,14 +612,19 @@ class TestSwarmCapabilitiesUnlock(unittest.TestCase):
                 (ws / "pkg" / name).write_text(body, encoding="utf-8")
             runner = LiveSwarmRunner(workspace_root=ws, artifacts_dir=Path(tmp) / "reports", auto_spindown=False)
             try:
-                excerpts = runner._read_targeted_file_excerpts(
-                    "Topology Mutation and Recovery Policy\nAudit pkg/alpha_big.py, beta_mid.py, recovery_policy.py, and swarm_evo_bench.py"
-                )
-                clipped = excerpts[: runner.subagent_excerpt_chars]
-                # Workstream-matched recovery_policy.py comes FIRST and all 4 files fit inside 3200 chars!
+                runner.configure_topology(subagent_excerpt_chars=12_000, executor_excerpt_chars=16_000)
+                goal = "Topology Mutation and Recovery Policy\nAudit pkg/alpha_big.py, beta_mid.py, recovery_policy.py, and swarm_evo_bench.py"
+                subagent = runner._read_targeted_file_excerpts(goal)
+                clipped = subagent[: runner.subagent_excerpt_chars]
                 self.assertLess(clipped.find("recovery_policy.py"), clipped.find("alpha_big.py"))
                 for fname in ("recovery_policy.py", "alpha_big.py", "beta_mid.py", "swarm_evo_bench.py"):
                     self.assertIn(fname, clipped)
+                    self.assertIn(f"def fn_{fname[:4]}_0()", clipped)
+                self.assertLessEqual(len(subagent), runner.subagent_excerpt_chars)
+
+                executor = runner._read_targeted_file_excerpts(goal, excerpt_budget=runner.executor_excerpt_chars)
+                self.assertGreater(len(executor), len(subagent))
+                self.assertLessEqual(len(executor), runner.executor_excerpt_chars)
             finally:
                 runner.shutdown()
 

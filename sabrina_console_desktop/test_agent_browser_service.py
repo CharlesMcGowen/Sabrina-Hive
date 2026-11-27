@@ -17,6 +17,63 @@ from sabrina_console_desktop.live_swarm_runner import LiveSwarmRunner
 
 
 class TestAgentBrowserService(unittest.TestCase):
+    def test_browser_mission_keeps_matched_skill_guidance_on_each_turn(self):
+        class Session:
+            backend = "fixture"
+            origin = "https://example.com"
+            start_url = "https://example.com/"
+            max_actions = 3
+            def __init__(self):
+                self.events = []
+            def manifest(self):
+                return {"backend": self.backend, "origin": self.origin, "start_url": self.start_url}
+            def run(self, request, _cancel):
+                event = {"action": request["action"], "ok": True, "dispatched": True,
+                         "snapshot": 'heading "Example Domain"', "elapsed_ms": 1}
+                self.events.append(event)
+                return event
+            def close(self):
+                pass
+            def telemetry(self):
+                return {"backend": self.backend, "actions": len(self.events)}
+
+        prompts = []
+        critic_calls = []
+        model = "ollama/gemma3:4b"
+        def llm(role, model_id, _system, prompt):
+            if role == "execution_specialist":
+                prompts.append(prompt)
+                reply = ('{"action":"open"}' if len(prompts) == 1 else
+                         '{"action":"finish","summary":"Example Domain"}')
+            else:
+                critic_calls.append((_system, prompt))
+                reply = '{"passed":true,"reason":"The heading was observed."}'
+            return {"ok": True, "model": model_id, "provider": "ollama", "text": reply}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = LiveSwarmRunner(workspace_root=root, artifacts_dir=root / "reports", step_delay_sec=0,
+                                     auto_spindown=False, llm_caller=llm,
+                                     skill_lookup_fn=lambda goal, limit: [{"id": "browser-tasks", "name": "browser-tasks", "excerpt": "Use observed page evidence."}])
+            try:
+                manifest = build_preflight_manifest(unlocked_providers=["ollama"], ollama_models=["gemma3:4b"], ollama_ready=True)
+                blueprint = {"playbook": "direct_single_agent", "role_bindings": {
+                    "execution_specialist": model, "critic_verifier": model}, "stop_condition": "Read the heading."}
+                launch = runner.launch_context_first_mission("Use browser-tasks to read the heading", manifest=manifest,
+                                                             blueprint=blueprint, browser_session=Session())
+                self.assertTrue(launch["ok"], launch.get("error"))
+                self.assertIsNotNone(runner.wait_for_mission(launch["mission_id"], timeout=10))
+                self.assertEqual(len(prompts), 2)
+                self.assertEqual(len(critic_calls), 1)
+                self.assertIn("only part of the goal is not a pass", critic_calls[0][0])
+                self.assertIn("Stop Condition: Read the heading.", critic_calls[0][1])
+                for prompt in prompts:
+                    self.assertIn("Use observed page evidence.", prompt)
+                    self.assertIn("Authorized origin: https://example.com", prompt)
+                    self.assertIn("existing permissions still apply", prompt)
+            finally:
+                runner.shutdown()
+
     def test_browser_actions_stay_in_scope(self):
         url, origin = scoped_url("https://Example.com:443/start")
         self.assertEqual(url, "https://example.com/start")

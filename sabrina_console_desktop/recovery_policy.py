@@ -39,9 +39,9 @@ class RecoveryPolicy:
         values = json.loads(contents)
         ranges = {
             "timeout_seconds": (5, 120),
-            "max_context_chars": (1000, 12000),
+            "max_context_chars": (1000, 65536),
             "max_reply_tokens": (128, 2048),
-            "max_workers_per_mission": (0, 8),
+            "max_workers_per_mission": (0, 256),
         }
         if not isinstance(values, dict) or values.keys() - {"model", "allow_worker_hotfixes", *ranges}:
             raise ValueError("Recovery policy contains unsupported settings")

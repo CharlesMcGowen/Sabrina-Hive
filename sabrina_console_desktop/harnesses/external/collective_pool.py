@@ -794,7 +794,7 @@ class KindCollectivePool:
         self,
         portal_ids: List[str],
         prompt: str,
-        max_workers: int = 12,
+        max_workers: int = 32,
         *, conversation=False, task_id='', member_call=None, on_response=None,
         should_continue=None, progress=None,
     ) -> List[Dict[str, Any]]:

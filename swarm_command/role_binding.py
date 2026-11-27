@@ -99,6 +99,18 @@ def infer_model_provider(model_id: str) -> str:
 
     prefix_map = (
         ("openrouter/", "openrouter"),
+        ("google_vertex/", "google_vertex"),
+        ("vertex/", "google_vertex"),
+        ("aws_bedrock/", "aws_bedrock"),
+        ("bedrock/", "aws_bedrock"),
+        ("runpod/", "runpod"),
+        ("vastai/", "vastai"),
+        ("vast/", "vastai"),
+        ("lambda_labs/", "lambda_labs"),
+        ("lambda/", "lambda_labs"),
+        ("modal/", "modal"),
+        ("coreweave/", "coreweave"),
+        ("custom_gpu/", "custom_gpu"),
         ("huggingface/", "huggingface"),
         ("cerebras/", "cerebras"),
         ("sambanova/", "sambanova"),

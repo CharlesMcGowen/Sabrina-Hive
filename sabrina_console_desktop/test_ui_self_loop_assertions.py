@@ -4,8 +4,7 @@ Validates:
 1. HTML DOM contract for `#quick-mission-goal` ("Enter a mission goal for the swarm..."),
    `#quick-auto-loop-count` (0/+1x/+2x/+3x), `#recommended-next-banner`, `#btn-restore-prev-goal`,
    `#btn-auto-seed-self-loop`, and `data-spawn-agent="recommend_next"`.
-2. JS event-handler invariants (`applyRecommendedNextGoalToInputs`, `window.__remainingAutoLoops`,
-   `seedSelfLoopFinalePreset`, `fId -> loop_root` self-loop preset, and Node VM execution when Node is installed).
+2. Browser handlers for background follow-up submission, recommendation review, Stop, and the self-loop preset.
 3. End-to-end 3-cycle Bridge + SwarmRunner prompt-and-loop telemetry:
    Prompt 1 -> Swarm Mission 1 -> Finale Next Step 1 -> Prompt 2 -> Swarm Mission 2 -> Finale Next Step 2,
    plus SBV drift interception and payload byte-ceiling telemetry verification.
@@ -13,35 +12,64 @@ Validates:
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
 from sabrina_console_desktop.automation_engine import compute_goal_similarity, stabilize_evolved_goal
 from sabrina_console_desktop.sabrina_desktop_ui import SabrinaDesktopBridge
+from sabrina_console_desktop.test_snapshot_ui import find_browser
 
 ROOT = Path(__file__).resolve().parent.parent
 UI_HTML = ROOT / "sabrina_console_desktop" / "sabrina_desktop_ui.html"
 
 
-def _find_node_binary() -> str | None:
-    found = shutil.which("node")
-    if found:
-        return found
-    for candidate in (
-        r"C:\Program Files\nodejs\node.exe",
-        r"C:\Program Files (x86)\nodejs\node.exe",
-        os.path.expandvars(r"%LOCALAPPDATA%\Programs\nodejs\node.exe"),
-        os.path.expandvars(r"%APPDATA%\nvm\current\node.exe"),
-    ):
-        if candidate and Path(candidate).is_file():
-            return candidate
-    return None
+_SELF_LOOP_PROBE = """
+<output id="self-loop-result">pending</output>
+<script>
+(async () => {
+  const el = id => document.getElementById(id);
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const check = (ok, message) => { if (!ok) throw new Error(message); };
+  const launches = [], stops = [];
+  const goal = el("quick-mission-goal");
+  let saved;
+  window.pywebview = {api: {
+    launch_mission: async (...args) => { launches.push(args); return {ok:true}; },
+    stop_mission: async id => { stops.push(id); return {ok:true}; },
+    get_snapshot: async () => ({swarm:{workers:[], active_worker_count:0},
+                               recommended_next_step:{goal:"Review results", source:"finale"}}),
+    save_automation: async spec => { saved = spec; return {ok:true}; },
+  }};
+  try {
+    goal.value = "Check inputs";
+    el("quick-auto-loop-count").value = "2";
+    el("btn-quick-launch").click();
+    await wait(0);
+    check(launches.length === 1 && launches[0][0] === "Check inputs" && launches[0][10] === 2,
+          "Quick launch did not submit the selected follow-up count once");
+    check(goal.value === "Review results" && el("recommended-next-text").textContent === goal.value,
+          "The completed run did not populate the recommended goal");
+    el("btn-restore-prev-goal").click();
+    el("btn-refresh").click();
+    await wait(1000);  // Advance past the former 950 ms browser relaunch timer.
+    check(goal.value === "Check inputs" && launches.length === 1, "A repeated snapshot reapplied or launched the recommendation");
+    el("btn-quick-stop").click();
+    check(stops.length === 1 && stops[0] === "", "Stop did not cancel background missions through the bridge");
+    el("btn-auto-seed-self-loop").click();
+    el("btn-manual-save").click();
+    const finale = saved.steps.find(step => step.step_type === "recommend_next");
+    check(finale && saved.edges.some(edge => edge.from === finale.id && edge.to === "loop_root" &&
+          edge.comm_type === "loop" && edge.max_loops === 1), "The preset did not loop from the finale to the root once");
+    el("self-loop-result").textContent = "passed";
+  } catch (error) { el("self-loop-result").textContent = String(error); }
+})();
+</script>
+"""
 
 
 class _DomInspector(HTMLParser):
@@ -91,24 +119,22 @@ class TestUiSelfLoopAssertions(unittest.TestCase):
         ):
             self.assertIn(req_id, inspector.elements_by_id, f"Missing required DOM id={req_id}")
 
-        # 2. Verify JS state machine wiring for input auto-fill, remaining auto-loops, Stop cancellation, and self-loop preset
-        self.assertIn("function applyRecommendedNextGoalToInputs(", html)
-        self.assertIn("window.__applyRecommendedNextGoal = applyRecommendedNextGoalToInputs;", html)
-        self.assertIn("window.__remainingAutoLoops = Math.max(0, Number(window.__remainingAutoLoops) - 1);", html)
-        self.assertIn("window.__remainingAutoLoops = 0;", html)
-        self.assertIn('to: "loop_root"', html)
-        self.assertRegex(html, r'step_type:\s*"recommend_next"')
-
-        # Optional Node VM execution if Node.js is installed on host
-        node_bin = _find_node_binary()
-        if node_bin:
-            proc = subprocess.run(
-                [node_bin, "-e", "const fs=require('fs'); console.log(fs.statSync(process.argv[1]).size);", str(UI_HTML)],
-                capture_output=True,
-                text=True,
-                timeout=10,
+        browser = find_browser()
+        if not browser:
+            self.skipTest("Requires an installed Edge or Chromium browser")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            page = root / "self-loop.html"
+            page.write_text(html.replace("</body>", _SELF_LOOP_PROBE + "</body>"), encoding="utf-8")
+            result = subprocess.run(
+                [browser, "--headless", "--disable-gpu", "--disable-extensions", "--no-first-run",
+                 "--disable-background-networking", f"--user-data-dir={root / 'profile'}",
+                 "--virtual-time-budget=1500", "--dump-dom", page.as_uri()],
+                capture_output=True, encoding="utf-8", errors="replace", timeout=30, check=True,
             )
-            self.assertEqual(proc.returncode, 0)
+        outcome = re.search(r'<output id="self-loop-result">([^<]*)</output>', result.stdout)
+        self.assertIsNotNone(outcome, "Browser did not return the self-loop page")
+        self.assertEqual(unescape(outcome[1]), "passed")
 
     def test_three_cycle_prompt_and_loop_telemetry_with_sbv_and_budget_guards(self) -> None:
         mission_round = 0

@@ -233,6 +233,7 @@ class TestRoleBindingConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = Path(tmp) / "role_bindings.json"
             cfg = RoleBindingConfig(config_path=cfg_path)
+            default_coordinator = cfg.get_binding("coordinator")
             self.assertEqual(cfg.get_binding("verifier").role, "critic_verifier")
             self.assertEqual(cfg.get_binding(AgentRole.RESEARCH_SCOUT).primary_model, "gemini-4-hydrogen")
 
@@ -256,10 +257,12 @@ class TestRoleBindingConfig(unittest.TestCase):
             )
 
             reset = reloaded.reset_binding("coordinator")
-            self.assertEqual(reset.primary_model, "gemini-4-carbon")
+            self.assertEqual(reset, default_coordinator)
+            self.assertEqual(RoleBindingConfig(config_path=cfg_path).get_binding("coordinator"), default_coordinator)
 
     def test_resolve_model_and_execute_with_fallback(self) -> None:
         cfg = RoleBindingConfig()
+        cfg.set_binding("coordinator", "gemini-4-carbon", ["gemini-4-neon", "openai/gpt-5"])
         # Primary gemini-4-carbon is locked when only openai is unlocked -> selects openai/gpt-5.
         resolved = cfg.resolve_model("coordinator", unlocked_providers={"openai"})
         self.assertEqual(resolved["selected_model"], "openai/gpt-5")

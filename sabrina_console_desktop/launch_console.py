@@ -77,6 +77,11 @@ def run_supervised() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     global log
+    args = sys.argv[1:] if argv is None else argv
+    if args[:1] == ["--followup-coordinator"] and len(args) == 2:
+        from followup_coordinator import run_worker
+        run_worker(args[1])
+        return
     configure_tk_environment()
     log = (ROOT / "console-launch.log").open("a", encoding="utf-8", buffering=1)
     sys.stdout = log

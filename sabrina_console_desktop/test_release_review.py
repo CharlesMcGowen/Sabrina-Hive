@@ -15,12 +15,12 @@ class TestReleaseReview(unittest.TestCase):
         self.root = Path(tmp.name).resolve()
         (self.root / "dist").mkdir()
         archive = self.root / "dist" / "sabrina-console-release-kit.zip"
-        with ZipFile(archive, "w") as bundle:
+        archive.write_bytes((release.KIT / "dist" / archive.name).read_bytes())
+        with ZipFile(archive) as bundle:
             for name in release.INPUTS:
                 path = self.root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes((release.KIT / name).read_bytes())
-                bundle.write(path, name)
+                path.write_bytes(bundle.read(name))
         kit_patch = patch.object(release, "KIT", self.root)
         kit_patch.start()
         self.addCleanup(kit_patch.stop)
@@ -62,13 +62,13 @@ class TestReleaseReview(unittest.TestCase):
 
     def test_release_launch_uses_only_the_report_runner(self):
         bridge = Mock(spec=SabrinaDesktopBridge)
-        bridge.launch_release_review.side_effect = lambda: {"ok": True, "execution_authorized": False}
-        with patch("sabrina_console_desktop.sabrina_desktop_ui.launch_swarm_mission") as legacy:
-            result = SabrinaDesktopBridge.launch_mission(bridge, release.GOAL)
-            self.assertTrue(result["ok"])
-            bridge.launch_release_review.assert_called_once()
-            bridge._try_local_desktop_action.assert_not_called()
-            legacy.assert_not_called()
+        bridge.swarm_runner = Mock()
+        bridge.launch_release_review.return_value = {"ok": True, "execution_authorized": False}
+        result = SabrinaDesktopBridge.launch_mission(bridge, release.GOAL)
+        self.assertEqual(result, {"ok": True, "execution_authorized": False})
+        bridge.launch_release_review.assert_called_once_with()
+        bridge._try_local_desktop_action.assert_not_called()
+        bridge.swarm_runner.launch_mission.assert_not_called()
 
 
 if __name__ == "__main__":

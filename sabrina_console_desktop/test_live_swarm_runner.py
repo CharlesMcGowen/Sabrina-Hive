@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from sabrina_console_desktop.live_swarm_runner import LiveSwarmRunner
 from swarm_command.models import AgentRole
@@ -14,6 +18,51 @@ from swarm_command.role_binding import RoleBindingConfig
 
 
 class TestLiveSwarmRunner(unittest.TestCase):
+    def test_unexpected_pipeline_failure_is_available_after_reopening(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            options = {"workspace_root": self._make_sample_workspace(root), "artifacts_dir": root / "missions",
+                       "step_delay_sec": 0, "auto_spindown": False}
+            runner = LiveSwarmRunner(**options)
+            with patch.object(runner, "_build_scoped_registry", side_effect=RuntimeError("injected pipeline fault")):
+                mission_id = runner.launch_mission("Audit a sample file")["mission_id"]
+                self.assertEqual(runner.wait_for_mission(mission_id, timeout=10)["state"], "FAILED")
+
+            reopened = LiveSwarmRunner(**options)
+            output = reopened.get_mission_output(mission_id)["output"]
+            self.assertEqual(output["mission_id"], mission_id)
+            self.assertEqual(output["state"], "FAILED")
+            self.assertIn("injected pipeline fault", output["summary"])
+            self.assertEqual(reopened.list_run_attention(), [output])
+
+    def test_process_exit_is_recovered_as_interrupted(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = self._make_sample_workspace(root)
+            artifacts = root / "missions"
+            child = """
+import os
+import sys
+from sabrina_console_desktop.live_swarm_runner import LiveSwarmRunner
+
+runner = LiveSwarmRunner(workspace_root=sys.argv[1], artifacts_dir=sys.argv[2], step_delay_sec=60)
+mission = runner.launch_mission('Audit a sample file')
+print(mission['mission_id'], flush=True)
+os._exit(71)
+"""
+            env = {**os.environ, "SABRINA_ASSISTANT_DB": str(root / "assistant.sqlite3"),
+                   "SABRINA_DND_BLACKBOARD_DB": str(root / "telemetry.sqlite3")}
+            result = subprocess.run([sys.executable, "-c", child, str(workspace), str(artifacts)],
+                                    cwd=Path(__file__).resolve().parents[1], env=env, timeout=25,
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 71, result.stderr)
+            mission_id = result.stdout.strip().splitlines()[-1]
+            reopened = LiveSwarmRunner(workspace_root=workspace, artifacts_dir=artifacts)
+            output = reopened.get_mission_output(mission_id)["output"]
+            self.assertEqual(output["mission_id"], mission_id)
+            self.assertEqual(output["state"], "INTERRUPTED")
+            self.assertEqual(reopened.list_run_attention(), [output])
+
     def test_overlapping_missions_block_stale_write_and_allow_a_fresh_read(self) -> None:
         contender_ready = threading.Event()
         winner_done = threading.Event()
