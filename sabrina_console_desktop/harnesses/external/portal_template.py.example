@@ -1,0 +1,16 @@
+"""Template entry point for an external portal harness.
+
+Copy this file to `<portal_slug>.py` in `sabrina_console_desktop/harnesses/external/`
+and fill in your own portal ID, model ID, and endpoint URL (or register the portal
+in SQLite so `harnesses.external` resolves it dynamically).
+Direct calls remain subject to current portal policy and evidence gates.
+"""
+from tools.portal_transport import invoke_portal
+
+PORTAL_ID = "example-portal-id"
+MODEL_ID = "example-model-id"
+ENDPOINT_URL = "https://example.invalid/v1/chat/completions"
+
+
+def invoke(prompt: str, task_id: str = "", **kwargs):
+    return invoke_portal(PORTAL_ID, prompt, task_id, **kwargs)

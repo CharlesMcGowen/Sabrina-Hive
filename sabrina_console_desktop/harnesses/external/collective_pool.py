@@ -4,33 +4,18 @@ Sabrina Unified External Collective Pool (`harnesses/external/collective_pool.py
 ==================================================================================
 Guild 1 + Guild 4 Upgrade:
 1. Polite Per-Endpoint Token-Bucket Cooldown (`min_cooldown_sec`): Never floods free
-   community Gradio spaces or anonymous portals ("Kind-Compute").
+   community endpoints or anonymous portals ("Kind-Compute").
 2. SQLite Semantic Query Cache (`assistant_semantic_query_cache`):
    - Normalizes and hashes `(tier_or_portal, task_id, normalized_prompt)` using both
      exact SHA-256 and token-shingle Jaccard similarity (`>= 0.88`) so repeated or
      near-identical sub-queries across the swarm are served in `<1ms` with zero
      external network traffic.
 3. 3-Tier Latency & Entropy Routing (`CollectiveRouter`):
-   - `tier="flash"` (`<1.5s` target): Fast cloud & low-latency Gradio flash portals
-     (`google-gemini-3-1-flash-lite-preview-cloud`, `google-gemini-3-5-flash-lite-cloud`,
-     `google-gemini-flash-lite-latest`, `google-gemini-3-1-flash-lite-cloud`,
-     `hf-gradio-jayeshmurthi49-byte-agentic-rag-chatbot-api`, `hf-gradio-himakesh-parth-ai-tutor`,
-     `hf-gradio-ksufian-ai-car-assistant`, `hf-gradio-pelinbalci-pelin-notes-chat`,
-     `hf-gradio-htchu-coderhelper`).
+   - `tier="flash"` (`<1.5s` target): Fast cloud & low-latency endpoints configured in SQLite.
    - `tier="deep_reasoning"` (`27B-72B` & Reasoning Distill): High-capacity open-weights
-     and frontier reasoning models (`google-gemini-3-flash-preview-cloud`,
-     `hf-gradio-vml12-qwen-ai-chatbot` [`Qwen2.5-72B`],
-     `hf-gradio-kingpin92-qwen3-8-27b-iq2-chat` [`Qwen3-27B`],
-     `hf-gradio-zerolimites-deepseek-ai-deepseek-r1-distill-qwen-14b` [`DeepSeek-R1-14B`],
-     `hf-gradio-ast-1320-gemma-4-aggressive` [`Gemma-4`],
-     `hf-gradio-oookto-huihui-gemma-4-e2b-api`, `pollinations-openai-fast`).
-   - `tier="domain_rag"` (Specialized RAG & Digital Twin Spaces):
-     `hf-gradio-affanaiengr-rag`, `hf-gradio-free234-snap-rag-assistant`,
-     `hf-gradio-lkeira108-resume-rag-chatbot`, `hf-gradio-mahmudnadim479-krishiguard`,
-     `hf-gradio-kshitijthakkar-shlokartha-playground`, `hf-gradio-dkt3-digital-twin`,
-     `hf-gradio-dyndl-digital-twin`, `hf-gradio-rstanley2026-rodney-digital-twin`,
-     `hf-gradio-parmeshlata-portfolio-chatbot`, `hf-gradio-nakaassoumatine-einstein-chatbot`,
-     `hf-gradio-netrisyl-lobels-stores-assistant`.
+     and frontier reasoning models configured in SQLite.
+   - `tier="domain_rag"` (Specialized RAG & Domain Spaces): Domain-specific portals
+     configured in SQLite or instantiated from `portal_template.py.example`.
 """
 from __future__ import annotations
 
@@ -61,19 +46,12 @@ from tools.portal_policy import DEFAULT_DB as DEFAULT_DB_PATH
 
 
 # ---------------------------------------------------------------------------
-# Guild 4: Canonical 3-Tier Latency & Capability Classification
+# Guild 4: Canonical 3-Tier Latency & Capability Classification (Template)
+# Populate via SQLite `assistant_external_portals.qualified_roles` or local config.
 # ---------------------------------------------------------------------------
-TIER_1_FLASH_PORTALS: Tuple[str, ...] = (
-    "google-gemini-3-1-flash-lite-preview-cloud",
-    "google-gemini-3-5-flash-lite-cloud",
-    "google-gemini-flash-lite-latest",
-    "google-gemini-3-1-flash-lite-cloud",
-)
+TIER_1_FLASH_PORTALS: Tuple[str, ...] = ()
 
-TIER_2_DEEP_REASONING_PORTALS: Tuple[str, ...] = (
-    "google-gemini-3-flash-preview-cloud",
-    "pollinations-openai-fast",
-)
+TIER_2_DEEP_REASONING_PORTALS: Tuple[str, ...] = ()
 
 TIER_3_DOMAIN_RAG_PORTALS: Tuple[str, ...] = ()
 
@@ -375,15 +353,8 @@ class KindCollectivePool:
                 continue
 
     def _seed_ema_latencies(self) -> None:
-        """Seed initial EMA latencies from known empirical Guild 1-4 benchmarks so cold-start routing is optimal."""
-        priors = {
-            "google-gemini-3-5-flash-lite-cloud": 1171.0,
-            "google-gemini-3-1-flash-lite-preview-cloud": 1229.0,
-            "google-gemini-flash-lite-latest": 1473.0,
-            "google-gemini-3-1-flash-lite-cloud": 2590.0,
-            "pollinations-openai-fast": 11924.0,
-            "google-gemini-3-flash-preview-cloud": 13690.0,
-        }
+        """Seed initial EMA latencies from configured priors if any are registered."""
+        priors: Dict[str, float] = {}
         for pid, lat in priors.items():
             if pid in self._harnesses and pid not in self._ema_latency_ms:
                 self._ema_latency_ms[pid] = lat
