@@ -71,5 +71,28 @@ DEFAULT_LOCAL_MODEL: str = _get_str("default_local_model", "SABRINA_DEFAULT_LOCA
 DEFAULT_CODER_MODEL: str = _get_str("default_coder_model", "SABRINA_DEFAULT_CODER_MODEL", "local-coder")
 DEFAULT_GENERAL_MODEL: str = _get_str("default_general_model", "SABRINA_DEFAULT_GENERAL_MODEL", "local-general")
 EXTERNAL_PORTAL_IDS: tuple[str, ...] = _get_list("external_portal_ids", "SABRINA_EXTERNAL_PORTAL_IDS", ())
+EXTERNAL_MODELS_PATH: str = _get_str(
+    "external_models_path",
+    "SABRINA_EXTERNAL_MODELS_PATH",
+    str(WORKSPACE_ROOT / "external_models.json"),
+)
 RESEARCH_PROJECT_ROOT: str = _get_str("research_project_root", "SABRINA_RESEARCH_PROJECT_ROOT", "")
 WHEELHOUSE_DIR: str = _get_str("wheelhouse_dir", "SABRINA_WHEELHOUSE_DIR", str(WORKSPACE_ROOT / "artifacts" / "wheels"))
+
+
+def load_external_models() -> list[dict[str, Any]]:
+    """Load enabled external model/portal entries from git-ignored external_models.json."""
+    candidates = [
+        Path(EXTERNAL_MODELS_PATH),
+        DESKTOP_ROOT / "external_models.json",
+        DESKTOP_ROOT / "data" / "external_models.json",
+    ]
+    for path in candidates:
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                raw = data.get("models", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                return [m for m in raw if isinstance(m, dict) and m.get("enabled", True) and m.get("portal_id")]
+            except Exception:
+                pass
+    return []

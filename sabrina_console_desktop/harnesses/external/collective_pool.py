@@ -324,16 +324,24 @@ class KindCollectivePool:
         return False
 
     def _discover_harnesses(self) -> None:
+        from types import SimpleNamespace
+
         if self.external_hf_only:
             # Registry-backed members need no generated Python wrapper. Do not import
             # legacy executors when operating the public HF conversation collective.
-            from types import SimpleNamespace
             from tools.portal_policy import PortalPolicy
             with PortalPolicy(self.db_path).db() as conn:
                 rows = conn.execute("SELECT portal_id,model_claim FROM portal_profiles WHERE provider='huggingface'").fetchall()
             self._harnesses = {r['portal_id']: SimpleNamespace(PORTAL_ID=r['portal_id'], MODEL_ID=r['model_claim']) for r in rows}
             return
-        for py_file in sorted(HARNESS_DIR.glob("*.py")):
+
+        # 1. Discover local Python portal modules (in external/ and git-ignored external/local/)
+        py_files = list(sorted(HARNESS_DIR.glob("*.py")))
+        local_dir = HARNESS_DIR / "local"
+        if local_dir.is_dir():
+            py_files.extend(sorted(local_dir.glob("*.py")))
+
+        for py_file in py_files:
             if py_file.name in (
                 "__init__.py",
                 "collective_pool.py",
@@ -351,6 +359,42 @@ class KindCollectivePool:
                         self._harnesses[pid] = mod
             except Exception:
                 continue
+
+        # 2. Discover declarative models from git-ignored external_models.json
+        try:
+            from sabrina_config import load_external_models
+        except ImportError:
+            try:
+                from sabrina_console_desktop.sabrina_config import load_external_models  # type: ignore[no-redef]
+            except ImportError:
+                load_external_models = None  # type: ignore[assignment]
+
+        if load_external_models is not None:
+            for entry in load_external_models():
+                pid = str(entry["portal_id"]).strip()
+                if not pid or pid in self._harnesses:
+                    continue
+                model_id = str(entry.get("model_id") or pid)
+                endpoint_url = str(entry.get("endpoint_url") or "")
+
+                def _make_invoke(_pid: str):
+                    def _invoke(prompt: str, task_id: str = "", **kwargs: Any) -> Dict[str, Any]:
+                        from tools.portal_transport import invoke_portal
+                        return invoke_portal(_pid, prompt, task_id, db_path=self.db_path, **kwargs)
+                    return _invoke
+
+                self._harnesses[pid] = SimpleNamespace(
+                    PORTAL_ID=pid,
+                    MODEL_ID=model_id,
+                    ENDPOINT_URL=endpoint_url,
+                    invoke=_make_invoke(pid),
+                )
+                tier = entry.get("tier")
+                if isinstance(tier, str) and tier in ("flash", "deep_reasoning", "domain_rag"):
+                    self._diagnosed_tiers[pid] = tier
+                roles = entry.get("roles")
+                if isinstance(roles, list):
+                    self._diagnosed_roles[pid] = [str(r) for r in roles if str(r).strip()]
 
     def _seed_ema_latencies(self) -> None:
         """Seed initial EMA latencies from configured priors if any are registered."""

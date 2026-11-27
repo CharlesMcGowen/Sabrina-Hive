@@ -78,6 +78,15 @@ tests/test_h1_v2*
 # Local user config & backup files
 sabrina_config.json
 sabrina_console_desktop/sabrina_config.json
+external_models.json
+sabrina_console_desktop/external_models.json
+sabrina_console_desktop/data/external_models.json
+sabrina_console_desktop/harnesses/external/local/
+sabrina_console_desktop/harnesses/external/*.py
+!sabrina_console_desktop/harnesses/external/__init__.py
+!sabrina_console_desktop/harnesses/external/cognitive_blackboard.py
+!sabrina_console_desktop/harnesses/external/collective_pool.py
+!sabrina_console_desktop/harnesses/external/swarm_system_bridges.py
 *.bak*
 
 # IDE & OS files

@@ -1,0 +1,22 @@
+{
+  "models": [
+    {
+      "portal_id": "example-hf-space",
+      "provider": "huggingface",
+      "model_id": "example-org/example-model",
+      "endpoint_url": "",
+      "tier": "deep_reasoning",
+      "roles": ["architect", "verifier"],
+      "enabled": false
+    },
+    {
+      "portal_id": "example-openai-compatible",
+      "provider": "openai_compatible",
+      "model_id": "local-or-remote-model",
+      "endpoint_url": "",
+      "tier": "flash",
+      "roles": ["fast_worker"],
+      "enabled": false
+    }
+  ]
+}
