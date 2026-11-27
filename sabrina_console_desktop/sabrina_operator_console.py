@@ -7,7 +7,9 @@ from tkinter import messagebox, ttk
 from tools.run_measurement import build_console_measurement_summary
 from tools.desktop_trace_reader import DesktopTraceReader
 
-API = "http://127.0.0.1:8087"
+# Sabrina Social API on ego, reached through the SSH tunnel in tools/tunnel_ego_social_api.ps1.
+# Set SABRINA_OPERATOR_API to point elsewhere (for example http://127.0.0.1:8087 for this machine's own API).
+API = os.environ.get("SABRINA_OPERATOR_API", "http://127.0.0.1:18087").rstrip("/")
 def request(path, method="GET", payload=None):
     data = None if payload is None else json.dumps(payload).encode()
     req = urllib.request.Request(API + path, data=data, method=method, headers={"Content-Type":"application/json"})

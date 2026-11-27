@@ -737,7 +737,21 @@ class LiveSwarmRunner:
             return copy.deepcopy(self._a2a_links)
 
     def set_a2a_links(self, links: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        valid_comms = {"pass_off", "loop", "critique_gate", "delegate_spawn", "blackboard_sync", "escalate_hitl"}
+        legacy_upgrade = {
+            "delegate_spawn": "cut_spawn",
+            "pass_off": "bridge_handoff",
+            "critique_gate": "arbiter_gate",
+        }
+        valid_comms = {
+            "cut_spawn",
+            "bridge_handoff",
+            "arbiter_gate",
+            "wait_edge",
+            "log_fin_gate",
+            "loop",
+            "blackboard_sync",
+            "escalate_hitl",
+        }
         valid_conds = {"always", "on_needs_work", "on_pass", "on_low_confidence", "on_error", "custom"}
         cleaned: list[dict[str, Any]] = []
         seen_ids: set[str] = set()
@@ -748,10 +762,11 @@ class LiveSwarmRunner:
             dst = str(item.get("to") or "").strip()
             if not src or not dst:
                 continue
-            comm = str(item.get("comm_type") or "pass_off").strip().lower()
+            raw_comm = str(item.get("comm_type") or "bridge_handoff").strip().lower()
+            comm = legacy_upgrade.get(raw_comm, raw_comm)
             if comm not in valid_comms:
-                comm = "pass_off"
-            default_cond = "on_needs_work" if comm == "loop" else "always"
+                comm = "bridge_handoff"
+            default_cond = "on_needs_work" if comm == "loop" else ("on_pass" if comm == "log_fin_gate" else "always")
             cond = str(item.get("condition") or default_cond).strip().lower()
             if cond not in valid_conds:
                 cond = default_cond
@@ -759,6 +774,7 @@ class LiveSwarmRunner:
                 max_loops = max(1, min(25, int(item.get("max_loops") or 3)))
             except (TypeError, ValueError):
                 max_loops = 3
+            default_payload = "summary_only" if comm == "bridge_handoff" else "full_envelope"
             lid = str(item.get("id") or f"swarm_a2a_{idx + 1}_{src}_{dst}").strip()
             if not lid or lid in seen_ids:
                 lid = f"swarm_a2a_{uuid.uuid4().hex[:8]}"
@@ -772,7 +788,7 @@ class LiveSwarmRunner:
                     "condition": cond,
                     "condition_expr": str(item.get("condition_expr") or "").strip(),
                     "max_loops": max_loops,
-                    "payload_mode": str(item.get("payload_mode") or "full_envelope").strip(),
+                    "payload_mode": str(item.get("payload_mode") or default_payload).strip(),
                     "message_template": str(item.get("message_template") or "").strip(),
                 }
             )
@@ -785,7 +801,9 @@ class LiveSwarmRunner:
         dst = str(spec.get("to") or "").strip()
         if not src or not dst:
             raise ValueError("Both 'from' and 'to' node identifiers are required.")
-        comm = str(spec.get("comm_type") or "pass_off").strip().lower()
+        legacy_upgrade = {"delegate_spawn": "cut_spawn", "pass_off": "bridge_handoff", "critique_gate": "arbiter_gate"}
+        raw_comm = str(spec.get("comm_type") or "bridge_handoff").strip().lower()
+        comm = legacy_upgrade.get(raw_comm, raw_comm)
         target_id = str(spec.get("id") or "").strip()
         with self._lock:
             current = copy.deepcopy(self._a2a_links)
@@ -3052,7 +3070,26 @@ class LiveSwarmRunner:
                 budget_share=budget_share,
             )
             if res.ok and res.results:
-                return self._record_spawn(sub_wid, res.results[0])
+                spawn = res.results[0]
+                # Keep the concrete 3D embedding with the worker record. The
+                # registry already computes this geometry for every CUT; without
+                # copying it here, the monitor can only show the logical tree.
+                if spawn.cantor_path:
+                    try:
+                        node = reg.get_node(spawn.cantor_path)
+                        region = getattr(node, "region", None) if node is not None else None
+                        if region is not None:
+                            sphere = {
+                                "cx": round(float(region.x), 5),
+                                "cy": round(float(region.y), 5),
+                                "cz": round(float(region.z), 5),
+                                "r": round(float(region.r), 5),
+                            }
+                            with self._join_cut_lock:
+                                self._join_cut_spheres[sub_wid] = sphere
+                    except Exception as exc:  # noqa: BLE001 - geometry telemetry must not block a CUT
+                        _logger.debug("JOIN_CUT geometry telemetry unavailable for %s: %s", sub_wid, exc)
+                return self._record_spawn(sub_wid, spawn)
             return False, res.reason or "capacity: no open node available in join-cut tree"
         except Exception as exc:  # noqa: BLE001 - fail open by design
             _logger.warning("JOIN_CUT fail-open on claim for %s: %s", sub_wid, exc)
@@ -4736,7 +4773,8 @@ class LiveSwarmRunner:
                                     reason = f"Blocked by failed, missing, or cyclic prerequisite(s): {', '.join(missing)}"
                                     subtask_results[key] = {
                                         "worker_id": wid, "name": ws["title"], "task": ws["title"],
-                                        "role": ws["role"], "status": "FAILED", "summary": reason, "llm_error": reason,
+                                        "role": ws["role"], "model": "not run", "status": "FAILED",
+                                        "summary": reason, "llm_error": reason,
                                     }
                                     self._join_cut_settle(mission_id, wid, outcome="transient_failure")
                                     unstarted_claims.discard(wid)
@@ -4932,12 +4970,13 @@ class LiveSwarmRunner:
                 if review
                 else (
                     "\nIDE & HARNESS TOOLS (optional, up to 3 rounds): If you need to inspect files, run diagnostics, or generate media before finishing, "
-                    "emit fenced tool blocks:\n"
-                    "```tool:search\n<symbol or text>\n```\n"
-                    "```tool:read_file\n<relative/path:1-140>\n```\n"
-                    "```tool:run_diagnostics\n<relative/path or .>\n```\n"
-                    "```tool:run_qa\n<target_keyword_or_path>\n```\n"
-                    "```tool:run_tests\n<module_or_path>\n```\n"
+                    "emit fenced tool blocks. These are examples: replace each argument with a real value, "
+                    "and do not add angle brackets:\n"
+                    "```tool:search\ncompute_score\n```\n"
+                    "```tool:read_file\nsrc/engine.py:1-140\n```\n"
+                    "```tool:run_diagnostics\n.\n```\n"
+                    "```tool:run_qa\nsrc/engine.py\n```\n"
+                    "```tool:run_tests\ntest_engine.py\n```\n"
                     "When all media tools/checks are complete, provide your final answer (and all `write_file:` blocks) with NO `tool:` blocks."
                 )
             )
@@ -5792,6 +5831,15 @@ class LiveSwarmRunner:
                 worker_hotfix = copy.deepcopy(mission_snapshot.get("worker_hotfix"))
                 final_contract = copy.deepcopy(mission_snapshot.get("mission_contract"))
                 contract_discards = copy.deepcopy(mission_snapshot.get("contract_discards") or [])
+            any_subtask_failed = any(st.get("status") == "FAILED" for st in subtask_results.values())
+            if any_subtask_failed:
+                verdict["passed"] = False
+                verdict_passed = False
+                for k, st in subtask_results.items():
+                    if st.get("status") == "FAILED":
+                        err_msg = f"{st.get('name') or k} failed: {st.get('llm_error') or 'subtask execution failed'}"
+                        if err_msg not in (verdict.get("issues") or []):
+                            verdict.setdefault("issues", []).append(err_msg)
             # Write real bounded report artifact under artifacts_dir/<mission_id>.md
             _set_worker_milestone(
                 verifier_result_id, 3, 4, "writing_report",
@@ -5823,17 +5871,10 @@ class LiveSwarmRunner:
             if cancel_event.is_set():
                 return
 
-            any_subtask_failed = any(st.get("status") == "FAILED" for st in subtask_results.values())
             if (self.llm_caller is not None and live_llm_calls == 0) or any_subtask_failed:
                 final_state = "FAILED"
                 verdict["passed"] = False
                 verdict_passed = False
-                if any_subtask_failed:
-                    for k, st in subtask_results.items():
-                        if st.get("status") == "FAILED":
-                            err_msg = f"{st.get('name') or k} failed: {st.get('llm_error') or 'subtask execution failed'}"
-                            if err_msg not in (verdict.get("issues") or []):
-                                verdict.setdefault("issues", []).append(err_msg)
             elif execution_mode == "DRY_RUN_NO_LLM":
                 final_state = "DRY_RUN"
             else:
@@ -6384,7 +6425,15 @@ class LiveSwarmRunner:
         eff_c_val = coordinator_count
         eff_w_val = workers_per_coordinator
         if eff_c_val is None and eff_w_val is None:
-            if re.search(r"\b(fan-out|fanout|parallel 8|8 workers|swarm 8)\b", clean_goal, re.I):
+            explicit_fanout = re.search(
+                r"\b(?:fan[-\s]?out|parallel(?:ize|ise)?|branch(?:ing)?|spawn)\s+(?:to\s+|into\s+|with\s+)?"
+                r"(\d+)\s+(?:distinct\s+)?(?:branches?|workers?|agents?)\b",
+                clean_goal,
+                re.I,
+            )
+            if explicit_fanout:
+                eff_w_val = max(1, min(1024, int(explicit_fanout.group(1))))
+            elif re.search(r"\b(fan-out|fanout|parallel 8|8 workers|swarm 8)\b", clean_goal, re.I):
                 eff_w_val = 8
             elif re.search(r"\b(dual-lead|dual lead|2 coordinators|two coordinators)\b", clean_goal, re.I):
                 eff_c_val = 2
@@ -7105,10 +7154,11 @@ class LiveSwarmRunner:
             shed_list = ", ".join(manifest.available_tool_shed)
             tool_instructions = (
                 f"\nPermitted tools from Pre-Flight Manifest: [{shed_list}]\n"
-                "If you need to inspect or verify code before producing your final deliverable, emit fenced tool blocks:\n"
-                "```tool:search_files\n<query>\n```\n"
-                "```tool:read_file\n<relative/path.py:1-140>\n```\n"
-                "```tool:run_diagnostics\n<relative/path.py or .>\n```\n"
+                "If you need to inspect or verify code before producing your final deliverable, emit fenced tool blocks. "
+                "These are examples: replace each argument with a real value, and do not add angle brackets:\n"
+                "```tool:search_files\ncompute_score\n```\n"
+                "```tool:read_file\nsrc/engine.py:1-140\n```\n"
+                "```tool:run_diagnostics\n.\n```\n"
             )
             write_instruction = (
                 "\nTo write workspace files, emit ```write_file:relative/path.ext\\n<content>\\n```."

@@ -923,7 +923,7 @@ class SabrinaDesktopBridge:
             connector_registry=self.connector_registry,
             gemini_caller=self._call_private_automation_model,
             swarm_caller=self._run_automation_swarm_step,
-            agent_caller=self._call_swarm_llm,
+            agent_caller=llm_caller or self._call_swarm_llm,
             join_cut_registry=self.join_cut_registry,
             blackboard=self.blackboard,
             workspace_tool_executor=self._execute_automation_workspace_tools,
@@ -6415,97 +6415,6 @@ class SabrinaDesktopBridge:
             return {**res, "collective": self.harness_registry.list_harnesses()}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "execution_authorized": False}
-
-    # ------------------------------------------------------------------
-    # Dependencies & Local Artifact Repository Endpoints
-    # ------------------------------------------------------------------
-
-    def get_dependencies_status(self) -> dict[str, Any]:
-        """Return status of uv, local wheelhouse, and installed packages for the dependencies tab."""
-        try:
-            ws_root = (
-                self.workspace_sandbox.root
-                if self.workspace_sandbox is not None
-                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
-            )
-            from swarm_console.workspace_sandbox import WorkspaceSandbox
-            sb = WorkspaceSandbox(
-                ws_root,
-                allow_local_venv_fallback=True,
-                policy_profile=self.workspace_policy_profile if self.workspace_policy_profile in VALID_POLICY_PROFILES else "sandboxed_edit",
-            )
-            cache_info = sb.execute_tool("manage_dependencies", {"action": "cache_info"})
-            list_info = sb.execute_tool("manage_dependencies", {"action": "list"})
-
-            packages = []
-            if list_info.get("ok"):
-                raw_out = list_info.get("output", "")
-                for line in raw_out.splitlines():
-                    parts = line.strip().split()
-                    if len(parts) >= 2 and not parts[0].startswith("-") and parts[0].lower() != "package":
-                        packages.append({"name": parts[0], "version": parts[1]})
-
-            active_profile = self.harness_updates.active_profile()
-
-            return {
-                "ok": True,
-                "uv_available": cache_info.get("uv_available", False),
-                "backend": cache_info.get("backend", "pip"),
-                "wheelhouse_dir": cache_info.get("wheelhouse_dir", ""),
-                "cached_wheels_count": cache_info.get("cached_wheels_count", 0),
-                "cached_wheels": cache_info.get("cached_wheels", []),
-                "cache_dir": cache_info.get("cache_dir", ""),
-                "installed_packages": packages,
-                "installed_count": len(packages),
-                "active_revision": active_profile.revision,
-                "instructions_summary": active_profile.reason,
-            }
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def install_dependency_package(self, packages: list[str], wheelhouse_only: bool = False) -> dict[str, Any]:
-        """Install one or more packages using the sandbox dependency manager."""
-        try:
-            ws_root = (
-                self.workspace_sandbox.root
-                if self.workspace_sandbox is not None
-                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
-            )
-            from swarm_console.workspace_sandbox import WorkspaceSandbox
-            sb = WorkspaceSandbox(
-                ws_root,
-                allow_local_venv_fallback=True,
-                policy_profile="sandboxed_edit",
-            )
-            res = sb.execute_tool(
-                "manage_dependencies",
-                {"action": "install", "packages": packages, "wheelhouse_only": bool(wheelhouse_only)},
-            )
-            return res
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-    def cache_dependency_wheels(self, packages: list[str]) -> dict[str, Any]:
-        """Download wheels to local wheelhouse for offline access."""
-        try:
-            ws_root = (
-                self.workspace_sandbox.root
-                if self.workspace_sandbox is not None
-                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
-            )
-            from swarm_console.workspace_sandbox import WorkspaceSandbox
-            sb = WorkspaceSandbox(
-                ws_root,
-                allow_local_venv_fallback=True,
-                policy_profile="sandboxed_edit",
-            )
-            res = sb.execute_tool(
-                "manage_dependencies",
-                {"action": "cache_wheel", "packages": packages},
-            )
-            return res
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
     # Evo-Bench Self-Analytical Evolution Endpoints

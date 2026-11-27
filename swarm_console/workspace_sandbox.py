@@ -1668,22 +1668,30 @@ class WorkspaceSandbox:
             cache_dir = self._get_uv_cache_dir()
             mpl_dir = cache_dir / "matplotlib"
             mpl_dir.mkdir(parents=True, exist_ok=True)
+            wheelhouse = self._get_wheelhouse_dir()
+            has_wheels = wheelhouse.exists() and any(wheelhouse.glob("*.whl"))
+
             env = {
                 "PATH": os.environ.get("PATH", ""),
                 "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
                 "UV_CACHE_DIR": str(cache_dir),
                 "MPLCONFIGDIR": str(mpl_dir),
             }
+            if has_wheels:
+                env["UV_OFFLINE"] = "1"
+                env["UV_NO_INDEX"] = "1"
+                env["PIP_NO_INDEX"] = "1"
+                env["PIP_FIND_LINKS"] = str(wheelhouse)
+                env["UV_FIND_LINKS"] = str(wheelhouse)
 
             has_inline_deps = "# /// script" in args.code and "dependencies" in args.code
             if has_inline_deps and uv_bin:
-                wheelhouse = self._get_wheelhouse_dir()
                 temp_script = self.root / f".uv_ephemeral_{uuid.uuid4().hex[:8]}.py"
                 try:
                     temp_script.write_text(args.code, encoding="utf-8")
                     uv_cmd = [uv_bin, "run", "--no-project", "--python", self.python_executable]
-                    if wheelhouse.exists() and any(wheelhouse.glob("*.whl")):
-                        uv_cmd.extend(["--find-links", str(wheelhouse)])
+                    if has_wheels:
+                        uv_cmd.extend(["--offline", "--no-index", "--find-links", str(wheelhouse)])
                     uv_cmd.append(str(temp_script))
                     proc = subprocess.run(
                         uv_cmd,
@@ -1838,7 +1846,7 @@ class WorkspaceSandbox:
                 if wheelhouse.exists() and any(wheelhouse.glob("*.whl")):
                     cmd.extend(["--find-links", str(wheelhouse)])
                 if args.wheelhouse_only:
-                    cmd.append("--no-index")
+                    cmd.extend(["--no-index", "--offline"])
                 cmd.extend(clean_packages)
             else:
                 cmd = [self.python_executable, "-m", "pip", "install"]

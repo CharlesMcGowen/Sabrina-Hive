@@ -39,18 +39,26 @@ except ImportError:
 
 DEFAULT_AUTOMATIONS_DB = Path(__file__).resolve().parent / "data" / "automations.sqlite3"
 
-VALID_A2A_COMM_TYPES: tuple[str, ...] = (
+CANONICAL_JOIN_CUT_COMM_TYPES: tuple[str, ...] = (
     "cut_spawn",
     "bridge_handoff",
     "arbiter_gate",
     "wait_edge",
     "log_fin_gate",
-    "pass_off",
     "loop",
-    "critique_gate",
-    "delegate_spawn",
     "blackboard_sync",
     "escalate_hitl",
+)
+
+LEGACY_A2A_COMM_UPGRADE_MAP: dict[str, str] = {
+    "delegate_spawn": "cut_spawn",
+    "pass_off": "bridge_handoff",
+    "critique_gate": "arbiter_gate",
+}
+
+VALID_A2A_COMM_TYPES: tuple[str, ...] = (
+    *CANONICAL_JOIN_CUT_COMM_TYPES,
+    *LEGACY_A2A_COMM_UPGRADE_MAP.keys(),
 )
 
 VALID_A2A_CONDITIONS: tuple[str, ...] = (
@@ -281,7 +289,7 @@ CODESIGNER_RESPONSE_SCHEMA: dict[str, Any] = {
                             "id": {"type": "string"},
                             "from": {"type": "string"},
                             "to": {"type": "string"},
-                            "comm_type": {"type": "string", "enum": list(VALID_A2A_COMM_TYPES)},
+                            "comm_type": {"type": "string", "enum": list(CANONICAL_JOIN_CUT_COMM_TYPES)},
                             "condition": {"type": "string", "enum": list(VALID_A2A_CONDITIONS)},
                             "condition_expr": {"type": "string"},
                             "max_loops": {"type": "integer"},
@@ -456,9 +464,10 @@ def normalize_workflow_edges(raw_edges: Any) -> list[dict[str, Any]]:
         dst = str(item.get("to") or "").strip()
         if not src or not dst:
             continue
-        comm = str(item.get("comm_type") or "pass_off").strip().lower()
-        if comm not in VALID_A2A_COMM_TYPES:
-            comm = "loop" if comm in ("retry", "cycle", "feedback", "transient_retry") else "pass_off"
+        raw_comm = str(item.get("comm_type") or "bridge_handoff").strip().lower()
+        comm = LEGACY_A2A_COMM_UPGRADE_MAP.get(raw_comm, raw_comm)
+        if comm not in CANONICAL_JOIN_CUT_COMM_TYPES:
+            comm = "loop" if comm in ("retry", "cycle", "feedback", "transient_retry") else "bridge_handoff"
         if comm == "loop" and src != dst and dst != "loop_root":
             default_cond = "on_needs_work"
         elif comm == "log_fin_gate":
@@ -707,6 +716,18 @@ class AutomationEngine:
                     db.execute(migration_sql)
                 except sqlite3.OperationalError:
                     pass
+            rows = db.execute("SELECT id, edges_json FROM automation_loops").fetchall()
+            for r in rows:
+                raw_ej = r["edges_json"] or "[]"
+                if any(tok in raw_ej for tok in ("delegate_spawn", "pass_off", "critique_gate")):
+                    try:
+                        upgraded = normalize_workflow_edges(json.loads(raw_ej))
+                        db.execute(
+                            "UPDATE automation_loops SET edges_json=? WHERE id=?",
+                            (json.dumps(upgraded), r["id"]),
+                        )
+                    except Exception:
+                        pass
 
     def _decode_loop(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
         if not row:
@@ -1569,9 +1590,11 @@ class AutomationEngine:
         def _ensure_eulerian_slot(src_id: str, dst_id: str, jc_op: str) -> str:
             if topo is None or dst_id == "loop_root":
                 return ""
-            if dst_id in node_to_slot:
-                return node_to_slot[dst_id]
             src_hub = node_to_hub.get(src_id) or node_to_hub.get("loop_root") or ""
+            if dst_id in node_to_slot:
+                # If a WAIT_EDGE visited dst_id first on src_hub, still honor an explicit BRIDGE seam graft
+                if not (jc_op == "BRIDGE" and src_id != "loop_root" and node_to_hub.get(dst_id) == src_hub):
+                    return node_to_slot[dst_id]
             if not src_hub or src_hub not in topo.nodes:
                 return ""
             try:
@@ -1818,8 +1841,6 @@ class AutomationEngine:
             if jc_reg is not None:
                 try:
                     owner_wid = f"{run_id}:{node_id}:h{hops + 1}"
-                    parent_src = str(inc_edges[-1].get("from") or "") if inc_edges else ""
-                    pref_parent = jc_leases.get(parent_src, {}).get("path") if parent_src else None
                     cut_res = jc_reg.try_cut(
                         "workflow_node",
                         {
@@ -1831,7 +1852,6 @@ class AutomationEngine:
                         },
                         owner_id=owner_wid,
                         max_retries=max_retry_by_target.get(node_id, 4),
-                        preferred_parent=pref_parent,
                     )
                     if cut_res.allowed and cut_res.cantor_path is not None:
                         cantor_path = cut_res.cantor_path
@@ -1918,32 +1938,16 @@ class AutomationEngine:
             if cand_next:
                 latest_next_goal = cand_next
 
-            explicit_pass = (
-                txt_low.lstrip().startswith("pass:")
-                or '"goal_met": true' in txt_low
-                or "goal_met=true" in txt_low
-            )
-            needs_work = (not ok) or (
-                not explicit_pass
-                and any(
-                    marker in txt_low
-                    for marker in (
-                        "needs_more_work",
-                        "needs_work",
-                        "goal_met=false",
-                        '"goal_met": false',
-                        "fail:",
-                        "revise",
-                        "loop_back",
-                        "issues_found",
-                    )
+            explicit_pass, needs_work, low_conf = evaluate_step_verdict(ok, raw_txt, res_obj)
+
+            if node_id not in retry_target_nodes:
+                jc_state = _settle_jc_node(
+                    node_id,
+                    "semantic_failure" if (not ok and not retry_target_nodes) else "completed",
+                    raw_txt[:512],
                 )
-            )
-            low_conf = (
-                "low_confidence" in txt_low
-                or "uncertain" in txt_low
-                or (res_obj.get("logprob") is not None and float(res_obj["logprob"]) < -0.35)
-            )
+                if jc_state:
+                    step_res["jc_settlement"] = jc_state
 
             out_edges = [e for e in norm_edges if e["from"] == node_id]
             if not out_edges:
@@ -1954,8 +1958,14 @@ class AutomationEngine:
                 comm = edge_spec["comm_type"]
                 cond = edge_spec["condition"]
                 is_self_recycle = edge_spec["to"] == "loop_root"
+                is_cycle_edge = edge_spec["id"] in cycle_edge_ids or edge_spec["from"] == edge_spec["to"]
                 max_lp = int(edge_spec.get("max_loops") or (1 if is_self_recycle else 3))
-                if (comm == "loop" or is_self_recycle or cond in ("on_needs_work", "on_error", "on_low_confidence")) and cnt >= max_lp:
+                if (
+                    comm == "loop"
+                    or is_self_recycle
+                    or is_cycle_edge
+                    or cond in ("on_needs_work", "on_error", "on_low_confidence")
+                ) and cnt >= max_lp:
                     return False
                 if cond == "on_needs_work":
                     return needs_work
@@ -1967,9 +1977,11 @@ class AutomationEngine:
                     return low_conf
                 if cond == "custom":
                     expr = str(edge_spec.get("condition_expr") or "").strip().lower()
-                    if (comm == "loop" or is_self_recycle) and cnt >= max_lp:
+                    if (comm == "loop" or is_self_recycle or is_cycle_edge) and cnt >= max_lp:
                         return False
                     return bool(expr and expr in txt_low)
+                if comm == "log_fin_gate":
+                    return ok and not needs_work
                 return True
 
             priority_edges = [
@@ -1979,6 +1991,40 @@ class AutomationEngine:
             ]
             forward_edges = [e for e in out_edges if e not in priority_edges]
             matched_priority = [e for e in priority_edges if _matches(e)]
+
+            exhausted_needs_work_edges = [
+                e for e in priority_edges
+                if e["condition"] in ("on_needs_work", "on_error")
+                and edge_counts.get(e["id"], 0) >= int(e.get("max_loops") or 3)
+            ]
+            if needs_work and not matched_priority and exhausted_needs_work_edges:
+                for ex_e in exhausted_needs_work_edges:
+                    _settle_jc_node(ex_e["to"], "semantic_failure")
+                _settle_jc_node(node_id, "semantic_failure")
+                fail_closed_reason = (
+                    f"Fail-closed Join-Cut PRUNE at '{_node_name(node_id)}': retry cap exhausted while deliverable still NEEDS_WORK."
+                )
+                a2a_events.append(
+                    {
+                        "edge_id": exhausted_needs_work_edges[0]["id"],
+                        "from": node_id,
+                        "from_name": _node_name(node_id),
+                        "to": exhausted_needs_work_edges[0]["to"],
+                        "to_name": _node_name(exhausted_needs_work_edges[0]["to"]),
+                        "comm_type": exhausted_needs_work_edges[0]["comm_type"],
+                        "jc_op": "PRUNE_FAIL_CLOSED",
+                        "condition": exhausted_needs_work_edges[0]["condition"],
+                        "hop": edge_counts.get(exhausted_needs_work_edges[0]["id"], 0),
+                        "instruction": fail_closed_reason,
+                    }
+                )
+                break
+
+            if not needs_work and priority_edges:
+                for pe in priority_edges:
+                    if pe["to"] in jc_leases:
+                        _settle_jc_node(pe["to"], "completed", raw_txt[:512])
+
             chosen_edges = matched_priority if matched_priority else [e for e in forward_edges if _matches(e)]
 
             transient_opts = getattr(self, "_transient_loop_opts", {})
@@ -2000,6 +2046,15 @@ class AutomationEngine:
                 edge_counts[eid] = edge_counts.get(eid, 0) + 1
                 hop = edge_counts[eid]
                 target_id = chosen["to"]
+                jc_op = chosen["jc_op"]
+
+                if jc_op == "TRANSIENT_RETRY" and target_id in jc_leases:
+                    rel_status = _settle_jc_node(target_id, "retry")
+                    if rel_status == "TOMBSTONED_PRUNED":
+                        fail_closed_reason = f"Join-Cut task_dedup max_retries exhausted on '{_node_name(target_id)}'."
+                        break
+
+                _ensure_eulerian_slot(node_id, target_id, jc_op)
                 edge_ceiling = int(chosen.get("max_payload_bytes") or loop_ceiling)
                 env = self._format_a2a_envelope(
                     chosen,
@@ -2009,17 +2064,39 @@ class AutomationEngine:
                     hop,
                     max_payload_bytes=edge_ceiling,
                 )
+
+                if self.blackboard is not None and chosen["comm_type"] in ("blackboard_sync", "bridge_handoff"):
+                    try:
+                        ns = f"workflow.{loop['id']}.{node_id}"
+                        self.blackboard.write_artifact(
+                            namespace=ns,
+                            author=node_id,
+                            summary=self._compact_text_preserving_ends(raw_txt, 600),
+                            data={"hop": hop, "to": target_id, "jc_op": jc_op, "cantor_path": cantor_path},
+                            assigned_namespace=ns,
+                        )
+                        self.blackboard.record_hop(
+                            from_agent=node_id,
+                            to_agent=target_id,
+                            reason=f"{jc_op}:{chosen['comm_type']}",
+                            trace_id=run_id,
+                            handoff_id=eid,
+                        )
+                    except Exception:
+                        pass
+
                 a2a_events.append(
                     {
                         k: env[k]
                         for k in (
                             "edge_id", "from", "from_name", "to", "to_name",
-                            "comm_type", "condition", "hop", "payload_bytes", "budget_capped", "instruction",
+                            "comm_type", "jc_op", "condition", "hop", "payload_bytes", "budget_capped", "instruction",
                         )
                     }
                 )
 
                 if target_id == "loop_root":
+                    _settle_all_remaining_leases("completed")
                     raw_evolved = latest_next_goal or extract_recommended_next_goal(raw_txt, active_goal)
                     sbv_check = stabilize_evolved_goal(
                         anchor_goal=anchor_goal,
@@ -2037,6 +2114,7 @@ class AutomationEngine:
                     if not goal_history or goal_history[-1] != active_goal:
                         goal_history.append(active_goal)
                     a2a_events[-1]["evolved_goal"] = active_goal
+                    next_cycle_idx = self_cycle_idx + 1
 
                     re_entries = [e for e in norm_edges if e["from"] == "loop_root" and e["to"] != "loop_root"]
                     if re_entries:
@@ -2061,7 +2139,7 @@ class AutomationEngine:
                                     k: re_env[k]
                                     for k in (
                                         "edge_id", "from", "from_name", "to", "to_name",
-                                        "comm_type", "condition", "hop", "payload_bytes", "budget_capped", "instruction",
+                                        "comm_type", "jc_op", "condition", "hop", "payload_bytes", "budget_capped", "instruction",
                                     )
                                 }
                             )
@@ -2073,6 +2151,7 @@ class AutomationEngine:
                                     "incoming_a2a": re_env,
                                     "incoming_a2a_batch": [re_env],
                                     "evolved_goal": active_goal,
+                                    "self_cycle_idx": next_cycle_idx,
                                 }
                             )
                     elif steps:
@@ -2085,6 +2164,7 @@ class AutomationEngine:
                                 "incoming_a2a": env,
                                 "incoming_a2a_batch": [env],
                                 "evolved_goal": active_goal,
+                                "self_cycle_idx": next_cycle_idx,
                             }
                         )
                     continue
@@ -2116,11 +2196,76 @@ class AutomationEngine:
                         }
                     )
 
-        return self._finalize_run(
-            run, loop, last_step_idx + 1, outputs, edge_counts, a2a_events, goal_history=goal_history
+            if fail_closed_reason:
+                break
+
+        _settle_all_remaining_leases(
+            "cancelled" if cancelled else ("semantic_failure" if fail_closed_reason else "completed")
         )
 
-    def _advance_run(self, run_id: str, approved_override: dict[str, Any] | None = None) -> dict[str, Any]:
+        jc_summary: dict[str, Any] = {
+            "settled_paths": jc_settled_paths,
+            "pruned_paths": jc_pruned_paths,
+            "cycle_edge_ids": sorted(cycle_edge_ids),
+            "log_fin_promoted": False,
+        }
+        if jc_reg is not None:
+            try:
+                inv_errs = jc_reg.verify_invariants()
+                jc_summary["registry_invariants_ok"] = len(inv_errs) == 0
+            except Exception:
+                jc_summary["registry_invariants_ok"] = True
+        if topo is not None:
+            try:
+                snap = topo.snapshot()
+                jc_summary["eulerian_topology"] = {
+                    "m": snap["m"],
+                    "sphere_count": snap["sphere_count"],
+                    "bridge_count": len(snap["bridges"]),
+                }
+                if promo_gate is not None and outputs and not fail_closed_reason and not cancelled:
+                    last_o = outputs[-1]
+                    last_r = last_o.get("result") if isinstance(last_o.get("result"), dict) else {}
+                    l_ok = bool(last_r.get("ok", True))
+                    _, l_nw, _ = evaluate_step_verdict(l_ok, str(last_r.get("text", "")), last_r)
+                    slot_id = str(last_o.get("eulerian_slot") or node_to_slot.get("loop_root") or "")
+                    ports = topo.log_fin_ports()
+                    matching_port = next(
+                        (p for p in sorted(ports) if slot_id and topo.tree_path(slot_id, p) is not None),
+                        None,
+                    )
+                    if slot_id in topo.nodes and matching_port is not None:
+                        aid = promo_gate.append_log_da(
+                            "deliverable",
+                            {"ok": l_ok, "needs_work": l_nw, "run_id": run_id},
+                            author=str(last_o.get("node_id") or "workflow"),
+                            slot=slot_id,
+                        )
+                        promo_res = promo_gate.promote_via_log_fin(aid, port_id=matching_port)
+                        jc_summary["log_fin_promoted"] = bool(promo_res.get("ok"))
+                        jc_summary["log_fin_port"] = matching_port
+            except Exception:
+                pass
+
+        return self._finalize_run(
+            run,
+            loop,
+            last_step_idx + 1,
+            outputs,
+            edge_counts,
+            a2a_events,
+            goal_history=goal_history,
+            fail_closed_reason=fail_closed_reason,
+            cancelled=cancelled,
+            join_cut_summary=jc_summary,
+        )
+
+    def _advance_run(
+        self,
+        run_id: str,
+        approved_override: dict[str, Any] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
         with self._db() as db:
             run_row = db.execute("SELECT * FROM automation_runs WHERE id=?", (run_id,)).fetchone()
         run = self._decode_run(run_row)
@@ -2133,7 +2278,14 @@ class AutomationEngine:
         steps = loop.get("steps") or []
         edges = list(loop.get("edges") or [])
         if steps and (edges or run.get("execution_queue")):
-            return self._advance_run_graph(run, loop, steps, edges, approved_override=approved_override)
+            return self._advance_run_graph(
+                run,
+                loop,
+                steps,
+                edges,
+                approved_override=approved_override,
+                cancel_event=cancel_event,
+            )
 
         outputs: list[dict[str, Any]] = list(run.get("step_outputs") or [])
         idx = int(run.get("current_step_index") or 0)
@@ -2229,9 +2381,12 @@ class AutomationEngine:
             for c in self.connectors.list_connectors()
         ]
         prompt = (
-            "You are Sabrina Console's AI Automation Co-Designer.\n"
-            "Help the user design an agent automation loop by asking 1 to 3 concise multiple-choice questions (status='needs_input') "
+            "You are Sabrina Console's AI Join-Cut Workflow Co-Designer.\n"
+            "Help the user design a genus-0 m-Eulerian Join-Cut automation workflow by asking 1 to 3 concise multiple-choice questions (status='needs_input') "
             "until you have enough detail to produce a concrete executable blueprint (status='ready').\n"
+            "Wire edges using canonical Join-Cut operators: 'cut_spawn' from 'loop_root' to child branches, "
+            "'bridge_handoff' for cross-sphere SharingPolicy seams, 'wait_edge' for DAG fan-in barriers, "
+            "'arbiter_gate' + 'loop' (condition='on_needs_work') for verification retries, and 'log_fin_gate' (condition='on_pass') for promotion.\n"
             "Prefer read-only steps unless the user asks for write actions, and set approval_policy='always_for_writes'.\n"
             f"Available Connectors: {json.dumps(connectors_summary)}\n"
             f"User Goal: {goal}\n"

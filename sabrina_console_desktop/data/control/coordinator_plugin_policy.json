@@ -154,7 +154,7 @@
       }
     },
     "kraken_monitor": {
-      "sha256": "9a382e4631b8ef757895fce11f61ccbda7bdfe933ad1efe48fad547c65ea23e2",
+      "sha256": "57af5c646b426f99d0d5b0823ce1e60ffbc09b8ce58697c0eb306c006ac49d99",
       "operations": {
         "top_gainers_24h": {
           "classification": "public",

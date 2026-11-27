@@ -1,18 +1,108 @@
 {
   "session_id": "sabrina_desktop",
-  "state_version": 1,
+  "state_version": 11,
   "active_owner": "swarm_command",
   "turn_metrics": {
-    "hop_count": 0,
+    "hop_count": 5,
     "tokens_used": 0,
     "budget_limit": 40000,
-    "loop_counts": {}
+    "loop_counts": {
+      "s2": 1,
+      "e1": 2,
+      "f1": 2
+    }
   },
   "goal_tree": {
     "root_goal": "",
     "tasks": []
   },
-  "artifacts": {},
+  "artifacts": {
+    "workflow.loop_5a2b0f15110f.s1": {
+      "version": 1,
+      "author": "s1",
+      "summary": "Step finished",
+      "citations": [],
+      "updated_at": "2026-11-27T03:26:09Z",
+      "data": {
+        "hop": 1,
+        "to": "s2",
+        "jc_op": "BRIDGE",
+        "cantor_path": "0"
+      }
+    },
+    "workflow.loop_7b4aa18b4aba.p1": {
+      "version": 2,
+      "author": "p1",
+      "summary": "Blueprint for turn 2",
+      "citations": [],
+      "updated_at": "2026-11-27T03:26:12Z",
+      "data": {
+        "hop": 2,
+        "to": "e1",
+        "jc_op": "BRIDGE",
+        "cantor_path": "0"
+      }
+    },
+    "workflow.loop_7b4aa18b4aba.c1": {
+      "version": 2,
+      "author": "c1",
+      "summary": "PASS: Deliverable verified.",
+      "citations": [],
+      "updated_at": "2026-11-27T03:26:12Z",
+      "data": {
+        "hop": 2,
+        "to": "f1",
+        "jc_op": "BRIDGE",
+        "cantor_path": "0"
+      }
+    }
+  },
   "side_effect_ledger": [],
-  "audit_trail": []
+  "audit_trail": [
+    {
+      "hop": 1,
+      "from": "s1",
+      "to": "s2",
+      "reason": "BRIDGE:bridge_handoff",
+      "trace_id": "run_5afdcfd92ca5",
+      "handoff_id": "e2",
+      "timestamp": "2026-11-27T03:26:09Z"
+    },
+    {
+      "hop": 2,
+      "from": "p1",
+      "to": "e1",
+      "reason": "BRIDGE:bridge_handoff",
+      "trace_id": "run_e15a3ca038e8",
+      "handoff_id": "p_e",
+      "timestamp": "2026-11-27T03:26:12Z"
+    },
+    {
+      "hop": 3,
+      "from": "c1",
+      "to": "f1",
+      "reason": "BRIDGE:bridge_handoff",
+      "trace_id": "run_e15a3ca038e8",
+      "handoff_id": "c_f",
+      "timestamp": "2026-11-27T03:26:12Z"
+    },
+    {
+      "hop": 4,
+      "from": "p1",
+      "to": "e1",
+      "reason": "BRIDGE:bridge_handoff",
+      "trace_id": "run_e15a3ca038e8",
+      "handoff_id": "p_e",
+      "timestamp": "2026-11-27T03:26:12Z"
+    },
+    {
+      "hop": 5,
+      "from": "c1",
+      "to": "f1",
+      "reason": "BRIDGE:bridge_handoff",
+      "trace_id": "run_e15a3ca038e8",
+      "handoff_id": "c_f",
+      "timestamp": "2026-11-27T03:26:12Z"
+    }
+  ]
 }

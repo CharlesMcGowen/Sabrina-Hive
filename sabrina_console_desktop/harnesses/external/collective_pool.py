@@ -68,36 +68,14 @@ TIER_1_FLASH_PORTALS: Tuple[str, ...] = (
     "google-gemini-3-5-flash-lite-cloud",
     "google-gemini-flash-lite-latest",
     "google-gemini-3-1-flash-lite-cloud",
-    "hf-gradio-jayeshmurthi49-byte-agentic-rag-chatbot-api",
-    "hf-gradio-himakesh-parth-ai-tutor",
-    "hf-gradio-ksufian-ai-car-assistant",
-    "hf-gradio-pelinbalci-pelin-notes-chat",
-    "hf-gradio-htchu-coderhelper",
 )
 
 TIER_2_DEEP_REASONING_PORTALS: Tuple[str, ...] = (
     "google-gemini-3-flash-preview-cloud",
-    "hf-gradio-vml12-qwen-ai-chatbot",
-    "hf-gradio-kingpin92-qwen3-8-27b-iq2-chat",
-    "hf-gradio-zerolimites-deepseek-ai-deepseek-r1-distill-qwen-14b",
-    "hf-gradio-ast-1320-gemma-4-aggressive",
-    "hf-gradio-oookto-huihui-gemma-4-e2b-api",
     "pollinations-openai-fast",
 )
 
-TIER_3_DOMAIN_RAG_PORTALS: Tuple[str, ...] = (
-    "hf-gradio-affanaiengr-rag",
-    "hf-gradio-free234-snap-rag-assistant",
-    "hf-gradio-lkeira108-resume-rag-chatbot",
-    "hf-gradio-mahmudnadim479-krishiguard",
-    "hf-gradio-kshitijthakkar-shlokartha-playground",
-    "hf-gradio-dkt3-digital-twin",
-    "hf-gradio-dyndl-digital-twin",
-    "hf-gradio-rstanley2026-rodney-digital-twin",
-    "hf-gradio-parmeshlata-portfolio-chatbot",
-    "hf-gradio-nakaassoumatine-einstein-chatbot",
-    "hf-gradio-netrisyl-lobels-stores-assistant",
-)
+TIER_3_DOMAIN_RAG_PORTALS: Tuple[str, ...] = ()
 
 
 def _normalize_text_for_semantic_key(text: str) -> Tuple[str, List[str]]:
@@ -399,33 +377,12 @@ class KindCollectivePool:
     def _seed_ema_latencies(self) -> None:
         """Seed initial EMA latencies from known empirical Guild 1-4 benchmarks so cold-start routing is optimal."""
         priors = {
-            "hf-gradio-jayeshmurthi49-byte-agentic-rag-chatbot-api": 1065.0,
             "google-gemini-3-5-flash-lite-cloud": 1171.0,
-            "hf-gradio-himakesh-parth-ai-tutor": 1216.0,
             "google-gemini-3-1-flash-lite-preview-cloud": 1229.0,
-            "hf-gradio-ksufian-ai-car-assistant": 1267.0,
             "google-gemini-flash-lite-latest": 1473.0,
-            "hf-gradio-pelinbalci-pelin-notes-chat": 1573.0,
-            "hf-gradio-dkt3-digital-twin": 2166.0,
-            "hf-gradio-htchu-coderhelper": 2278.0,
-            "hf-gradio-parmeshlata-portfolio-chatbot": 2278.0,
-            "hf-gradio-netrisyl-lobels-stores-assistant": 2373.0,
-            "hf-gradio-affanaiengr-rag": 2556.0,
             "google-gemini-3-1-flash-lite-cloud": 2590.0,
-            "hf-gradio-rstanley2026-rodney-digital-twin": 2744.0,
-            "hf-gradio-free234-snap-rag-assistant": 3200.0,
-            "hf-gradio-lkeira108-resume-rag-chatbot": 3400.0,
-            "hf-gradio-kshitijthakkar-shlokartha-playground": 3800.0,
-            "hf-gradio-mahmudnadim479-krishiguard": 4200.0,
-            "hf-gradio-nakaassoumatine-einstein-chatbot": 9294.0,
             "pollinations-openai-fast": 11924.0,
-            "hf-gradio-dyndl-digital-twin": 11935.0,
             "google-gemini-3-flash-preview-cloud": 13690.0,
-            "hf-gradio-ast-1320-gemma-4-aggressive": 14250.0,
-            "hf-gradio-zerolimites-deepseek-ai-deepseek-r1-distill-qwen-14b": 18500.0,
-            "hf-gradio-vml12-qwen-ai-chatbot": 28004.0,
-            "hf-gradio-kingpin92-qwen3-8-27b-iq2-chat": 46085.0,
-            "hf-gradio-oookto-huihui-gemma-4-e2b-api": 58465.0,
         }
         for pid, lat in priors.items():
             if pid in self._harnesses and pid not in self._ema_latency_ms:

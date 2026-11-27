@@ -18,21 +18,12 @@ import paramiko
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Files that exist in the Windows tree AND differ from ego's copy as of 2026-11-26.
+# The other entries that used to be listed here were either byte-identical on ego
+# (deploying them is a no-op) or exist only on ego (deploying from Windows would
+# not be correct, and the Windows tree does not have them at all).
 APPROVED_MANIFEST = [
-    "tools/sabrina_host_execution.py",
-    "tests/unit/test_sabrina_host_execution.py",
-    "tools/sabrina_evaluation_engine.py",
-    "tests/unit/test_sabrina_evaluation_engine.py",
-    "tools/sabrina_console_performance.py",
     "sabrina_operator_console.py",
-    "missions/__init__.py",
-    "missions/cross_app_handoff_helper/__init__.py",
-    "missions/cross_app_handoff_helper/task_handoff_helper.py",
-    "missions/cross_app_handoff_helper/test_task_handoff_helper.py",
-    "missions/cross_app_handoff/__init__.py",
-    "missions/cross_app_handoff/task_handoff_helper.py",
-    "missions/cross_app_handoff/test_task_handoff_helper.py",
-    "skills/cross-app-handoff/SKILL.md",
 ]
 
 
@@ -77,7 +68,8 @@ def run_remote_cmd(client: paramiko.SSHClient, cmd: str) -> tuple[int, str, str]
 def deploy(
     host: str = "ego.local",
     user: str = "ego",
-    password: str = "ego",
+    password: str | None = None,
+    key_filename: str | None = None,
     remote_base: str = "/home/ego/bot/Sabrina-windows-sync",
     manifest: list[str] | None = None,
 ) -> dict:
@@ -103,7 +95,9 @@ def deploy(
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.load_system_host_keys()
-    client.connect(host, username=user, password=password, timeout=10)
+    # Key or agent auth by default; a password is used only if one is passed explicitly.
+    client.connect(host, username=user, password=password, key_filename=key_filename, timeout=10,
+                   look_for_keys=password is None, allow_agent=password is None)
     sftp = client.open_sftp()
 
     try:

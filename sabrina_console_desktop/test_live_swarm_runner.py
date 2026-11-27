@@ -1304,6 +1304,11 @@ os._exit(71)
                 )
                 result = runner.wait_for_mission(launch["mission_id"], timeout=8.0)
                 self.assertIsNotNone(result)
+                self.assertEqual(result["state"], "FAILED")
+                self.assertFalse(result["verdict"]["passed"])
+                self.assertTrue(Path(result["artifact_path"]).is_file())
+                self.assertIn("Blocked by failed, missing, or cyclic prerequisite", result["report_markdown"])
+                self.assertIn("- **Passed:** `False`", result["report_markdown"])
                 self.assertEqual(invoked, ["Obtain source evidence"])
                 blocked = {
                     w["task"] for w in runner.get_state()["workers"]

@@ -302,8 +302,9 @@ class TestAutomationsAndConnectors(unittest.TestCase):
             ["planner_architect", "execution_specialist", "critic_verifier", "execution_specialist", "critic_verifier"],
         )
         comm_types = [ev["comm_type"] for ev in run_res["a2a_events"]]
-        self.assertIn("pass_off", comm_types)
-        self.assertIn("critique_gate", comm_types)
+        self.assertIn("cut_spawn", comm_types)
+        self.assertIn("bridge_handoff", comm_types)
+        self.assertIn("arbiter_gate", comm_types)
         self.assertIn("loop", comm_types)
 
     def test_escalate_hitl_a2a_link_and_swarm_monitor_a2a_bridge(self) -> None:
@@ -579,6 +580,244 @@ class TestAutomationsAndConnectors(unittest.TestCase):
         wf_events = [ev for ev in run["a2a_events"] if ev["edge_id"] == "e_wf"]
         self.assertTrue(all(ev["budget_capped"] for ev in wf_events))
         self.assertTrue(all(ev["payload_bytes"] <= 1536 for ev in wf_events))
+
+    def test_join_cut_operators_cantor_paths_bridge_policy_and_log_fin_promotion(self) -> None:
+        from sabrina_console_desktop.join_cut_registry import JoinCutRegistry
+        from swarm_command.blackboard import SessionBlackboard
+
+        jc_reg = JoinCutRegistry(self.tmp_dir / "jc_workflow.sqlite3")
+        bb = SessionBlackboard(session_id="test_jc_wf", checkpoint_path=self.tmp_dir / "bb.json")
+        critic_turns = 0
+        observed_exec_prompts: list[str] = []
+
+        def fake_agent(role: str, model_id: str, sys_prompt: str, user_prompt: str):
+            nonlocal critic_turns
+            if role == "planner_architect":
+                # Emit >4200 chars + casual word "revise" to verify SharingPolicy seam & verdict parser
+                return {
+                    "ok": True,
+                    "text": "Blueprint ready (no need to revise root contract): " + ("INVARIANT_" * 450),
+                }
+            if role == "execution_specialist":
+                observed_exec_prompts.append(user_prompt)
+                return {"ok": True, "text": f"Implementation v{len(observed_exec_prompts)} complete."}
+            if role == "critic_verifier":
+                critic_turns += 1
+                if critic_turns == 1:
+                    return {"ok": True, "text": "NEEDS_WORK: tighten Cantor lease check."}
+                return {"ok": True, "text": "PASS: all genus-0 invariants verified."}
+            return {"ok": True, "text": "RECOMMENDED_NEXT_GOAL: Expand Join-Cut bridge benchmarks."}
+
+        engine = AutomationEngine(
+            db_path=self.tmp_dir / "automations_jc.sqlite3",
+            connector_registry=self.connectors,
+            agent_caller=fake_agent,
+            join_cut_registry=jc_reg,
+            blackboard=bb,
+            branching_order=3,
+        )
+        res = engine.save_and_initiate_loop(
+            {
+                "name": "Join-Cut Council Proof",
+                "goal": "Validate CUT, BRIDGE SharingPolicy, ARBITER retry, and LOG_fin promotion.",
+                "loop_type": "autonomous_a2a",
+                "steps": [
+                    {"id": "p", "name": "Planner", "step_type": "agent", "agent_role": "planner_architect"},
+                    {"id": "e", "name": "Executor", "step_type": "agent", "agent_role": "execution_specialist"},
+                    {"id": "c", "name": "Arbiter", "step_type": "agent", "agent_role": "critic_verifier"},
+                    {"id": "f", "name": "Finale", "step_type": "recommend_next", "agent_role": "coordinator"},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "loop_root", "to": "p", "comm_type": "cut_spawn"},
+                    {"id": "e2", "from": "p", "to": "e", "comm_type": "bridge_handoff"},
+                    {"id": "e3", "from": "e", "to": "c", "comm_type": "arbiter_gate"},
+                    {"id": "e4", "from": "c", "to": "e", "comm_type": "loop", "condition": "on_needs_work", "max_loops": 2},
+                    {"id": "e5", "from": "c", "to": "f", "comm_type": "log_fin_gate", "condition": "on_pass"},
+                ],
+            }
+        )
+        self.assertTrue(res["ok"])
+        run = res["run"]
+        self.assertEqual(run["status"], "completed")
+        self.assertTrue(run["goal_met"])
+        self.assertEqual(len(observed_exec_prompts), 2)
+        self.assertIn("bridge_sharing_policy", observed_exec_prompts[0])
+
+        jc_meta = run["join_cut"]
+        self.assertTrue(jc_meta["registry_invariants_ok"])
+        self.assertEqual(jc_reg.verify_invariants(), [])
+        self.assertGreaterEqual(len(jc_meta["settled_paths"]), 3)
+        self.assertTrue(jc_meta["log_fin_promoted"])
+        self.assertGreaterEqual(jc_meta["eulerian_topology"]["bridge_count"], 1)
+        self.assertIn("workflow.", json.dumps(bb.snapshot()["artifacts"]))
+
+    def test_asymmetric_multi_hop_fan_in_barrier_executes_join_once(self) -> None:
+        join_prompts: list[str] = []
+
+        def fake_agent(role: str, model_id: str, sys_prompt: str, user_prompt: str):
+            if role == "fast_worker":
+                return {"ok": True, "text": "FAST_1HOP_PAYLOAD"}
+            if role == "research_scout":
+                return {"ok": True, "text": "SCOUT_HOP1_PAYLOAD"}
+            if role == "planner_architect":
+                return {"ok": True, "text": "PLANNER_2HOP_PAYLOAD"}
+            if role == "execution_specialist":
+                join_prompts.append(user_prompt)
+                return {"ok": True, "text": "PASS: Coalesced asymmetric branches."}
+            return {"ok": True, "text": "ok"}
+
+        engine = AutomationEngine(
+            db_path=self.tmp_dir / "automations_asym.sqlite3",
+            connector_registry=self.connectors,
+            agent_caller=fake_agent,
+        )
+        res = engine.save_and_initiate_loop(
+            {
+                "name": "Asymmetric Multi-Hop Fan-In",
+                "goal": "Ensure 1-hop branch waits for 2-hop branch before executing join node",
+                "loop_type": "autonomous_a2a",
+                "steps": [
+                    {"id": "fast", "name": "Fast 1-Hop", "step_type": "agent", "agent_role": "fast_worker"},
+                    {"id": "scout", "name": "Scout Hop 1", "step_type": "agent", "agent_role": "research_scout"},
+                    {"id": "plan", "name": "Planner Hop 2", "step_type": "agent", "agent_role": "planner_architect"},
+                    {"id": "join", "name": "Join Synthesizer", "step_type": "agent", "agent_role": "execution_specialist"},
+                ],
+                "edges": [
+                    {"id": "r_fast", "from": "loop_root", "to": "fast", "comm_type": "cut_spawn"},
+                    {"id": "r_scout", "from": "loop_root", "to": "scout", "comm_type": "cut_spawn"},
+                    {"id": "s_plan", "from": "scout", "to": "plan", "comm_type": "pass_off"},
+                    {"id": "f_join", "from": "fast", "to": "join", "comm_type": "wait_edge", "payload_mode": "raw_output"},
+                    {"id": "p_join", "from": "plan", "to": "join", "comm_type": "wait_edge", "payload_mode": "raw_output"},
+                ],
+            }
+        )
+        run = res["run"]
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(len(join_prompts), 1)
+        self.assertIn("FAST_1HOP_PAYLOAD", join_prompts[0])
+        self.assertIn("PLANNER_2HOP_PAYLOAD", join_prompts[0])
+
+    def test_fail_closed_prune_on_exhausted_arbiter_and_cycle_hop_cap(self) -> None:
+        deployed: list[str] = []
+
+        def always_failing_critic(role: str, model_id: str, sys_prompt: str, user_prompt: str):
+            if role == "critic_verifier":
+                return {"ok": True, "text": "NEEDS_WORK: invariant violation persists."}
+            if role == "coordinator":
+                deployed.append("ran")
+                return {"ok": True, "text": "Deployed anyway"}
+            return {"ok": True, "text": "Draft candidate"}
+
+        engine = AutomationEngine(
+            db_path=self.tmp_dir / "automations_fail_closed.sqlite3",
+            connector_registry=self.connectors,
+            agent_caller=always_failing_critic,
+        )
+        res = engine.save_and_initiate_loop(
+            {
+                "name": "Fail-Closed Arbiter Test",
+                "goal": "Never promote downstream when arbiter exhausts retries on NEEDS_WORK",
+                "loop_type": "autonomous_a2a",
+                "steps": [
+                    {"id": "ex", "name": "Executor", "step_type": "agent", "agent_role": "execution_specialist"},
+                    {"id": "cr", "name": "Critic", "step_type": "agent", "agent_role": "critic_verifier"},
+                    {"id": "dp", "name": "Deploy", "step_type": "agent", "agent_role": "coordinator"},
+                ],
+                "edges": [
+                    {"id": "e1", "from": "loop_root", "to": "ex", "comm_type": "cut_spawn"},
+                    {"id": "e2", "from": "ex", "to": "cr", "comm_type": "arbiter_gate"},
+                    {"id": "e3", "from": "cr", "to": "ex", "comm_type": "loop", "condition": "on_needs_work", "max_loops": 2},
+                    {"id": "e4", "from": "cr", "to": "dp", "comm_type": "pass_off", "condition": "always"},
+                ],
+            }
+        )
+        self.assertFalse(res["ok"])
+        self.assertEqual(res["run"]["status"], "failed")
+        self.assertFalse(res["run"]["goal_met"])
+        self.assertEqual(deployed, [])
+        self.assertTrue(any(ev.get("jc_op") == "PRUNE_FAIL_CLOSED" for ev in res["run"]["a2a_events"]))
+
+        # Verify non-loop chord cycles are detected by topology validator and bounded by max_loops
+        chord_calls = 0
+
+        def counting_agent(role: str, model_id: str, sys_prompt: str, user_prompt: str):
+            nonlocal chord_calls
+            chord_calls += 1
+            return {"ok": True, "text": "Step output"}
+
+        engine2 = AutomationEngine(
+            db_path=self.tmp_dir / "automations_chord.sqlite3",
+            connector_registry=self.connectors,
+            agent_caller=counting_agent,
+        )
+        chord_spec = {
+            "name": "Unguarded Chord Cycle",
+            "goal": "Cap non-loop cycles",
+            "loop_type": "autonomous_a2a",
+            "steps": [
+                {"id": "a", "name": "Node A", "step_type": "agent", "agent_role": "planner_architect"},
+                {"id": "b", "name": "Node B", "step_type": "agent", "agent_role": "execution_specialist"},
+            ],
+            "edges": [
+                {"id": "ab", "from": "a", "to": "b", "comm_type": "pass_off", "condition": "always", "max_loops": 2},
+                {"id": "ba", "from": "b", "to": "a", "comm_type": "pass_off", "condition": "always", "max_loops": 2},
+            ],
+        }
+        topo_check = engine2.validate_workflow_topology(chord_spec)
+        self.assertFalse(topo_check["genus_zero_valid"])
+        self.assertEqual(topo_check["cycle_edge_ids"], ["ba"])
+        engine2.save_and_initiate_loop(chord_spec)
+        self.assertLessEqual(chord_calls, 6)
+
+    def test_cooperative_cancellation_releases_join_cut_leases(self) -> None:
+        import threading
+        import time
+
+        entered = threading.Event()
+        unblock = threading.Event()
+
+        def slow_agent(role: str, model_id: str, sys_prompt: str, user_prompt: str):
+            entered.set()
+            unblock.wait(timeout=2.0)
+            return {"ok": True, "text": "Step finished"}
+
+        bridge = SabrinaDesktopBridge(
+            vault_path=self.tmp_dir / "vault_cancel.json",
+            role_bindings_path=self.tmp_dir / "roles_cancel.json",
+            custom_models_path=self.tmp_dir / "models_cancel.json",
+            swarm_artifacts_dir=self.tmp_dir / "missions_cancel",
+            llm_caller=slow_agent,
+        )
+        try:
+            launched = bridge.initiate_automation_async(
+                {
+                    "name": "Cancellable Join-Cut Loop",
+                    "goal": "Verify cooperative stop releases leases",
+                    "loop_type": "autonomous_a2a",
+                    "steps": [
+                        {"id": "s1", "name": "Step 1", "step_type": "agent", "agent_role": "planner_architect"},
+                        {"id": "s2", "name": "Step 2", "step_type": "agent", "agent_role": "execution_specialist"},
+                    ],
+                    "edges": [
+                        {"id": "e1", "from": "loop_root", "to": "s1", "comm_type": "cut_spawn"},
+                        {"id": "e2", "from": "s1", "to": "s2", "comm_type": "bridge_handoff"},
+                    ],
+                }
+            )
+            self.assertTrue(entered.wait(timeout=3.0))
+            loop_id = launched["loop"]["id"]
+            bridge.stop_automation(loop_id)
+            unblock.set()
+            for _ in range(40):
+                runs = bridge.get_automation_runs(loop_id, 1)["runs"]
+                if runs and runs[0]["status"] != "running":
+                    break
+                time.sleep(0.05)
+            runs = bridge.get_automation_runs(loop_id, 1)["runs"]
+            self.assertEqual(runs[0]["status"], "cancelled")
+            self.assertEqual(bridge.join_cut_registry.verify_invariants(), [])
+        finally:
+            bridge.swarm_runner.shutdown()
 
 
 if __name__ == "__main__":

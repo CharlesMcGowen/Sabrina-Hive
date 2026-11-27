@@ -239,6 +239,13 @@
       overflow: auto;
     }
     .topo-svg { width: 100%; min-width: 720px; height: auto; min-height: 360px; display: block; }
+    #topo-joincut-svg {
+      width: 100%; min-width: 720px; min-height: 360px; display: block;
+      background: radial-gradient(ellipse at 50% 10%, rgba(22, 78, 99, 0.34), transparent 65%), #0a101b;
+    }
+    #topo-joincut-svg .joincut-sphere { transition: opacity 180ms ease; }
+    #topo-joincut-svg .joincut-active-halo { animation: joincut-pulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes joincut-pulse { 50% { opacity: 0.22; transform: scale(1.28); } }
     .topo-appearance {
       position: sticky;
       top: 0;
@@ -1222,23 +1229,35 @@
                   <button id="topo-conflict-count" class="pill pill-warn" style="display:none" type="button">File conflicts</button>
                 </div>
               </div>
-              <svg id="topo-svg" class="topo-svg" viewBox="0 0 1000 360" preserveAspectRatio="xMidYMid meet"></svg>
+              <div class="row" role="tablist" aria-label="Live topology view" style="gap:6px; padding:6px 0;">
+                <button id="btn-topology-hierarchy" class="btn-primary" type="button" role="tab" aria-selected="true" style="padding:4px 9px; font-size:11px;">Worker tree</button>
+                <button id="btn-topology-joincut-3d" class="btn-ghost" type="button" role="tab" aria-selected="false" style="padding:4px 9px; font-size:11px;">Join-Cut 3D</button>
+                <span id="topo-joincut-summary" class="mono muted" style="font-size:10.5px; margin-left:auto;">Waiting for live Join-Cut coordinates</span>
+              </div>
+              <div id="topo-hierarchy-view">
+                <svg id="topo-svg" class="topo-svg" viewBox="0 0 1000 360" preserveAspectRatio="xMidYMid meet"></svg>
+              </div>
+              <div id="topo-joincut-view" hidden>
+                <svg id="topo-joincut-svg" viewBox="0 0 960 380" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Live Join-Cut 3D sphere embedding"></svg>
+              </div>
             </div>
             <div id="swarm-a2a-composer" class="panel" style="display:none; margin-top:8px; padding:11px 13px; background:rgba(15,23,42,0.94); border-color:rgba(56,189,248,0.55);">
               <div class="panel-head">
                 <div class="row" style="gap:8px;">
-                  <span class="pill pill-run">SWARM A2A LINK</span>
+                  <span class="pill pill-run">SWARM JOIN-CUT SEAM</span>
                   <strong id="swarm-a2a-pair-label" class="mono" style="font-size:12.5px;">Source ➔ Target</strong>
                 </div>
                 <button id="btn-swarm-a2a-close" class="btn-ghost" type="button" style="padding:3px 8px; font-size:11px;">✕ Close</button>
               </div>
               <div class="row" style="gap:8px;">
                 <select id="swarm-a2a-comm-type">
-                  <option value="pass_off">➔ Pass-Off / Handoff</option>
-                  <option value="loop">↻ Loop / Iterative Retry</option>
-                  <option value="critique_gate">🛡 Critique / Verify Gate</option>
-                  <option value="delegate_spawn">⑂ Delegate Sub-Task</option>
-                  <option value="blackboard_sync">📡 Blackboard A2A Sync</option>
+                  <option value="cut_spawn">⑂ CUT / Spawn Child</option>
+                  <option value="bridge_handoff">🌉 BRIDGE Seam Handoff</option>
+                  <option value="arbiter_gate">🛡 ARBITER Critique (LOG_da)</option>
+                  <option value="wait_edge">⏳ WAIT_EDGE Barrier</option>
+                  <option value="log_fin_gate">✓ LOG_fin Promotion Port</option>
+                  <option value="loop">↻ Transient Retry / Loop</option>
+                  <option value="blackboard_sync">📡 Blackboard Partition Sync</option>
                   <option value="escalate_hitl">⚠ Escalate / HITL Gate</option>
                 </select>
                 <select id="swarm-a2a-condition">
@@ -1839,7 +1858,8 @@
                 <button id="btn-launch-kraken-gui" class="btn-ok" type="button" title="Open the standalone Sabrina Kraken Live & $1,000 Paper Desktop Monitor">🖥 Launch Kraken Desktop Monitor</button>
                 <button id="btn-run-kraken-qa" class="btn-ghost" type="button" title="Run deterministic Product QA (imports, headless Tcl/Tk GUI smoke, UI parity, unit tests)">🧪 Run Product QA Smoke Check</button>
                 <button id="btn-kraken-paper-review" class="btn-ghost" type="button" title="Send the simulated portfolio totals to Claude and GPT, then have Gemini review their findings">Review paper results with Claude, GPT &amp; Gemini</button>
-                <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View replacement paper trial</button>
+                <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View Top 25 paper trial</button>
+                <button id="btn-kraken-top25-picks" class="btn-ghost" type="button">View Top 25 picks</button>
                 <button id="btn-swarm-kraken-qa" class="btn-ghost" type="button" title="Dispatch the 4-agent Swarm in Product QA mode to audit the Kraken GUI product">⚡ Swarm QA Mission on Kraken</button>
                 <button id="btn-swarm-manage-kraken" class="btn-primary" type="button" title="Deploy the Swarm to autonomously monitor order-books, turnover velocity, and QuantOrb safety">🤖 Deploy Swarm Kraken Manager</button>
               </div>
@@ -1958,13 +1978,14 @@
             <div class="panel">
               <div class="panel-head">
                 <div>
-                  <h2 class="panel-title">Manual Loop Builder · Interactive Agent-to-Agent (A2A) Workflow Studio</h2>
-                  <div class="muted" style="font-size:12px;">Click a source node on the graph, then click a target node to define a <b>Loop</b>, <b>Pass-Off</b>, or other <b>A2A communication</b>. Click any link badge to edit.</div>
+                  <h2 class="panel-title">Manual Loop Builder · Genus-0 Join-Cut &amp; A2A Workflow Studio</h2>
+                  <div class="muted" style="font-size:12px;">Click a source node, then a target node to wire a <b>CUT Spawn</b>, <b>BRIDGE Seam</b>, <b>ARBITER Gate (LOG_da)</b>, <b>WAIT_EDGE Barrier</b>, or <b>LOG_fin Port</b>. Click any link badge to edit.</div>
                 </div>
-                <div class="row" style="gap:6px;">
+                <div class="row" style="gap:6px; align-items:center;">
+                  <span id="auto-jc-invariant-badge" class="pill pill-ok" style="font-size:10.5px;">g=0 TREE · VALID</span>
                   <button id="btn-auto-import-swarm" class="btn-ghost" type="button">Import Swarm Schema</button>
                   <button id="btn-auto-sim-run" class="btn-ghost" type="button">▶ Simulate A2A Flow</button>
-                  <button id="btn-auto-sim-stop" class="btn-ghost" type="button">⏹ Stop Sim</button>
+                  <button id="btn-auto-sim-stop" class="btn-ghost" type="button">⏹ Stop</button>
                   <button id="btn-manual-save" class="btn-ghost" type="button">Save Loop</button>
                   <button id="btn-manual-initiate" class="btn-ok" type="button">⚡ Initiate Autonomous Workflow</button>
                 </div>
@@ -1975,21 +1996,21 @@
               <div class="grid-2" style="gap:10px; margin-bottom:4px;">
                 <div>
                   <label class="muted" style="font-size:11.5px;">Workflow / Loop Name</label>
-                  <input id="manual-name" type="text" style="width:100%;" placeholder="Autonomous A2A Research &amp; Verification Loop" />
+                  <input id="manual-name" type="text" style="width:100%;" placeholder="Join-Cut Autonomous Council (g=0)" />
                 </div>
                 <div>
                   <label class="muted" style="font-size:11.5px;">Agent Workflow Goal</label>
-                  <input id="manual-goal" type="text" style="width:100%;" placeholder="Describe the shared mission goal for the connected agents..." />
+                  <input id="manual-goal" type="text" style="width:100%;" placeholder="Describe the shared mission goal for the Join-Cut spheres..." />
                 </div>
               </div>
 
               <div id="auto-link-banner" class="a2a-link-banner">
                 <div id="auto-link-banner-text">
                   <span style="color:var(--cyan); font-weight:700;">🔗 Click-to-Link Active:</span>
-                  Click any agent/step node below to select the <b>source</b>, then click a <b>second node</b> (or the same node) to define an A2A <b>Pass-Off</b>, <b>Loop</b>, <b>Critique Gate</b>, <b>Delegation</b>, <b>Blackboard Sync</b>, or <b>Escalation</b>.
+                  Click any node below to select the <b>source</b>, then click a <b>second node</b> to wire a genus-0 <b>CUT Spawn</b>, <b>BRIDGE Seam</b>, <b>ARBITER Gate (LOG_da)</b>, <b>WAIT_EDGE Barrier</b>, <b>LOG_fin Port</b>, or <b>HITL Escalation</b>.
                 </div>
                 <div class="row" style="gap:6px;">
-                  <button id="btn-auto-link-self" class="btn-ghost" type="button" style="display:none; padding:4px 9px; font-size:11.5px;">↻ Self-Loop Selected Node</button>
+                  <button id="btn-auto-link-self" class="btn-ghost" type="button" style="display:none; padding:4px 9px; font-size:11.5px;">↻ Self-Retry Selected Node</button>
                   <button id="btn-auto-link-cancel" class="btn-ghost" type="button" style="display:none; padding:4px 9px; font-size:11.5px;">✕ Cancel Selection</button>
                 </div>
               </div>
@@ -1997,14 +2018,15 @@
               <div class="topo-wrap" style="margin-bottom:4px;">
                 <div class="web-legend">
                   <span>
-                    <span class="web-legend-dot" style="background:#38bdf8;"></span>PASS-OFF / HANDOFF &nbsp;
-                    <span class="web-legend-dot" style="background:#fbbf24;"></span>LOOP / RETRY &nbsp;
-                    <span class="web-legend-dot" style="background:#a78bfa;"></span>CRITIQUE GATE &nbsp;
-                    <span class="web-legend-dot" style="background:#34d399;"></span>DELEGATE &nbsp;
-                    <span class="web-legend-dot" style="background:#60a5fa;"></span>BLACKBOARD A2A &nbsp;
-                    <span class="web-legend-dot" style="background:#f87171;"></span>ESCALATE / HITL
+                    <span class="web-legend-dot" style="background:#34d399;"></span>CUT SPAWN &nbsp;
+                    <span class="web-legend-dot" style="background:#38bdf8;"></span>BRIDGE SEAM &nbsp;
+                    <span class="web-legend-dot" style="background:#a78bfa;"></span>ARBITER (LOG_da) &nbsp;
+                    <span class="web-legend-dot" style="background:#60a5fa;"></span>WAIT_EDGE &nbsp;
+                    <span class="web-legend-dot" style="background:#10b981;"></span>LOG_fin PORT &nbsp;
+                    <span class="web-legend-dot" style="background:#fbbf24;"></span>RETRY / LOOP &nbsp;
+                    <span class="web-legend-dot" style="background:#f87171;"></span>HITL GATE
                   </span>
-                  <span id="auto-sim-metrics" class="mono">IDLE · 0 nodes · 0 A2A links</span>
+                  <span id="auto-sim-metrics" class="mono">IDLE · 0 nodes · 0 Join-Cut links</span>
                 </div>
                 <svg id="auto-topo-svg" class="topo-svg" viewBox="0 0 1040 380" preserveAspectRatio="xMidYMid meet"></svg>
               </div>
@@ -2013,7 +2035,7 @@
               <div id="auto-link-composer" class="panel" style="display:none; background:rgba(15,23,42,0.94); border-color:rgba(56,189,248,0.55); padding:12px;">
                 <div class="panel-head" style="margin-bottom:8px;">
                   <div class="row" style="gap:8px; align-items:center;">
-                    <span class="pill pill-run">A2A LINK COMPOSER</span>
+                    <span class="pill pill-run">JOIN-CUT SEAM COMPOSER</span>
                     <strong id="auto-link-pair-label" class="mono" style="font-size:13px; color:#e2e8f0;">Source ➔ Target</strong>
                   </div>
                   <div class="row" style="gap:6px;">
@@ -2022,44 +2044,46 @@
                   </div>
                 </div>
 
-                <div class="muted" style="font-size:11.5px; margin-bottom:6px;">Select A2A Communication Type between these nodes:</div>
+                <div class="muted" style="font-size:11.5px; margin-bottom:6px;">Select Genus-0 Join-Cut Operator between these nodes:</div>
                 <div id="auto-comm-type-grid" class="a2a-comm-grid" style="margin-bottom:10px;">
-                  <button type="button" class="a2a-comm-card selected" data-comm-pick="pass_off">
-                    <span style="font-weight:700; color:#38bdf8; font-size:12px;">➔ Pass-Off / Handoff</span>
-                    <span class="muted" style="font-size:11px;">Transfer task ownership &amp; structured output envelope to next agent.</span>
+                  <button type="button" class="a2a-comm-card selected" data-comm-pick="cut_spawn">
+                    <span style="font-weight:700; color:#34d399; font-size:12px;">⑂ CUT / Spawn Child</span>
+                    <span class="muted" style="font-size:11px;">Allocate disjoint 3D Cantor sphere &amp; child lease under parent (max arity m).</span>
+                  </button>
+                  <button type="button" class="a2a-comm-card" data-comm-pick="bridge_handoff">
+                    <span style="font-weight:700; color:#38bdf8; font-size:12px;">🌉 BRIDGE Seam Handoff</span>
+                    <span class="muted" style="font-size:11px;">Cross-sphere inner-deg-2 seam enforcing SharingPolicy (≤3.2k summary, no raw LOG_da).</span>
+                  </button>
+                  <button type="button" class="a2a-comm-card" data-comm-pick="arbiter_gate">
+                    <span style="font-weight:700; color:#a78bfa; font-size:12px;">🛡 ARBITER Critique (LOG_da)</span>
+                    <span class="muted" style="font-size:11px;">Inner-deg-1 verifier gate; triggers bounded transient retry or fail-closed PRUNE.</span>
+                  </button>
+                  <button type="button" class="a2a-comm-card" data-comm-pick="wait_edge">
+                    <span style="font-weight:700; color:#60a5fa; font-size:12px;">⏳ WAIT_EDGE Barrier</span>
+                    <span class="muted" style="font-size:11px;">Cycle-checked DAG prerequisite; blocks JOIN until all upstream branches settle.</span>
+                  </button>
+                  <button type="button" class="a2a-comm-card" data-comm-pick="log_fin_gate">
+                    <span style="font-weight:700; color:#10b981; font-size:12px;">✓ LOG_fin Promotion Port</span>
+                    <span class="muted" style="font-size:11px;">Outer-face planar closure gate required before promoting verified deliverables.</span>
                   </button>
                   <button type="button" class="a2a-comm-card" data-comm-pick="loop">
-                    <span style="font-weight:700; color:#fbbf24; font-size:12px;">↻ Loop / Iterative Retry</span>
-                    <span class="muted" style="font-size:11px;">Cycle back to refine or retry until exit condition or max loop count.</span>
-                  </button>
-                  <button type="button" class="a2a-comm-card" data-comm-pick="critique_gate">
-                    <span style="font-weight:700; color:#a78bfa; font-size:12px;">🛡 Critique / Verify Gate</span>
-                    <span class="muted" style="font-size:11px;">Verifier audits deliverable; passes forward or triggers revision loop.</span>
-                  </button>
-                  <button type="button" class="a2a-comm-card" data-comm-pick="delegate_spawn">
-                    <span style="font-weight:700; color:#34d399; font-size:12px;">⑂ Delegate Sub-Task</span>
-                    <span class="muted" style="font-size:11px;">Dispatch scoped sub-mission to specialist worker &amp; collect result.</span>
-                  </button>
-                  <button type="button" class="a2a-comm-card" data-comm-pick="blackboard_sync">
-                    <span style="font-weight:700; color:#60a5fa; font-size:12px;">📡 Blackboard Broadcast</span>
-                    <span class="muted" style="font-size:11px;">Publish shared artifact &amp; @mention wakeup on swarm blackboard.</span>
-                  </button>
-                  <button type="button" class="a2a-comm-card" data-comm-pick="escalate_hitl">
-                    <span style="font-weight:700; color:#f87171; font-size:12px;">⚠ Escalate / HITL Gate</span>
-                    <span class="muted" style="font-size:11px;">Escalate to supervisor or pause for human-in-the-loop approval.</span>
+                    <span style="font-weight:700; color:#fbbf24; font-size:12px;">↻ Transient Retry / Self-Loop</span>
+                    <span class="muted" style="font-size:11px;">Release target lease for bounded retry (NEEDS_WORK) or evolve root goal.</span>
                   </button>
                 </div>
 
                 <div class="grid-4" style="gap:8px; margin-bottom:8px;">
                   <div>
-                    <label class="muted" style="font-size:11px;">Communication Protocol</label>
+                    <label class="muted" style="font-size:11px;">Join-Cut / A2A Operator</label>
                     <select id="auto-link-comm-type" style="width:100%;">
-                      <option value="pass_off">Pass-Off / Direct Handoff</option>
-                      <option value="loop">Loop / Iterative Retry</option>
-                      <option value="critique_gate">Critique / Verification Gate</option>
-                      <option value="delegate_spawn">Delegate / Sub-Task Spawn</option>
-                      <option value="blackboard_sync">Blackboard Broadcast / Sync</option>
-                      <option value="escalate_hitl">Escalate / HITL Checkpoint</option>
+                      <option value="cut_spawn">⑂ CUT / Spawn Child Sphere</option>
+                      <option value="bridge_handoff">🌉 BRIDGE Seam Handoff (SharingPolicy)</option>
+                      <option value="arbiter_gate">🛡 ARBITER Critique Gate (LOG_da)</option>
+                      <option value="wait_edge">⏳ WAIT_EDGE Fan-In Barrier</option>
+                      <option value="log_fin_gate">✓ LOG_fin Outer-Face Promotion Port</option>
+                      <option value="loop">↻ Transient Retry / Self-Loop</option>
+                      <option value="escalate_hitl">⚠ Escalate / HITL Checkpoint</option>
+                      <option value="blackboard_sync">📡 Blackboard Partition Sync</option>
                     </select>
                   </div>
                   <div>
@@ -2509,18 +2533,20 @@
               <div id="schema-a2a-composer" class="panel" style="display:none; padding:11px 13px; background:rgba(15,23,42,0.94); border-color:rgba(56,189,248,0.55);">
                 <div class="panel-head">
                   <div class="row" style="gap:8px;">
-                    <span class="pill pill-run">SCHEMA A2A RULE</span>
+                    <span class="pill pill-run">SCHEMA JOIN-CUT RULE</span>
                     <strong id="schema-a2a-pair-label" class="mono" style="font-size:12.5px;">Parent ➔ Child</strong>
                   </div>
                   <button id="btn-schema-a2a-close" class="btn-ghost" type="button" style="padding:3px 8px; font-size:11px;">✕ Close</button>
                 </div>
                 <div class="row" style="gap:8px;">
                   <select id="schema-a2a-comm-type">
-                    <option value="pass_off">➔ Pass-Off / Spawning Handoff</option>
-                    <option value="loop">↻ Loop / Bounded Retry</option>
-                    <option value="critique_gate">🛡 Critique / Verify Gate</option>
-                    <option value="delegate_spawn">⑂ Delegate Sub-Task</option>
-                    <option value="blackboard_sync">📡 Blackboard A2A Sync</option>
+                    <option value="cut_spawn">⑂ CUT / Spawn Child</option>
+                    <option value="bridge_handoff">🌉 BRIDGE Seam Handoff</option>
+                    <option value="arbiter_gate">🛡 ARBITER Critique (LOG_da)</option>
+                    <option value="wait_edge">⏳ WAIT_EDGE Barrier</option>
+                    <option value="log_fin_gate">✓ LOG_fin Promotion Port</option>
+                    <option value="loop">↻ Transient Retry / Loop</option>
+                    <option value="blackboard_sync">📡 Blackboard Partition Sync</option>
                     <option value="escalate_hitl">⚠ Escalate / HITL Gate</option>
                   </select>
                   <select id="schema-a2a-condition">
@@ -3881,11 +3907,7 @@
       document.querySelectorAll(".nav-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const view = btn.dataset.view;
-          document.querySelectorAll(".nav-btn").forEach((b) => b.classList.remove("active"));
-          document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
-          btn.classList.add("active");
-          el("view-" + view).classList.add("active");
-          el("view-title").textContent = TITLES[view] || "Sabrina Console";
+          switchView(view);
         });
       });
 
@@ -4759,11 +4781,12 @@
         };
         nodesById.set("sabrina", rootNode);
 
-        // If no real workers are running, render the full stigmergic swarm council from the active schema
-        // When real live workers exist, render the real active workers directly under Sabrina!
+        // With no runtime workers, preview the configured schema's declared links.
+        // A flat list here made the monitor disagree with the Models page even at standby.
         if (effWorkers.length === 0) {
-          // Render ALL agents declared in the active collective schema (e.g. 7-agent / 8-agent swarm)
-          schemaAgents.filter(a => a.id !== "sabrina" && a.role !== "coordinator").forEach((agent) => {
+          const standbyAgents = schemaAgents.filter((a) => a.id !== "sabrina" && a.role !== "coordinator");
+          const standbyNodeIds = new Set(["sabrina"]);
+          standbyAgents.forEach((agent) => {
             const aKey = agent.id || agent.role;
             const hInfo = (nodeMap[aKey] && typeof nodeMap[aKey] === "object") ? nodeMap[aKey] : {};
             const hModel = String(agent.model || "gemini-4-neon");
@@ -4805,21 +4828,77 @@
               hasSpindownRule: false,
               isLiveRunNode: true,
             });
-            rootNode.childIds.push(aKey);
-            rootNode.acceptedChildIds.push(aKey);
+            standbyNodeIds.add(aKey);
+          });
+
+          const standbyRules = Array.isArray(schema.deterministic_spawning_rules)
+            ? schema.deterministic_spawning_rules
+            : (Array.isArray(schema.spawning_rules) ? schema.spawning_rules : (Array.isArray(schema.rules) ? schema.rules : []));
+          const ruleEdgeIds = new Set();
+          const linkedChildIds = new Set();
+          const nodeMatchesRole = (node, roleRef) =>
+            String(node.role || "").toLowerCase() === roleRef.toLowerCase()
+            || String(node.id || "").toLowerCase() === roleRef.toLowerCase();
+
+          standbyRules.forEach((rule, rIdx) => {
+            if (!rule || typeof rule !== "object") return;
+            const parentRef = String(rule.parent_role || rule.parent || rule.from || "").trim();
+            const childRef = String(rule.child_role || rule.child || rule.to || "").trim();
+            if (!parentRef || !childRef) return;
+            const parents = Array.from(nodesById.values()).filter((node) => nodeMatchesRole(node, parentRef));
+            const children = Array.from(nodesById.values()).filter((node) => nodeMatchesRole(node, childRef));
+            const ruleId = String(rule.rule_id || rule.id || `SCHEMA_${rIdx + 1}`);
+            const minLogprob = Number.isFinite(Number(rule.min_logprob)) ? Number(rule.min_logprob) : confGate;
+            parents.forEach((parent) => children.forEach((child) => {
+              if (parent.id === child.id) return;
+              const edgeId = `${parent.id}->${child.id}:${ruleId}`;
+              if (ruleEdgeIds.has(edgeId)) return;
+              ruleEdgeIds.add(edgeId);
+              if (!parent.childIds.includes(child.id)) parent.childIds.push(child.id);
+              if (!parent.acceptedChildIds.includes(child.id)) parent.acceptedChildIds.push(child.id);
+              if (!child.parentIds.includes(parent.id)) child.parentIds.push(parent.id);
+              linkedChildIds.add(child.id);
+              edges.push({
+                id: edgeId,
+                from: parent.id,
+                to: child.id,
+                rule_id: ruleId,
+                min_logprob: minLogprob,
+                liveLabel: ruleId,
+                trigger: String(rule.trigger || "schema rule"),
+                transition: String(rule.transition || "SPAWNING -> ACTIVE -> VALIDATING"),
+                triggersSpindown: /spindown/i.test(String(rule.transition || "")),
+                isStricter: minLogprob > confGate + 1e-9,
+                cappedByMaxChildren: false,
+                isCycle: false,
+                isSchemaEdge: true,
+              });
+            }));
+          });
+
+          // Keep declared but unlinked nodes visible, anchored as roots rather than
+          // silently inventing a schema edge for every agent.
+          standbyNodeIds.forEach((nodeId) => {
+            if (nodeId === "sabrina" || linkedChildIds.has(nodeId)) return;
+            const node = nodesById.get(nodeId);
+            if (!node) return;
+            node.parentIds.push("sabrina");
+            rootNode.childIds.push(nodeId);
+            rootNode.acceptedChildIds.push(nodeId);
             edges.push({
-              id: `sabrina->${aKey}:STANDBY`,
+              id: `sabrina->${nodeId}:SCHEMA_ROOT`,
               from: "sabrina",
-              to: aKey,
-              rule_id: "COUNCIL_SCHEMA",
+              to: nodeId,
+              rule_id: "SCHEMA_ROOT",
               min_logprob: confGate,
-              liveLabel: "STANDBY",
-              trigger: "schema",
+              liveLabel: "UNLINKED",
+              trigger: "schema node has no incoming rule",
               transition: "STANDBY",
               triggersSpindown: false,
               isStricter: false,
               cappedByMaxChildren: false,
               isCycle: false,
+              isSchemaEdge: true,
             });
           });
         }
@@ -4841,6 +4920,11 @@
           const wMode = String(w.mode || (wid.startsWith("dyn-") ? "DYNAMIC" : "DYNAMIC")).toUpperCase();
           const wCmd = String(w.active_command || w.command || w.task || "").trim();
           const wParent = String(w.parent_id || w.parent_node || "sabrina").trim();
+          const sphereRaw = (w.bounding_sphere && typeof w.bounding_sphere === "object") ? w.bounding_sphere : null;
+          const sphereRadius = sphereRaw ? Number(sphereRaw.r ?? sphereRaw.radius) : NaN;
+          const liveSphere = sphereRaw && [sphereRaw.cx, sphereRaw.cy, sphereRaw.cz].every((v) => Number.isFinite(Number(v))) && Number.isFinite(sphereRadius)
+            ? { cx: Number(sphereRaw.cx), cy: Number(sphereRaw.cy), cz: Number(sphereRaw.cz), r: sphereRadius }
+            : null;
           nodesById.set(wid, {
             id: wid,
             agent_id: wid,
@@ -4877,6 +4961,10 @@
             unreachable: false,
             hasSpindownRule: wStatus === "PASS" || wStatus === "DONE" || wState === "PASS",
             isLiveRunNode: true,
+            missionId: String(w.mission_id || ""),
+            updatedAt: String(w.updated_at || w.last_heartbeat_at || w.started_at || ""),
+            cantorPath: String(w.cantor_path || w.cantorPath || "").trim(),
+            boundingSphere: liveSphere,
             _rawParent: wParent,
             recoveryFor: String(w.recovery_for || ""),
             workerRevision: String(w.worker_revision || ""),
@@ -4897,17 +4985,14 @@
           let parentNode = null;
           if (n.recoveryFor) {
             parentNode = nodesById.get(n.recoveryFor) || rootNode;
-          } else if (rLow === "planner_architect" || rLow === "research_scout" || rLow === "rag_scout") {
-            parentNode = rootNode;
-          } else if (rLow === "execution_specialist") {
-            parentNode = roleToNode.get("planner_architect") || rootNode;
-          } else if (rLow === "critic_verifier") {
-            parentNode = roleToNode.get("execution_specialist") || roleToNode.get("planner_architect") || rootNode;
           } else {
             const rawP = n._rawParent || "sabrina";
             parentNode = nodesById.get(rawP)
               || nodesById.get(rawP.toLowerCase())
               || roleToNode.get(rawP.toLowerCase())
+              || (rLow === "planner_architect" || rLow === "research_scout" || rLow === "rag_scout" ? rootNode : null)
+              || (rLow === "execution_specialist" ? (roleToNode.get("planner_architect") || rootNode) : null)
+              || (rLow === "critic_verifier" ? (roleToNode.get("execution_specialist") || roleToNode.get("planner_architect") || rootNode) : null)
               || rootNode;
           }
           n.parentIds.push(parentNode.id);
@@ -5190,6 +5275,14 @@
         }
       }
 
+      function canonicalizeJoinCutComm(rawComm) {
+        const c = String(rawComm || "bridge_handoff").trim().toLowerCase();
+        if (c === "delegate_spawn") return "cut_spawn";
+        if (c === "pass_off") return "bridge_handoff";
+        if (c === "critique_gate") return "arbiter_gate";
+        return c;
+      }
+
       function openSwarmA2aComposer(fromId, toId, existingId = "") {
         const existing = existingId
           ? cachedSwarmA2aLinks.find((x) => x.id === existingId)
@@ -5197,7 +5290,10 @@
         const isSelf = fromId === toId;
         const isBack = (fromId === "claude" && (toId === "antigravity" || toId === "codex")) || toId === "sabrina";
         const isCritic = toId === "claude" || /verif|critic/i.test(toId);
-        const defComm = existing ? existing.comm_type : ((isSelf || isBack) ? "loop" : (isCritic ? "critique_gate" : "pass_off"));
+        const isRootSpawn = fromId === "sabrina";
+        const defComm = existing
+          ? canonicalizeJoinCutComm(existing.comm_type)
+          : ((isSelf || isBack) ? "loop" : (isRootSpawn ? "cut_spawn" : (isCritic ? "arbiter_gate" : "bridge_handoff")));
         const defCond = existing ? existing.condition : (defComm === "loop" ? "on_needs_work" : "always");
 
         swarmLinkSourceId = "";
@@ -6182,7 +6278,9 @@
           const badgeText = isLiveOnly
             ? (e.isFileEdge
                 ? shortLabel(e.liveLabel || "+NEW", 22)
-                : `${e.rule_id === "RECOVERY" ? "RECOVERY" : "LIVE"} · ${shortLabel(e.liveLabel || c.status || "ACTIVE", 18)}${suffix}`)
+                : (e.isSchemaEdge
+                    ? `${shortLabel(e.rule_id, 14)} · ≥${Number(e.min_logprob).toFixed(2)}${suffix}`
+                    : `${e.rule_id === "RECOVERY" ? "RECOVERY" : "LIVE"} · ${shortLabel(e.liveLabel || c.status || "ACTIVE", 18)}${suffix}`))
             : `${shortLabel(e.rule_id, 14)} · ≥${Number(e.min_logprob).toFixed(2)}${suffix}`;
           const badgeW = Math.min(196, Math.max(92, badgeText.length * 5.6 + 12));
 
@@ -6464,18 +6562,21 @@
         if (!svg || !lastLiveDag || !lastLiveDag.nodesById) return;
         const chipsEl = el("swarm-a2a-chips");
         const styleMap = {
-          pass_off: { label: "PASS-OFF", icon: "➔", color: "#38bdf8", marker: "main-arr-cyan" },
-          loop: { label: "LOOP", icon: "↻", color: "#fbbf24", marker: "main-arr-amber" },
-          critique_gate: { label: "VERIFY GATE", icon: "🛡", color: "#a78bfa", marker: "main-arr-purple" },
-          delegate_spawn: { label: "DELEGATE", icon: "⑂", color: "#34d399", marker: "main-arr-green" },
+          cut_spawn: { label: "CUT SPAWN", icon: "⑂", color: "#34d399", marker: "main-arr-green" },
+          bridge_handoff: { label: "BRIDGE SEAM", icon: "🌉", color: "#38bdf8", marker: "main-arr-cyan" },
+          arbiter_gate: { label: "ARBITER", icon: "🛡", color: "#a78bfa", marker: "main-arr-purple" },
+          wait_edge: { label: "WAIT_EDGE", icon: "⏳", color: "#60a5fa", marker: "main-arr-cyan" },
+          log_fin_gate: { label: "LOG_fin", icon: "✓", color: "#10b981", marker: "main-arr-green" },
+          loop: { label: "RETRY", icon: "↻", color: "#fbbf24", marker: "main-arr-amber" },
           blackboard_sync: { label: "BLACKBOARD", icon: "📡", color: "#60a5fa", marker: "main-arr-cyan" },
           escalate_hitl: { label: "ESCALATE", icon: "⚠", color: "#f87171", marker: "main-arr-red" },
         };
 
         if (chipsEl) {
           chipsEl.innerHTML = cachedSwarmA2aLinks.map((lk) => {
-            const st = styleMap[lk.comm_type] || styleMap.pass_off;
-            return `<button type="button" class="btn-ghost mono" style="padding:3px 8px; font-size:11px; border-color:${st.color}; color:${st.color};" onclick="window.__clickSwarmA2aEdge('${esc(lk.id)}')">${esc(lk.from)} ${st.icon} ${esc(lk.to)} [${esc(st.label)}${lk.comm_type === "loop" ? " ×" + (lk.max_loops || 3) : ""}]</button>`;
+            const normComm = canonicalizeJoinCutComm(lk.comm_type);
+            const st = styleMap[normComm] || styleMap.bridge_handoff;
+            return `<button type="button" class="btn-ghost mono" style="padding:3px 8px; font-size:11px; border-color:${st.color}; color:${st.color};" onclick="window.__clickSwarmA2aEdge('${esc(lk.id)}')">${esc(lk.from)} ${st.icon} ${esc(lk.to)} [${esc(st.label)}${normComm === "loop" ? " ×" + (lk.max_loops || 3) : ""}]</button>`;
           }).join("");
         }
 
@@ -6485,7 +6586,7 @@
             id: "__swarm_preview__",
             from: swarmPendingPair.from,
             to: swarmPendingPair.to,
-            comm_type: (el("swarm-a2a-comm-type") && el("swarm-a2a-comm-type").value) || "pass_off",
+            comm_type: (el("swarm-a2a-comm-type") && el("swarm-a2a-comm-type").value) || "bridge_handoff",
             condition: (el("swarm-a2a-condition") && el("swarm-a2a-condition").value) || "always",
             max_loops: Number((el("swarm-a2a-max-loops") && el("swarm-a2a-max-loops").value) || 3),
             isPreview: true,
@@ -6513,7 +6614,8 @@
           const p = lastLiveDag.nodesById.get(lk.from);
           const c = lastLiveDag.nodesById.get(lk.to);
           if (!p || !c || typeof p.x !== "number" || typeof c.x !== "number") return;
-          const st = styleMap[lk.comm_type] || styleMap.pass_off;
+          const normComm = canonicalizeJoinCutComm(lk.comm_type);
+          const st = styleMap[normComm] || styleMap.bridge_handoff;
           let pathD = "";
           let bx = 0;
           let by = 0;
@@ -6571,10 +6673,169 @@
         // Swarm Monitor (#topo-svg): STRICTLY real live runs only (zero simulated/projected nodes)
         lastLiveDag = buildLiveRunWeb(nodes || {}, effWorkers, effHandoffs);
         renderCollectiveWebSvg(el("topo-svg"), "main", lastLiveDag, false);
+        if (el("topo-joincut-view") && !el("topo-joincut-view").hidden) {
+          renderJoinCutSpace(el("topo-joincut-svg"), lastLiveDag);
+        } else {
+          updateJoinCutGeometrySummary(lastLiveDag);
+        }
         renderSwarmA2aOverlayOnMainSvg();
         updateSwarmA2aBanner();
         updateInspectedNodeBar();
       }
+
+      function updateJoinCutGeometrySummary(dag) {
+        const summary = el("topo-joincut-summary");
+        if (!summary) return;
+        const geometryNodes = (dag?.nodes || []).filter((n) => n && n.cantorPath && n.boundingSphere);
+        const missions = new Set(geometryNodes.map((n) => n.missionId || "").filter(Boolean));
+        summary.textContent = geometryNodes.length
+          ? `${geometryNodes.length} measured sphere${geometryNodes.length === 1 ? "" : "s"} · ${missions.size || 1} mission${missions.size === 1 ? "" : "s"}`
+          : "Waiting for live Join-Cut coordinates";
+      }
+
+      function renderJoinCutSpace(svg, dag) {
+        if (!svg) return;
+        const allGeometryNodes = (dag?.nodes || []).filter((n) => {
+          const s = n && n.boundingSphere;
+          return Boolean(n && n.cantorPath && s && [s.cx, s.cy, s.cz, s.r].every((v) => Number.isFinite(Number(v))));
+        });
+        updateJoinCutGeometrySummary(dag);
+        if (!allGeometryNodes.length) {
+          const width = 960;
+          const height = 360;
+          svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+          svg.style.height = `${height}px`;
+          svg.innerHTML = `<rect width="${width}" height="${height}" fill="transparent" />
+            <text x="${width / 2}" y="${height / 2 - 8}" text-anchor="middle" fill="#cbd5e1" font-size="15" font-family="system-ui, sans-serif">No worker 3D coordinates reported yet</text>
+            <text x="${width / 2}" y="${height / 2 + 18}" text-anchor="middle" fill="#8291a8" font-size="11" font-family="ui-monospace, monospace">This view fills from live Join-Cut CUT events; schema preview nodes are not plotted as runtime geometry.</text>`;
+          return;
+        }
+
+        const activeMissionIds = new Set((latestSnap?.swarm?.active_missions || []).map((m) => String(m.id || "")).filter(Boolean));
+        const byMission = new Map();
+        allGeometryNodes.forEach((node) => {
+          const missionId = node.missionId || "unknown-mission";
+          if (!byMission.has(missionId)) byMission.set(missionId, []);
+          byMission.get(missionId).push(node);
+        });
+        const missionGroups = Array.from(byMission.entries()).map(([id, nodes]) => ({
+          id,
+          nodes,
+          active: activeMissionIds.has(id),
+          newestAt: Math.max(...nodes.map((n) => {
+            const stamp = String(n.updatedAt || "");
+            const numeric = Number(stamp);
+            return stamp && Number.isFinite(numeric) ? numeric * (numeric < 1e12 ? 1000 : 1) : (Date.parse(stamp) || 0);
+          })),
+        })).sort((a, b) => Number(b.active) - Number(a.active) || b.newestAt - a.newestAt || a.id.localeCompare(b.id));
+        const visibleGroups = missionGroups.slice(0, 6);
+        const columns = Math.min(2, visibleGroups.length);
+        const cellWidth = 480;
+        const cellHeight = 278;
+        const width = columns * cellWidth;
+        const height = Math.max(360, Math.ceil(visibleGroups.length / columns) * cellHeight);
+        svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        svg.style.height = `${height}px`;
+
+        const parts = [];
+        visibleGroups.forEach((group, groupIdx) => {
+          const x0 = (groupIdx % columns) * cellWidth;
+          const y0 = Math.floor(groupIdx / columns) * cellHeight;
+          const cx = x0 + cellWidth / 2;
+          const cy = y0 + 158;
+          const projected = (s, z = Number(s.cz)) => ({
+            x: (Number(s.cx) - Number(s.cy)) * 0.70710678,
+            y: (Number(s.cx) + Number(s.cy)) * 0.40824829 - z * 0.81649658,
+          });
+          const ext = group.nodes.reduce((acc, node) => {
+            const p = projected(node.boundingSphere);
+            const r = Math.max(0, Number(node.boundingSphere.r));
+            acc.x = Math.max(acc.x, Math.abs(p.x) + r);
+            acc.y = Math.max(acc.y, Math.abs(p.y) + r);
+            return acc;
+          }, { x: 0.5, y: 0.5 });
+          const scale = Math.max(1, Math.min(92, (cellWidth * 0.5 - 52) / ext.x, (cellHeight * 0.5 - 54) / ext.y));
+          const point = (s) => {
+            const p = projected(s);
+            return { x: cx + p.x * scale, y: cy + p.y * scale };
+          };
+          const root = point({ cx: 0, cy: 0, cz: 0 });
+          const byPath = new Map();
+          group.nodes.forEach((node) => {
+            if (!byPath.has(node.cantorPath)) byPath.set(node.cantorPath, node);
+          });
+          const parentPath = (path) => {
+            const segments = String(path || "").split(".");
+            if (segments.length <= 1) return segments[0] === "r" ? null : "";
+            return segments.slice(0, -1).join(".");
+          };
+          const axes = [
+            { label: "X", dx: 1, dy: 0, dz: 0, color: "#f87171" },
+            { label: "Y", dx: 0, dy: 1, dz: 0, color: "#34d399" },
+            { label: "Z", dx: 0, dy: 0, dz: 1, color: "#38bdf8" },
+          ];
+          const ax = x0 + 26;
+          const ay = y0 + 38;
+          const axesSvg = axes.map((axis) => {
+            const p = projected({ cx: axis.dx, cy: axis.dy, cz: axis.dz });
+            return `<line x1="${ax}" y1="${ay}" x2="${ax + p.x * 21}" y2="${ay + p.y * 21}" stroke="${axis.color}" stroke-width="1.6" />
+              <text x="${ax + p.x * 25}" y="${ay + p.y * 25 + 3}" fill="${axis.color}" font-size="9" font-family="ui-monospace, monospace">${axis.label}</text>`;
+          }).join("");
+          parts.push(`<g class="joincut-mission" data-mission-id="${esc(group.id)}">
+            <rect x="${x0 + 8}" y="${y0 + 7}" width="${cellWidth - 16}" height="${cellHeight - 14}" rx="9" fill="rgba(12,20,34,.62)" stroke="${group.active ? "rgba(56,189,248,.6)" : "rgba(71,85,105,.55)"}" />
+            <text x="${x0 + 19}" y="${y0 + 25}" fill="#dbeafe" font-size="11" font-family="ui-monospace, monospace" font-weight="700">${esc(shortLabel(group.id, 27))}</text>
+            <text x="${x0 + cellWidth - 20}" y="${y0 + 25}" text-anchor="end" fill="${group.active ? "#38bdf8" : "#94a3b8"}" font-size="9" font-family="ui-monospace, monospace">${group.active ? "ACTIVE" : "RECORDED"} · ${group.nodes.length} SPHERES</text>
+            ${axesSvg}
+            <circle cx="${root.x}" cy="${root.y}" r="3.5" fill="#e2e8f0" />
+            <text x="${root.x + 6}" y="${root.y + 12}" fill="#cbd5e1" font-size="8" font-family="ui-monospace, monospace">ROOT</text>`);
+
+          group.nodes.forEach((node) => {
+            const path = String(node.cantorPath || "");
+            const pPath = parentPath(path);
+            const parent = pPath !== null ? byPath.get(pPath) : null;
+            const target = point(node.boundingSphere);
+            const source = parent ? point(parent.boundingSphere) : root;
+            const sphere = node.boundingSphere;
+            const xyBase = point({ cx: sphere.cx, cy: sphere.cy, cz: 0 });
+            const state = String(node.status || node.state || "").toUpperCase();
+            const color = /FAIL|ERROR/.test(state) ? "#f87171" : (/PASS|DONE|SPIN(?:DOWN|_DOWN)|COMPLETE/.test(state) ? "#34d399" : (/ACTIVE|WORKING|RUNNING|VERIFYING|SPAWNING/.test(state) ? "#38bdf8" : "#a5b4fc"));
+            const r = Math.max(3, Number(sphere.r) * scale);
+            const title = `${node.name || node.id} · ${path} · x=${Number(sphere.cx).toFixed(4)}, y=${Number(sphere.cy).toFixed(4)}, z=${Number(sphere.cz).toFixed(4)}, r=${Number(sphere.r).toFixed(4)} · ${state}`;
+            parts.push(`<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="${color}" stroke-opacity=".52" stroke-width="1.4" />
+              ${Math.abs(Number(sphere.cz)) > 0.012 ? `<line x1="${xyBase.x}" y1="${xyBase.y}" x2="${target.x}" y2="${target.y}" stroke="#38bdf8" stroke-opacity=".5" stroke-dasharray="3 3" stroke-width="1" />` : ""}
+              <g class="joincut-sphere" data-cantor-path="${esc(path)}"><title>${esc(title)}</title>
+                ${/ACTIVE|WORKING|RUNNING|VERIFYING|SPAWNING/.test(state) ? `<circle class="joincut-active-halo" cx="${target.x}" cy="${target.y}" r="${r + 4}" fill="none" stroke="${color}" stroke-opacity=".7" stroke-width="1.4" />` : ""}
+                <circle cx="${target.x}" cy="${target.y}" r="${r}" fill="${color}" fill-opacity=".22" stroke="${color}" stroke-width="1.5" />
+                <circle cx="${target.x}" cy="${target.y}" r="2.1" fill="${color}" />
+                <text x="${target.x + r + 3}" y="${target.y - 2}" fill="#e2e8f0" font-size="8.5" font-family="ui-monospace, monospace">${esc(shortLabel(node.name || path, 15))}</text>
+                <text x="${target.x + r + 3}" y="${target.y + 9}" fill="#8493aa" font-size="7.5" font-family="ui-monospace, monospace">${esc(path)}</text>
+              </g>`);
+          });
+          parts.push(`</g>`);
+        });
+        if (missionGroups.length > visibleGroups.length) {
+          parts.push(`<text x="${width - 15}" y="${height - 8}" text-anchor="end" fill="#94a3b8" font-size="9" font-family="ui-monospace, monospace">+${missionGroups.length - visibleGroups.length} earlier missions hidden</text>`);
+        }
+        svg.innerHTML = parts.join("");
+      }
+
+      function setSwarmTopologyView(viewName) {
+        const use3d = viewName === "joincut3d";
+        const hierarchyView = el("topo-hierarchy-view");
+        const joinCutView = el("topo-joincut-view");
+        const hierarchyButton = el("btn-topology-hierarchy");
+        const joinCutButton = el("btn-topology-joincut-3d");
+        if (hierarchyView) hierarchyView.hidden = use3d;
+        if (joinCutView) joinCutView.hidden = !use3d;
+        if (hierarchyButton) hierarchyButton.setAttribute("aria-selected", String(!use3d));
+        if (joinCutButton) joinCutButton.setAttribute("aria-selected", String(use3d));
+        hierarchyButton?.classList.toggle("btn-primary", !use3d);
+        joinCutButton?.classList.toggle("btn-primary", use3d);
+        if (use3d) renderJoinCutSpace(el("topo-joincut-svg"), lastLiveDag);
+      }
+
+      el("btn-topology-hierarchy")?.addEventListener("click", () => setSwarmTopologyView("hierarchy"));
+      el("btn-topology-joincut-3d")?.addEventListener("click", () => setSwarmTopologyView("joincut3d"));
 
       let selectedMissionOutputId = "";
       let monitorOpenedReport = null;
@@ -11369,8 +11630,16 @@
       const SAMPLE_SWARM_SCHEMA = SWARM_SCHEMA_PRESETS.autonomous_seed.schema;
       let activeParsedSwarmSchema = JSON.parse(JSON.stringify(SAMPLE_SWARM_SCHEMA));
       let schemaEditorDirty = false;
+      let schemaEditorValidationTimer = null;
       let lastLoadedPresetKey = "autonomous_seed";
       let lastInvariantReport = null;
+
+      function cancelPendingSchemaValidation() {
+        if (schemaEditorValidationTimer !== null) {
+          clearTimeout(schemaEditorValidationTimer);
+          schemaEditorValidationTimer = null;
+        }
+      }
 
       function inferProviderFromModelId(modelStr, explicitProv) {
         if (explicitProv) return String(explicitProv).toLowerCase().trim();
@@ -12273,7 +12542,8 @@
         dl.innerHTML = Array.from(roles).map((r) => `<option value="${esc(r)}"></option>`).join("");
       }
 
-      function commitBuilderSchemaMutation(mutatorFn, feedbackMsg = "") {
+      function commitBuilderSchemaMutation(mutatorFn, feedbackMsg = "", options = {}) {
+        cancelPendingSchemaValidation();
         schemaEditorDirty = true;
         const next = ensureMutableSchema(activeParsedSwarmSchema);
         mutatorFn(next);
@@ -12281,15 +12551,10 @@
         activeParsedSwarmSchema = next;
         const editor = el("schema-json-editor");
         if (editor) editor.value = JSON.stringify(next, null, 2);
-        validateAndInspectSchemaEditor();
+        validateAndInspectSchemaEditor(false, options);
         if (feedbackMsg && el("schema-editor-feedback")) {
           el("schema-editor-feedback").textContent = feedbackMsg;
         }
-        renderTopology(
-          (latestSnap && latestSnap.swarm && latestSnap.swarm.nodes) || {},
-          (latestSnap && latestSnap.swarm && latestSnap.swarm.workers) || [],
-          (latestSnap && latestSnap.swarm_active_handoffs) || []
-        );
       }
 
       window.__builderToggleAgent = (idx, enabled) => {
@@ -12371,7 +12636,7 @@
         }, `✓ Removed spawning rule (synced to JSON, invariants & web).`);
       };
 
-      function validateAndInspectSchemaEditor(showExplicitReport = false) {
+      function validateAndInspectSchemaEditor(showExplicitReport = false, options = {}) {
         const editor = el("schema-json-editor");
         const pill = el("schema-validation-pill");
         const tabBadge = el("schema-tab-badge");
@@ -12515,6 +12780,10 @@
           fanoutEl.style.color = (agentsCapped || throttled) ? "var(--amber)" : "var(--green)";
           fanoutEl.style.borderColor = (agentsCapped || throttled) ? "rgba(251,191,36,0.45)" : "rgba(52,211,153,0.35)";
         }
+
+        // Guardrail-only number changes do not alter agents, rules, or graph edges.
+        // Keep the input responsive by updating the audit/stats without rebuilding the tables and SVGs.
+        if (options.skipDetailedRender) return parsed;
 
         const agentsList = extractNormalizedSchemaAgents(parsed);
         refreshBuilderRoleOptions(agentsList);
@@ -12672,10 +12941,12 @@
         updateSchemaA2aBanner(rawLinks.length);
 
         const styleMap = {
-          pass_off: { label: "PASS-OFF", icon: "➔", color: "#38bdf8", marker: "schema-arr-cyan" },
-          loop: { label: "LOOP", icon: "↻", color: "#fbbf24", marker: "schema-arr-amber" },
-          critique_gate: { label: "VERIFY GATE", icon: "🛡", color: "#a78bfa", marker: "schema-arr-purple" },
-          delegate_spawn: { label: "DELEGATE", icon: "⑂", color: "#34d399", marker: "schema-arr-green" },
+          cut_spawn: { label: "CUT SPAWN", icon: "⑂", color: "#34d399", marker: "schema-arr-green" },
+          bridge_handoff: { label: "BRIDGE SEAM", icon: "🌉", color: "#38bdf8", marker: "schema-arr-cyan" },
+          arbiter_gate: { label: "ARBITER", icon: "🛡", color: "#a78bfa", marker: "schema-arr-purple" },
+          wait_edge: { label: "WAIT_EDGE", icon: "⏳", color: "#60a5fa", marker: "schema-arr-cyan" },
+          log_fin_gate: { label: "LOG_fin", icon: "✓", color: "#10b981", marker: "schema-arr-green" },
+          loop: { label: "RETRY", icon: "↻", color: "#fbbf24", marker: "schema-arr-amber" },
           blackboard_sync: { label: "BLACKBOARD", icon: "📡", color: "#60a5fa", marker: "schema-arr-cyan" },
           escalate_hitl: { label: "ESCALATE", icon: "⚠", color: "#f87171", marker: "schema-arr-red" },
         };
@@ -12686,7 +12957,7 @@
             id: "__schema_preview__",
             from: schemaPendingPair.from,
             to: schemaPendingPair.to,
-            comm_type: (el("schema-a2a-comm-type") && el("schema-a2a-comm-type").value) || "pass_off",
+            comm_type: (el("schema-a2a-comm-type") && el("schema-a2a-comm-type").value) || "bridge_handoff",
             condition: (el("schema-a2a-condition") && el("schema-a2a-condition").value) || "always",
             max_loops: Number((el("schema-a2a-max-loops") && el("schema-a2a-max-loops").value) || 3),
             isPreview: true,
@@ -12713,7 +12984,8 @@
           const p = resolveNode(lk.from);
           const c = resolveNode(lk.to);
           if (!p || !c || typeof p.x !== "number" || typeof c.x !== "number") return;
-          const st = styleMap[lk.comm_type] || styleMap.pass_off;
+          const normComm = canonicalizeJoinCutComm(lk.comm_type);
+          const st = styleMap[normComm] || styleMap.bridge_handoff;
           let pathD = "";
           let bx = 0;
           let by = 0;
@@ -12767,7 +13039,9 @@
           ? links.find((x) => x.id === existingId)
           : links.find((x) => x.from === fromId && x.to === toId);
         const isSelf = fromId === toId;
-        const defComm = existing ? existing.comm_type : (isSelf ? "loop" : (/critic|verif/i.test(toId) ? "critique_gate" : "pass_off"));
+        const defComm = existing
+          ? canonicalizeJoinCutComm(existing.comm_type)
+          : (isSelf ? "loop" : (fromId === "sabrina" || fromId === "coordinator" ? "cut_spawn" : (/critic|verif/i.test(toId) ? "arbiter_gate" : "bridge_handoff")));
         const defCond = existing ? existing.condition : (defComm === "loop" ? "on_needs_work" : "always");
 
         schemaLinkSourceId = "";
@@ -12825,19 +13099,19 @@
         el("btn-schema-a2a-apply").addEventListener("click", () => {
           if (!schemaPendingPair) return;
           const { from, to, editingId } = schemaPendingPair;
-          const comm = el("schema-a2a-comm-type").value || "pass_off";
-          const cond = el("schema-a2a-condition").value || (comm === "loop" ? "on_needs_work" : "always");
+          const comm = canonicalizeJoinCutComm(el("schema-a2a-comm-type").value || "bridge_handoff");
+          const cond = el("schema-a2a-condition").value || (comm === "loop" ? "on_needs_work" : (comm === "log_fin_gate" ? "on_pass" : "always"));
           const maxLoops = Math.max(1, Math.min(25, Number(el("schema-a2a-max-loops").value || 3)));
           const msg = el("schema-a2a-message").value.trim();
           commitBuilderSchemaMutation((s) => {
             s.a2a_links = Array.isArray(s.a2a_links) ? s.a2a_links : [];
             const id = editingId || `schema_a2a_${Date.now() % 10000}_${from}_${to}`;
             const rec = { id, from, to, comm_type: comm, condition: cond, max_loops: maxLoops, message_template: msg };
-            const idx = s.a2a_links.findIndex((x) => x.id === editingId || (!editingId && x.from === from && x.to === to && x.comm_type === comm));
+            const idx = s.a2a_links.findIndex((x) => x.id === editingId || (!editingId && x.from === from && x.to === to && canonicalizeJoinCutComm(x.comm_type) === comm));
             if (idx >= 0) s.a2a_links[idx] = { ...rec, id: s.a2a_links[idx].id };
             else s.a2a_links.push(rec);
 
-            // Also sync non-cyclic forward pass-offs/delegations into deterministic_spawning_rules if not present
+            // Also sync non-cyclic forward Join-Cut links into deterministic_spawning_rules if not present
             if (comm !== "loop" && from !== to) {
               const agents = extractNormalizedSchemaAgents(s);
               const pAg = agents.find((a) => a.id === from || a.role === from);
@@ -12850,12 +13124,12 @@
                 const sameExists = rules.some((r) => r.parent_role === pRole && r.child_role === cRole);
                 if (!revExists && !sameExists) {
                   rules.push({
-                    rule_id: `A2A_${pRole.slice(0, 4).toUpperCase()}_${cRole.slice(0, 4).toUpperCase()}`,
+                    rule_id: `JC_${pRole.slice(0, 4).toUpperCase()}_${cRole.slice(0, 4).toUpperCase()}`,
                     parent_role: pRole,
                     child_role: cRole,
                     min_logprob: Number((s.topology && s.topology.confidence_gate_threshold) ?? -0.35),
-                    trigger: msg || `a2a_${comm}`,
-                    transition: comm === "critique_gate" ? "VALIDATING -> PASS -> SPINDOWN" : "SPAWNING -> ACTIVE -> VALIDATING",
+                    trigger: msg || `jc_${comm}`,
+                    transition: comm === "arbiter_gate" ? "VALIDATING -> PASS -> SPINDOWN" : "SPAWNING -> ACTIVE -> VALIDATING",
                   });
                   s.deterministic_spawning_rules = rules;
                 }
@@ -12928,7 +13202,7 @@
             id: swarmPendingPair.editingId || undefined,
             from: swarmPendingPair.from,
             to: swarmPendingPair.to,
-            comm_type: el("swarm-a2a-comm-type").value || "pass_off",
+            comm_type: canonicalizeJoinCutComm(el("swarm-a2a-comm-type").value || "bridge_handoff"),
             condition: el("swarm-a2a-condition").value || "always",
             max_loops: Math.max(1, Math.min(25, Number(el("swarm-a2a-max-loops").value || 3))),
             message_template: el("swarm-a2a-message").value.trim(),
@@ -12986,6 +13260,29 @@
       const spawnModeSel = el("builder-spawn-mode");
       if (spawnModeSel) spawnModeSel.addEventListener("change", syncSpawnMode);
 
+      const numericSchemaSyncTimers = new WeakMap();
+      const queueNumericSchemaSync = (input, handler) => {
+        const pending = numericSchemaSyncTimers.get(input);
+        if (pending) clearTimeout(pending);
+        const timer = setTimeout(() => {
+          numericSchemaSyncTimers.delete(input);
+          handler({ target: input });
+        }, 220);
+        numericSchemaSyncTimers.set(input, timer);
+      };
+      const flushNumericSchemaSync = (input, handler) => {
+        const pending = numericSchemaSyncTimers.get(input);
+        if (!pending) return;
+        clearTimeout(pending);
+        numericSchemaSyncTimers.delete(input);
+        handler({ target: input });
+      };
+      const wireNumericSchemaSync = (input, handler) => {
+        if (!input) return;
+        input.addEventListener("input", () => queueNumericSchemaSync(input, handler));
+        input.addEventListener("blur", () => flushNumericSchemaSync(input, handler));
+      };
+
       const syncComplexity = (ev) => {
         const str = String(ev.target.value || "").trim();
         if (!str || str.endsWith(".")) return;
@@ -12994,14 +13291,12 @@
         const clamped = Number(Math.min(24.0, v).toFixed(2));
         commitBuilderSchemaMutation(
           (s) => { s.topology.task_complexity = clamped; },
-          `✓ Set task_complexity E₀=${clamped} (algorithmic swarm dynamically resizes)`
+          `✓ Set task_complexity E₀=${clamped} (algorithmic swarm dynamically resizes)`,
+          { skipDetailedRender: true }
         );
       };
       const complexityInp = el("builder-complexity");
-      if (complexityInp) {
-        complexityInp.addEventListener("input", syncComplexity);
-        complexityInp.addEventListener("change", syncComplexity);
-      }
+      wireNumericSchemaSync(complexityInp, syncComplexity);
 
       const unboundAllGuardrails = () => {
         commitBuilderSchemaMutation((s) => {
@@ -13020,34 +13315,28 @@
       const syncDepthGuardrail = (ev) => {
         const str = String(ev.target.value || "").trim();
         if (str === "") {
-          commitBuilderSchemaMutation((s) => { s.topology.max_spawn_depth = null; }, "✓ Set max_spawn_depth=∞ (adaptive entropy convergence)");
+          commitBuilderSchemaMutation((s) => { s.topology.max_spawn_depth = null; }, "✓ Set max_spawn_depth=∞ (adaptive entropy convergence)", { skipDetailedRender: true });
           return;
         }
         const raw = parseInt(str, 10);
         if (isNaN(raw) || raw < 1) return;
-        commitBuilderSchemaMutation((s) => { s.topology.max_spawn_depth = raw; }, `✓ Set max_spawn_depth=${raw} (web & simulation bounded to depth 0..${raw})`);
+        commitBuilderSchemaMutation((s) => { s.topology.max_spawn_depth = raw; }, `✓ Set max_spawn_depth=${raw} (web & simulation bounded to depth 0..${raw})`, { skipDetailedRender: true });
       };
       const maxDepthInp = el("builder-max-depth");
-      if (maxDepthInp) {
-        maxDepthInp.addEventListener("input", syncDepthGuardrail);
-        maxDepthInp.addEventListener("change", syncDepthGuardrail);
-      }
+      wireNumericSchemaSync(maxDepthInp, syncDepthGuardrail);
 
       const syncConcurrencyGuardrail = (ev) => {
         const str = String(ev.target.value || "").trim();
         if (str === "") {
-          commitBuilderSchemaMutation((s) => { s.topology.max_concurrency = null; }, "✓ Set max_concurrency=∞ (unthrottled)");
+          commitBuilderSchemaMutation((s) => { s.topology.max_concurrency = null; }, "✓ Set max_concurrency=∞ (unthrottled)", { skipDetailedRender: true });
           return;
         }
         const raw = parseInt(str, 10);
         if (isNaN(raw) || raw < 1) return;
-        commitBuilderSchemaMutation((s) => { s.topology.max_concurrency = raw; }, `✓ Set max_concurrency=${raw}`);
+        commitBuilderSchemaMutation((s) => { s.topology.max_concurrency = raw; }, `✓ Set max_concurrency=${raw}`, { skipDetailedRender: true });
       };
       const maxConcInp = el("builder-max-concurrency");
-      if (maxConcInp) {
-        maxConcInp.addEventListener("input", syncConcurrencyGuardrail);
-        maxConcInp.addEventListener("change", syncConcurrencyGuardrail);
-      }
+      wireNumericSchemaSync(maxConcInp, syncConcurrencyGuardrail);
 
       let lastKnownAgentLimit = 16;
 
@@ -13079,20 +13368,17 @@
       const syncMaxAgentsGuardrail = (ev) => {
         const str = String(ev.target.value || "").trim();
         if (str === "") {
-          commitBuilderSchemaMutation((s) => { s.topology.max_total_agents = null; }, "✓ Set max_total_agents=∞ (unlimited agents)");
+          commitBuilderSchemaMutation((s) => { s.topology.max_total_agents = null; }, "✓ Set max_total_agents=∞ (unlimited agents)", { skipDetailedRender: true });
           return;
         }
         const raw = parseInt(str, 10);
         if (isNaN(raw) || raw < 1) return;
         const v = Math.min(256, raw);
         lastKnownAgentLimit = v;
-        commitBuilderSchemaMutation((s) => { s.topology.max_total_agents = v; }, `✓ Set max_total_agents=${v} (agent limit enforced across web, INV-03 & simulation)`);
+        commitBuilderSchemaMutation((s) => { s.topology.max_total_agents = v; }, `✓ Set max_total_agents=${v} (agent limit enforced across web, INV-03 & simulation)`, { skipDetailedRender: true });
       };
       const maxAgentsInp = el("builder-max-agents");
-      if (maxAgentsInp) {
-        maxAgentsInp.addEventListener("input", syncMaxAgentsGuardrail);
-        maxAgentsInp.addEventListener("change", syncMaxAgentsGuardrail);
-      }
+      wireNumericSchemaSync(maxAgentsInp, syncMaxAgentsGuardrail);
 
       const syncRatioBuilder = () => {
         const cInp = el("builder-coord-count");
@@ -13106,19 +13392,12 @@
         commitBuilderSchemaMutation((s) => {
           s.topology.coordinator_count = c;
           s.topology.workers_per_coordinator = w;
-        }, `✓ Set ratio ${c}:${w} (${c * w} workers)`);
+        }, `✓ Set ratio ${c}:${w} (${c * w} workers)`, { skipDetailedRender: true });
       };
       ["builder-coord-count", "builder-workers-per-coord"].forEach((bid) => {
         const bInp = el(bid);
-        if (bInp) {
-          bInp.addEventListener("input", syncRatioBuilder);
-          bInp.addEventListener("change", syncRatioBuilder);
-        }
+        wireNumericSchemaSync(bInp, syncRatioBuilder);
       });
-      if (maxAgentsInp) {
-        maxAgentsInp.addEventListener("input", syncMaxAgentsGuardrail);
-        maxAgentsInp.addEventListener("change", syncMaxAgentsGuardrail);
-      }
 
       const syncConfGateGuardrail = (ev) => {
         const str = String(ev.target.value || "").trim();
@@ -13128,12 +13407,12 @@
         commitBuilderSchemaMutation((s) => {
           s.topology.confidence_gate_threshold = Number(v.toFixed(2));
           if (v <= 0) s.topology.confidence_gate_probability = Number(Math.exp(v).toFixed(3));
-        }, `✓ Set confidence_gate_threshold=${v.toFixed(2)}`);
+        }, `✓ Set confidence_gate_threshold=${v.toFixed(2)}`, { skipDetailedRender: true });
       };
       const confGateInp = el("builder-conf-gate");
       if (confGateInp) {
-        confGateInp.addEventListener("input", syncConfGateGuardrail);
-        confGateInp.addEventListener("change", syncConfGateGuardrail);
+        wireNumericSchemaSync(confGateInp, syncConfGateGuardrail);
+        confGateInp.addEventListener("blur", () => validateAndInspectSchemaEditor());
       }
 
       el("builder-blackboard-bus").addEventListener("change", (ev) => {
@@ -13265,6 +13544,7 @@
         const editor = el("schema-json-editor");
         const fb = el("schema-editor-feedback");
         if (!editor) return;
+        cancelPendingSchemaValidation();
         const parsed = validateAndInspectSchemaEditor(false);
         if (parsed) {
           editor.value = JSON.stringify(parsed, null, 2);
@@ -13276,6 +13556,7 @@
       });
       el("btn-schema-validate").addEventListener("click", async () => {
         const editor = el("schema-json-editor");
+        cancelPendingSchemaValidation();
         const parsed = validateAndInspectSchemaEditor(true);
         if (parsed && window.pywebview && window.pywebview.api && typeof window.pywebview.api.audit_swarm_schema === "function") {
           await callBridge("Schema", "audit_swarm_schema", false, "schema", null, editor ? editor.value : "");
@@ -13283,10 +13564,15 @@
       });
       el("schema-json-editor").addEventListener("input", () => {
         schemaEditorDirty = true;
-        validateAndInspectSchemaEditor(false);
+        cancelPendingSchemaValidation();
+        schemaEditorValidationTimer = window.setTimeout(() => {
+          schemaEditorValidationTimer = null;
+          validateAndInspectSchemaEditor(false);
+        }, 140);
       });
 
       el("btn-schema-apply").addEventListener("click", async () => {
+        cancelPendingSchemaValidation();
         const parsed = validateAndInspectSchemaEditor(true);
         const fb = el("schema-editor-feedback");
         const pill = el("schema-validation-pill");
@@ -13419,9 +13705,54 @@
       let codesignerBlueprint = null;
 
       const A2A_COMM_META = {
+        cut_spawn: {
+          label: "CUT SPAWN",
+          title: "Join-Cut Child Sphere Spawn",
+          icon: "⑂",
+          color: "#34d399",
+          border: "rgba(52,211,153,0.72)",
+          edgeCls: "edge-pass",
+          marker: "green",
+        },
+        bridge_handoff: {
+          label: "BRIDGE SEAM",
+          title: "Inner-Deg-2 Bridge Seam (SharingPolicy)",
+          icon: "🌉",
+          color: "#38bdf8",
+          border: "rgba(56,189,248,0.72)",
+          edgeCls: "edge-active",
+          marker: "cyan",
+        },
+        arbiter_gate: {
+          label: "ARBITER",
+          title: "Inner-Deg-1 Arbiter Critique (LOG_da)",
+          icon: "🛡",
+          color: "#a78bfa",
+          border: "rgba(167,139,250,0.74)",
+          edgeCls: "edge-verify",
+          marker: "purple",
+        },
+        wait_edge: {
+          label: "WAIT_EDGE",
+          title: "Cycle-Checked Fan-In Barrier",
+          icon: "⏳",
+          color: "#60a5fa",
+          border: "rgba(96,165,250,0.74)",
+          edgeCls: "edge-active",
+          marker: "blue",
+        },
+        log_fin_gate: {
+          label: "LOG_fin PORT",
+          title: "Outer-Face Planar Promotion Gate",
+          icon: "✓",
+          color: "#10b981",
+          border: "rgba(16,185,129,0.76)",
+          edgeCls: "edge-pass",
+          marker: "green",
+        },
         pass_off: {
           label: "PASS-OFF",
-          title: "Pass-Off / Handoff",
+          title: "Pass-Off / Handoff (Bridge Alias)",
           icon: "➔",
           color: "#38bdf8",
           border: "rgba(56,189,248,0.68)",
@@ -13429,8 +13760,8 @@
           marker: "cyan",
         },
         loop: {
-          label: "LOOP",
-          title: "Loop / Iterative Retry",
+          label: "RETRY / LOOP",
+          title: "Transient Retry / Self-Loop",
           icon: "↻",
           color: "#fbbf24",
           border: "rgba(251,191,36,0.75)",
@@ -13439,7 +13770,7 @@
         },
         critique_gate: {
           label: "VERIFY GATE",
-          title: "Critique / Verification Gate",
+          title: "Critique / Verification Gate (Arbiter Alias)",
           icon: "🛡",
           color: "#a78bfa",
           border: "rgba(167,139,250,0.72)",
@@ -13448,7 +13779,7 @@
         },
         delegate_spawn: {
           label: "DELEGATE",
-          title: "Delegate / Sub-Task Spawn",
+          title: "Delegate / Sub-Task Spawn (CUT Alias)",
           icon: "⑂",
           color: "#34d399",
           border: "rgba(52,211,153,0.70)",
@@ -13457,7 +13788,7 @@
         },
         blackboard_sync: {
           label: "BLACKBOARD",
-          title: "Blackboard A2A Sync",
+          title: "Blackboard Partition Sync",
           icon: "📡",
           color: "#60a5fa",
           border: "rgba(96,165,250,0.70)",
@@ -13549,8 +13880,9 @@
             const from = validNodeIds.has(rawFrom) ? rawFrom : (oldIdxToId.get(rawFrom) || "");
             const to = validNodeIds.has(rawTo) ? rawTo : (oldIdxToId.get(rawTo) || "");
             if (!from || !to || !validNodeIds.has(from) || !validNodeIds.has(to)) return null;
-            const comm = A2A_COMM_META[e.comm_type] ? e.comm_type : "pass_off";
-            const cond = A2A_CONDITION_SHORT[e.condition] ? e.condition : (comm === "loop" ? "on_needs_work" : "always");
+            const upgradedComm = canonicalizeJoinCutComm(e.comm_type);
+            const comm = A2A_COMM_META[upgradedComm] ? upgradedComm : "bridge_handoff";
+            const cond = A2A_CONDITION_SHORT[e.condition] ? e.condition : (comm === "loop" ? "on_needs_work" : (comm === "log_fin_gate" ? "on_pass" : "always"));
             return {
               id: String(e.id || `a2a_${idx + 1}_${from}_${to}`),
               from,
@@ -13659,34 +13991,34 @@
             id: "a2a_root_planner",
             from: "loop_root",
             to: pId,
-            comm_type: "delegate_spawn",
+            comm_type: "cut_spawn",
             condition: "always",
             condition_expr: "",
             max_loops: 1,
-            payload_mode: "full_envelope",
-            message_template: "Initiate mission planning with goal & constraints",
+            payload_mode: "summary_only",
+            message_template: "CUT child Cantor sphere & decompose mission invariants",
           },
           {
             id: "a2a_planner_exec",
             from: pId,
             to: eId,
-            comm_type: "pass_off",
+            comm_type: "bridge_handoff",
             condition: "always",
             condition_expr: "",
             max_loops: 1,
-            payload_mode: "full_envelope",
-            message_template: "Pass structured blueprint & acceptance criteria to executor",
+            payload_mode: "summary_only",
+            message_template: "Cross-sphere BRIDGE seam handoff (SharingPolicy ≤3.2k summary)",
           },
           {
             id: "a2a_exec_critic",
             from: eId,
             to: cId,
-            comm_type: "critique_gate",
+            comm_type: "arbiter_gate",
             condition: "always",
             condition_expr: "",
             max_loops: 1,
-            payload_mode: "full_envelope",
-            message_template: "Submit deliverable for independent verification gate",
+            payload_mode: "raw_output",
+            message_template: "Inner-deg-1 ARBITER (LOG_da) audit; reply PASS: or NEEDS_WORK:",
           },
           {
             id: "a2a_critic_loop_exec",
@@ -13695,22 +14027,22 @@
             comm_type: "loop",
             condition: "on_needs_work",
             condition_expr: "",
-            max_loops: 3,
-            payload_mode: "full_envelope",
-            message_template: "Loop back with critic revision items until PASS",
+            max_loops: 2,
+            payload_mode: "summary_only",
+            message_template: "release_transient retry until PASS or fail-closed PRUNE",
           },
         ];
         if (el("manual-name") && !el("manual-name").value.trim()) {
-          el("manual-name").value = "Autonomous A2A Council Loop";
+          el("manual-name").value = "Join-Cut Autonomous Council (g=0)";
         }
         if (el("manual-goal") && !el("manual-goal").value.trim()) {
-          el("manual-goal").value = "Plan, execute, and iteratively verify deliverables via A2A pass-offs and critic loops.";
+          el("manual-goal").value = "Decompose via CUT child spheres, hand off across SharingPolicy BRIDGE seams, and gate promotion via ARBITER & LOG_fin.";
         }
         if (el("manual-loop-type")) el("manual-loop-type").value = "autonomous_a2a";
         cancelAutoLinkSelection(false);
         renderManualSteps();
         if (announce && el("manual-feedback")) {
-          el("manual-feedback").textContent = "Seeded Autonomous Planner ➔ Executor ⇄ Critic A2A workflow. Click any two nodes to customize links!";
+          el("manual-feedback").textContent = "Seeded Genus-0 Join-Cut Council (CUT ➔ BRIDGE ➔ ARBITER ⇄ Transient Retry). Click any two nodes to customize seams!";
         }
       }
 
@@ -13763,34 +14095,34 @@
             id: "a2a_root_planner",
             from: "loop_root",
             to: pId,
-            comm_type: "delegate_spawn",
+            comm_type: "cut_spawn",
             condition: "always",
             condition_expr: "",
             max_loops: 2,
-            payload_mode: "full_envelope",
-            message_template: "Initiate iteration planning with active mission goal",
+            payload_mode: "summary_only",
+            message_template: "CUT child Cantor sphere with active mission goal",
           },
           {
             id: "a2a_planner_exec",
             from: pId,
             to: eId,
-            comm_type: "pass_off",
+            comm_type: "bridge_handoff",
             condition: "always",
             condition_expr: "",
             max_loops: 2,
-            payload_mode: "full_envelope",
-            message_template: "Pass structured blueprint & acceptance criteria to executor",
+            payload_mode: "summary_only",
+            message_template: "Cross-sphere BRIDGE seam handoff (SharingPolicy ≤3.2k)",
           },
           {
             id: "a2a_exec_critic",
             from: eId,
             to: cId,
-            comm_type: "critique_gate",
+            comm_type: "arbiter_gate",
             condition: "always",
             condition_expr: "",
             max_loops: 2,
             payload_mode: "raw_output",
-            message_template: "Audit deliverable; reply PASS: or NEEDS_WORK:",
+            message_template: "ARBITER (LOG_da) audit; reply PASS: or NEEDS_WORK:",
           },
           {
             id: "a2a_critic_loop_exec",
@@ -13800,19 +14132,19 @@
             condition: "on_needs_work",
             condition_expr: "",
             max_loops: 2,
-            payload_mode: "raw_output",
-            message_template: "Loop back with critic revision items until PASS",
+            payload_mode: "summary_only",
+            message_template: "release_transient retry until PASS or fail-closed PRUNE",
           },
           {
             id: "a2a_critic_pass_finale",
             from: cId,
             to: fId,
-            comm_type: "pass_off",
+            comm_type: "log_fin_gate",
             condition: "on_pass",
             condition_expr: "",
             max_loops: 2,
             payload_mode: "summary_only",
-            message_template: "Synthesize Finale Recommended Next Step for next loop / swarm input",
+            message_template: "Promote via outer-face LOG_fin port & synthesize Finale Next Step",
           },
           {
             id: "a2a_finale_recycle_root",
@@ -13823,7 +14155,7 @@
             condition_expr: "",
             max_loops: 1,
             payload_mode: "summary_only",
-            message_template: "Loop into self once with evolved goal, then place final next-step prompt into Swarm input",
+            message_template: "Loop into self once with SBV-bounded evolved goal, then load into Swarm input",
           },
         ];
         if (el("manual-name") && !el("manual-name").value.trim()) {
@@ -13850,34 +14182,38 @@
             id: nextAutoEdgeId("loop_root", firstId),
             from: "loop_root",
             to: firstId,
-            comm_type: "delegate_spawn",
+            comm_type: "cut_spawn",
             condition: "always",
             condition_expr: "",
             max_loops: 1,
-            payload_mode: "full_envelope",
-            message_template: "Initiate first workflow node",
+            payload_mode: "summary_only",
+            message_template: "CUT child Cantor sphere",
           });
         }
         for (let i = 0; i < manualSteps.length - 1; i += 1) {
           const a = manualSteps[i].id;
           const b = manualSteps[i + 1].id;
+          const toSt = manualSteps[i + 1];
+          const nextComm = toSt && (toSt.agent_role === "critic_verifier" || toSt.step_type === "qa")
+            ? "arbiter_gate"
+            : (toSt && toSt.step_type === "recommend_next" ? "log_fin_gate" : "bridge_handoff");
           if (!existingPairs.has(`${a}->${b}`)) {
             manualEdges.push({
               id: nextAutoEdgeId(a, b),
               from: a,
               to: b,
-              comm_type: "pass_off",
-              condition: "always",
+              comm_type: nextComm,
+              condition: nextComm === "log_fin_gate" ? "on_pass" : "always",
               condition_expr: "",
               max_loops: 3,
-              payload_mode: "full_envelope",
+              payload_mode: nextComm === "arbiter_gate" ? "raw_output" : "summary_only",
               message_template: "",
             });
           }
         }
         renderManualSteps();
         if (el("manual-feedback")) {
-          el("manual-feedback").textContent = "Connected sequential A2A Pass-Off links across nodes.";
+          el("manual-feedback").textContent = "Connected sequential Genus-0 Join-Cut seams across nodes.";
         }
       }
 
@@ -13928,11 +14264,12 @@
         const toStep = toIdx >= 0 ? manualSteps[toIdx] : null;
         const isSelfOrUpstream = (fromId === toId) || (fromIdx >= 0 && toIdx >= 0 && toIdx <= fromIdx) || toId === "loop_root";
 
-        let defaultComm = "pass_off";
+        let defaultComm = "bridge_handoff";
         let defaultCond = "always";
         let defaultMaxLoops = 3;
+        let defaultPayload = "summary_only";
         if (fromId === "loop_root") {
-          defaultComm = "delegate_spawn";
+          defaultComm = "cut_spawn";
         } else if (toId === "loop_root") {
           defaultComm = "loop";
           defaultCond = "always";
@@ -13940,14 +14277,18 @@
         } else if (isSelfOrUpstream) {
           defaultComm = "loop";
           defaultCond = "on_needs_work";
-        } else if (toStep && (toStep.agent_role === "critic_verifier" || /critic|verif|audit/i.test(toStep.name || ""))) {
-          defaultComm = "critique_gate";
+        } else if (toStep && toStep.step_type === "recommend_next") {
+          defaultComm = "log_fin_gate";
+          defaultCond = "on_pass";
+        } else if (toStep && (toStep.agent_role === "critic_verifier" || toStep.step_type === "qa" || /critic|verif|audit|qa/i.test(toStep.name || ""))) {
+          defaultComm = "arbiter_gate";
+          defaultPayload = "raw_output";
         }
 
         const commVal = existing ? existing.comm_type : defaultComm;
         const condVal = existing ? existing.condition : defaultCond;
         const maxLoopsVal = existing ? existing.max_loops : defaultMaxLoops;
-        const payloadVal = existing ? existing.payload_mode : "full_envelope";
+        const payloadVal = existing ? existing.payload_mode : defaultPayload;
         const msgVal = existing ? existing.message_template : "";
         const exprVal = existing ? existing.condition_expr : "";
 
@@ -14131,11 +14472,11 @@
             { id: "n_critic", step_type: "agent", agent_role: "critic_verifier", name: "Critic Release Verifier", model_id: "", prompt_template: "Verify QA receipt is PASS and issue release verdict.", kind: "read" },
           ];
           manualEdges = [
-            { id: "e_root_scout", from: "loop_root", to: "n_scout", comm_type: "delegate_spawn", condition: "always", condition_expr: "", max_loops: 1, payload_mode: "full_envelope", message_template: "Scan target product" },
-            { id: "e_scout_exec", from: "n_scout", to: "n_exec", comm_type: "pass_off", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "full_envelope", message_template: "Hand off workspace findings" },
-            { id: "e_exec_qa", from: "n_exec", to: "n_qa", comm_type: "critique_gate", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "full_envelope", message_template: "Run deterministic Product QA & GUI smoke suite" },
-            { id: "e_qa_loop", from: "n_qa", to: "n_exec", comm_type: "loop", condition: "on_needs_work", condition_expr: "", max_loops: 2, payload_mode: "raw_output", message_template: "Fix reported Product QA & GUI smoke defects" },
-            { id: "e_qa_critic", from: "n_qa", to: "n_critic", comm_type: "pass_off", condition: "on_pass", condition_expr: "", max_loops: 2, payload_mode: "raw_output", message_template: "Seal QA release verdict" },
+            { id: "e_root_scout", from: "loop_root", to: "n_scout", comm_type: "cut_spawn", condition: "always", condition_expr: "", max_loops: 1, payload_mode: "summary_only", message_template: "CUT child sphere to scan target product" },
+            { id: "e_scout_exec", from: "n_scout", to: "n_exec", comm_type: "bridge_handoff", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "summary_only", message_template: "BRIDGE seam handoff of workspace findings" },
+            { id: "e_exec_qa", from: "n_exec", to: "n_qa", comm_type: "arbiter_gate", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "raw_output", message_template: "ARBITER Product QA & GUI smoke gate" },
+            { id: "e_qa_loop", from: "n_qa", to: "n_exec", comm_type: "loop", condition: "on_needs_work", condition_expr: "", max_loops: 2, payload_mode: "raw_output", message_template: "release_transient retry to fix Product QA defects" },
+            { id: "e_qa_critic", from: "n_qa", to: "n_critic", comm_type: "log_fin_gate", condition: "on_pass", condition_expr: "", max_loops: 2, payload_mode: "raw_output", message_template: "LOG_fin outer-face release promotion" },
           ];
           if (el("manual-name") && !el("manual-name").value.trim()) el("manual-name").value = "Product QA & GUI Smoke Gate Loop";
           if (el("manual-goal") && !el("manual-goal").value.trim()) el("manual-goal").value = "Perform Product Quality Assurance on Kraken GUI entrypoints, Tcl/Tk smoke boot, and unit tests.";
@@ -14180,6 +14521,47 @@
           }
         });
       }
+      el("btn-kraken-top25-picks")?.addEventListener("click", async () => {
+        const feedback = el("kraken-qa-feedback");
+        const receipt = el("kraken-qa-receipt");
+        feedback.textContent = "Reading the latest Top 25 picks…";
+        receipt.style.display = "none";
+        const result = await callBridge("Kraken", "get_kraken_replacement_status");
+        const view = result?.direction;
+        if (!view?.latest) {
+          feedback.textContent = result?.error || "Waiting for the first recorded Top 25 forecast.";
+          return;
+        }
+        const timeOf = value => new Date(value * 1000).toLocaleTimeString();
+        const money = value => new Intl.NumberFormat(undefined, {style:"currency", currency:"USD"}).format(value);
+        const totals = view.totals || {};
+        const latest = view.latest;
+        const ended = Date.now() / 1000 >= latest.due;
+        const lines = [];
+        if (view.graded_rounds) {
+          lines.push(`${view.graded_rounds} completed rounds · ${totals.correct}/${totals.graded} calls correct · rise ${totals.rise_hits}/${totals.rise_calls} · flat/down ${totals.flat_hits}/${totals.flat_calls}`);
+          lines.push(`On the same pairs, always flat/down scored ${totals.flat_down}, always rise ${totals.rise}, and the feed ranking ${totals.feed_rank}.`);
+          if (totals.challenger_graded) {
+            lines.push(`Five-minute market breadth test · ${totals.challenger_correct}/${totals.challenger_graded} correct · primary ${totals.matched_primary_correct}/${totals.challenger_graded} on the same calls`);
+          }
+          lines.push(`Strongest rise calls · ${totals.top_positive}/${totals.top_priced} priced $25 paper positions covered costs · combined net ${money(totals.top_net_usd)}`);
+          lines.push(view.direction_evidence ? "The direction calls crossed the evidence threshold against all three baselines." : "A repeatable directional advantage has yet to be established.");
+        }
+        const show = (round, title) => {
+          lines.push("", `${title} · ${timeOf(round.issued)} to ${timeOf(round.due)}`);
+          const rows = [...round.markets].sort((a,b) => (b.score ?? -1) - (a.score ?? -1) || a.rank - b.rank);
+          for (const m of rows) {
+            const move = m.up == null ? (round.summary ? m.status || "unscored" : "pending") : `${m.move_pct >= 0 ? "+" : ""}${m.move_pct.toFixed(2)}%`;
+            const net = m.net_usd == null ? (round.summary ? m.fill_status || "" : "") : `${money(m.net_usd)} paper net`;
+            lines.push([`#${m.rank} ${m.symbol}`, m.call, move, net].filter(Boolean).join(" · "));
+          }
+        };
+        show(latest, ended ? "Most recent forecast" : "Open forecast");
+        if (view.last_graded && view.last_graded.id !== latest.id) show(view.last_graded, "Last completed forecast");
+        feedback.textContent = `15-minute Top 25 paper forecasts · updated ${new Date(view.as_of * 1000).toLocaleString()}`;
+        receipt.textContent = lines.join("\n");
+        receipt.style.display = "block";
+      });
       el("btn-kraken-replacement-status")?.addEventListener("click", async () => {
         const feedback = el("kraken-qa-feedback");
         const receipt = el("kraken-qa-receipt");
@@ -14192,15 +14574,34 @@
         }
         const asMoney = number => new Intl.NumberFormat(undefined, {style:"currency", currency:"USD"}).format(number);
         const trial = result.trial;
-        const names = {cash:"Cash", relative_breakout:"ETH/BTC breakout", hold_eth:"Buy and hold ETH"};
+        const names = {cash:"Cash", incumbent:"Existing Strategy Lab rule", A:"Claude rule", B:"GPT rule", C:"Gemini rule"};
         const lines = (result.portfolios || []).map(p =>
           `${p.name} · generation ${p.generation} · ${p.status} · ${p.open_lots} open · ${asMoney(p.net_usd)}`);
         if (trial?.books) {
-          lines.push("", `Trial through ${new Date(trial.ends_at * 1000).toLocaleString()} · ${trial.on_time_bars} on-time observations`);
+          lines.push("", `Top 25 trial through ${new Date(trial.ends_at * 1000).toLocaleString()} · ${trial.observations} ranked observations · Primary: ${names[trial.primary] || trial.primary}`);
           Object.entries(trial.books).forEach(([name, book]) =>
-            lines.push(`${names[name] || name} · equity ${asMoney(book.equity_usd)} · ${book.closed} closed`));
+            lines.push(`${names[name] || name}${book.retirement ? " · " + book.retirement.status : ""} · equity ${book.equity_usd == null ? "awaiting an executable quote" : asMoney(book.equity_usd)} · realized ${asMoney(book.realized_pnl_usd)} · ${book.closed} closed`));
+          if (result.windows) Object.entries(result.windows).forEach(([seconds, sample]) => {
+            if (sample.observed_pair_windows > 0) lines.push(`${Number(seconds)/60} min · ${sample.covered_costs} of ${sample.observed_pair_windows} complete pair windows covered trading costs`);
+          });
+          const speeds = {within_5m:"within 5 min", "5m_to_1h":"after 5 min to 1 h", over_1h:"after 1 h"};
+          Object.entries(trial.opportunities || {}).forEach(([seconds, bands]) => {
+            Object.entries(bands).forEach(([speed, count]) => {
+              lines.push(`${Number(seconds)/60} min window · covered costs ${speeds[speed] || speed} · ${count.captured_entries} captured · ${count.missed_windows} missed`);
+            });
+          });
+          if (result.ranked_pairs?.length) lines.push("", `Top 25 at ${new Date(result.rank_at*1000).toLocaleTimeString()}`, result.ranked_pairs.join(", "));
         }
         if (trial?.finding || trial?.error || trial?.last_data_error) lines.push(trial.finding || trial.error || trial.last_data_error);
+        const comparisonNames = {original:"Original rule", nominated:"Swarm revision", first_positive:"First positive exit", cash:"Cash"};
+        for (const test of result.miss_review?.experiments || []) {
+          lines.push("", `${test.label} · forward paper test · ${test.status} · ${test.observations} ranked observations`);
+          for (const [arm, book] of Object.entries(test.books)) {
+            const name = comparisonNames[arm] || names[arm] || arm;
+            const equity = book.equity_usd == null ? "awaiting an executable quote" : asMoney(book.equity_usd);
+            lines.push(`${name} · equity ${equity} · realized ${asMoney(book.realized_pnl_usd)} · ${book.open} open · ${book.closed} closed${book.retirement ? " · " + book.retirement.status : ""}`);
+          }
+        }
         feedback.textContent = `Paper service updated ${result.age_seconds}s ago · Replacement trial ${trial?.status || "awaiting registration"}`;
         receipt.textContent = lines.join("\n");
         receipt.style.display = "block";
@@ -14335,11 +14736,11 @@
                 id: nextAutoEdgeId(prevLastId, newId),
                 from: prevLastId,
                 to: newId,
-                comm_type: prevLastId === "loop_root" ? "delegate_spawn" : (kind === "critic_verifier" ? "critique_gate" : "pass_off"),
-                condition: "always",
+                comm_type: prevLastId === "loop_root" ? "cut_spawn" : (kind === "critic_verifier" || kind === "qa_verifier" ? "arbiter_gate" : (kind === "recommend_next" ? "log_fin_gate" : "bridge_handoff")),
+                condition: kind === "recommend_next" ? "on_pass" : "always",
                 condition_expr: "",
                 max_loops: 3,
-                payload_mode: "full_envelope",
+                payload_mode: (kind === "critic_verifier" || kind === "qa_verifier") ? "raw_output" : "summary_only",
                 message_template: "",
               });
             }
@@ -14393,11 +14794,24 @@
         });
       }
 
+      let cachedLatestAutomationProgress = {};
+
       function renderAutomationsSnapshot(auto) {
         if (!auto) return;
         cachedLoops = auto.loops || [];
         cachedConnectors = auto.connectors || [];
+        cachedLatestAutomationProgress = auto.active_progress || {};
         const pending = auto.pending_approvals || [];
+
+        const liveProg = editingLoopId ? cachedLatestAutomationProgress[editingLoopId] : null;
+        if (liveProg && liveProg.status === "running") {
+          renderAutomationTopology(
+            liveProg.active_node_id || "",
+            liveProg.active_edge_id || "",
+            liveProg.phase || "RUNNING JOIN-CUT",
+            new Set(liveProg.completed_node_ids || ["loop_root"])
+          );
+        }
 
         if (el("nav-automations")) el("nav-automations").textContent = cachedLoops.length;
         if (el("auto-loops-badge")) el("auto-loops-badge").textContent = String(cachedLoops.length);
@@ -14653,7 +15067,7 @@
           const firstAct = (firstConn.actions && firstConn.actions[0]) || { name: "accounts.balance", kind: "read" };
           manualSteps.push({ id: newId, step_type: "connector", name: `${firstConn.id}.${firstAct.name}`, connector_id: firstConn.id, action: firstAct.name, kind: firstAct.kind || "read", params: {} });
           if (manualEdges.length > 0 || prevId === "loop_root") {
-            manualEdges.push({ id: nextAutoEdgeId(prevId, newId), from: prevId, to: newId, comm_type: prevId === "loop_root" ? "delegate_spawn" : "pass_off", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "full_envelope", message_template: "" });
+            manualEdges.push({ id: nextAutoEdgeId(prevId, newId), from: prevId, to: newId, comm_type: prevId === "loop_root" ? "cut_spawn" : "bridge_handoff", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "summary_only", message_template: "" });
           }
           renderManualSteps();
         });
@@ -14664,7 +15078,7 @@
           const newId = nextAutoNodeId("gemini");
           manualSteps.push({ id: newId, step_type: "gemini", name: "Gemini Analysis", prompt_template: "Analyze previous outputs and summarize key findings.", kind: "read" });
           if (manualEdges.length > 0 || prevId === "loop_root") {
-            manualEdges.push({ id: nextAutoEdgeId(prevId, newId), from: prevId, to: newId, comm_type: prevId === "loop_root" ? "delegate_spawn" : "pass_off", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "full_envelope", message_template: "" });
+            manualEdges.push({ id: nextAutoEdgeId(prevId, newId), from: prevId, to: newId, comm_type: prevId === "loop_root" ? "cut_spawn" : "bridge_handoff", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "summary_only", message_template: "" });
           }
           renderManualSteps();
         });
@@ -14675,7 +15089,7 @@
           const newId = nextAutoNodeId("swarm");
           manualSteps.push({ id: newId, step_type: "swarm", name: "Swarm Sub-Mission", prompt_template: "Execute task using swarm agents.", kind: "read" });
           if (manualEdges.length > 0 || prevId === "loop_root") {
-            manualEdges.push({ id: nextAutoEdgeId(prevId, newId), from: prevId, to: newId, comm_type: prevId === "loop_root" ? "delegate_spawn" : "pass_off", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "full_envelope", message_template: "" });
+            manualEdges.push({ id: nextAutoEdgeId(prevId, newId), from: prevId, to: newId, comm_type: prevId === "loop_root" ? "cut_spawn" : "bridge_handoff", condition: "always", condition_expr: "", max_loops: 3, payload_mode: "summary_only", message_template: "" });
           }
           renderManualSteps();
         });
@@ -14744,6 +15158,8 @@
         return spec;
       }
 
+      let activeLiveAutomationLoopId = "";
+
       function renderLiveInitiationTrace(runRes) {
         const panel = el("manual-live-trace-panel");
         const statusEl = el("manual-live-trace-status");
@@ -14753,41 +15169,58 @@
         const st = String((runRes && runRes.status) || (runRes && runRes.ok ? "completed" : "error")).toUpperCase();
         if (statusEl) {
           statusEl.textContent = st;
-          statusEl.className = `pill ${st === "COMPLETED" ? "pill-ok" : (st === "WAITING_APPROVAL" ? "pill-warn" : (st === "ERROR" ? "pill-err" : "pill-run"))}`;
+          statusEl.className = `pill ${st === "COMPLETED" ? "pill-ok" : (st === "WAITING_APPROVAL" ? "pill-warn" : ((st === "ERROR" || st === "FAILED" || st === "CANCELLED") ? "pill-err" : "pill-run"))}`;
         }
         const events = Array.isArray(runRes && runRes.a2a_events) ? runRes.a2a_events : [];
         const outputs = Array.isArray(runRes && runRes.outputs) ? runRes.outputs : [];
+        const jc = (runRes && runRes.join_cut) || {};
         const lines = [];
+        if (jc && (Array.isArray(jc.settled_paths) || jc.eulerian_topology || jc.log_fin_promoted !== undefined)) {
+          lines.push("=== GENUS-0 JOIN-CUT & LOG_fin RECEIPT ===");
+          const settledCnt = Array.isArray(jc.settled_paths) ? jc.settled_paths.length : 0;
+          const prunedCnt = Array.isArray(jc.pruned_paths) ? jc.pruned_paths.length : 0;
+          const et = jc.eulerian_topology || {};
+          lines.push(
+            `Registry Invariants: ${jc.registry_invariants_ok !== false ? "VALID (g=0)" : "VIOLATION"} · Settled Cantor Paths: ${settledCnt}${settledCnt ? ` [${jc.settled_paths.join(", ")}]` : ""} · Pruned: ${prunedCnt}`
+          );
+          if (et.sphere_count !== undefined) {
+            lines.push(`Eulerian Map: m=${et.m || 3} · Spheres=${et.sphere_count} · SharingPolicy Bridges=${et.bridge_count || 0} · LOG_fin Promoted=${jc.log_fin_promoted ? `YES (${jc.log_fin_port || "outer-face"})` : "NO"}`);
+          }
+          lines.push("");
+        }
         if (runRes && Array.isArray(runRes.goal_history) && runRes.goal_history.length > 1) {
-          lines.push("=== SELF-LOOP GOAL EVOLUTION ===");
+          lines.push("=== SELF-LOOP GOAL EVOLUTION (SBV BOUNDED) ===");
           runRes.goal_history.forEach((g, gIdx) => {
             lines.push(`Cycle ${gIdx + 1}: ${g}`);
           });
           lines.push("");
         }
-        if (runRes && runRes.recommended_next_goal) {
+        if (runRes && runRes.recommended_next_goal && st === "COMPLETED") {
           lines.push("=== ✨ FINALE · RECOMMENDED NEXT MISSION GOAL (LOADED INTO SWARM INPUT) ===");
           lines.push(runRes.recommended_next_goal);
           lines.push("");
         }
+        if (runRes && runRes.error) {
+          lines.push(`=== GATE / EXECUTION STATUS ===\n${runRes.error}\n`);
+        }
         if (events.length) {
-          lines.push("=== A2A COMMUNICATION HOPS ===");
+          lines.push("=== JOIN-CUT & A2A HOPS ===");
           events.forEach((ev, idx) => {
-            lines.push(`${idx + 1}. [${String(ev.comm_type || "pass_off").toUpperCase()} · hop #${ev.hop || 1}] ${ev.from_name || ev.from} ➔ ${ev.to_name || ev.to} (${ev.condition || "always"})${ev.instruction ? ` — "${ev.instruction}"` : ""}`);
+            const opLbl = ev.jc_op || String(ev.comm_type || "pass_off").toUpperCase();
+            lines.push(`${idx + 1}. [${opLbl} (${ev.comm_type || "pass_off"}) · hop #${ev.hop || 1}] ${ev.from_name || ev.from} ➔ ${ev.to_name || ev.to} (${ev.condition || "always"})${ev.instruction ? ` — "${ev.instruction}"` : ""}`);
           });
           lines.push("");
         }
         if (outputs.length) {
-          lines.push("=== AGENT & STEP OUTPUTS ===");
+          lines.push("=== AGENT & STEP DELIVERABLES ===");
           outputs.forEach((out, idx) => {
             const res = out.result || {};
+            const pathTag = out.cantor_path ? ` [Cantor '${out.cantor_path}']` : "";
             const preview = res.text ? String(res.text).slice(0, 360) : JSON.stringify(res).slice(0, 360);
-            lines.push(`Step ${idx + 1} [${out.step || out.node_id}]: ${preview}`);
+            lines.push(`Step ${idx + 1} [${out.step || out.node_id}]${pathTag}: ${preview}`);
           });
         } else if (runRes && runRes.pending_approval) {
           lines.push(`Paused at HITL Checkpoint: ${runRes.pending_approval.reason || "Operator approval required"}`);
-        } else if (runRes && runRes.error) {
-          lines.push(`Error: ${runRes.error}`);
         }
         bodyEl.textContent = lines.join("\n") || JSON.stringify(runRes, null, 2);
       }
@@ -14798,7 +15231,7 @@
           const spec = collectManualLoopSpec();
           const res = await window.pywebview.api.save_automation(spec);
           const fb = el("manual-feedback");
-          if (fb) fb.textContent = res.ok ? `✓ Saved workflow "${spec.name}" (${manualSteps.length} nodes, ${manualEdges.length} A2A links).` : `Error: ${res.error}`;
+          if (fb) fb.textContent = res.ok ? `✓ Saved Join-Cut workflow "${spec.name}" (${manualSteps.length} nodes, ${manualEdges.length} links).` : `Error: ${res.error}`;
           if (res.ok && res.loop) {
             editingLoopId = res.loop.id;
             await poll();
@@ -14815,31 +15248,65 @@
             return;
           }
           const spec = collectManualLoopSpec("autonomous_a2a");
-          if (fb) fb.textContent = `⚡ Initiating autonomous A2A workflow "${spec.name}"…`;
+          if (fb) fb.textContent = `⚡ Initiating genus-0 Join-Cut workflow "${spec.name}"…`;
+          const api = (window.pywebview && window.pywebview.api) || {};
           let res;
-          if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.save_and_initiate_automation === "function") {
-            res = await window.pywebview.api.save_and_initiate_automation(spec);
+          if (typeof api.initiate_automation_async === "function" && typeof api.get_automation_runs === "function") {
+            const launched = await api.initiate_automation_async(spec);
+            if (!launched || !launched.ok || !launched.loop) {
+              if (fb) fb.textContent = `Error initiating workflow: ${(launched && launched.error) || "failed"}`;
+              return;
+            }
+            editingLoopId = launched.loop.id;
+            activeLiveAutomationLoopId = editingLoopId;
+            if (el("btn-auto-sim-stop")) el("btn-auto-sim-stop").textContent = "⏹ Stop Run";
+            renderLiveInitiationTrace({ status: "running", ok: true, a2a_events: [], outputs: [] });
+            for (let tick = 0; tick < 600; tick += 1) {
+              await new Promise((r) => setTimeout(r, 350));
+              await poll();
+              const runsRes = await api.get_automation_runs(editingLoopId, 1);
+              const latestRun = runsRes && Array.isArray(runsRes.runs) ? runsRes.runs[0] : null;
+              if (latestRun && latestRun.status && latestRun.status !== "running") {
+                res = {
+                  ok: latestRun.status !== "failed",
+                  loop: launched.loop,
+                  run: {
+                    ...latestRun,
+                    outputs: latestRun.step_outputs || [],
+                    recommended_next_goal: (cachedLatestAutomationProgress[editingLoopId] || {}).recommended_next_goal || "",
+                    goal_history: (cachedLatestAutomationProgress[editingLoopId] || {}).goal_history || [],
+                    join_cut: (cachedLatestAutomationProgress[editingLoopId] || {}).join_cut || {},
+                  },
+                };
+                break;
+              }
+            }
+            activeLiveAutomationLoopId = "";
+            if (el("btn-auto-sim-stop")) el("btn-auto-sim-stop").textContent = "⏹ Stop";
+          } else if (typeof api.save_and_initiate_automation === "function") {
+            res = await api.save_and_initiate_automation(spec);
           } else {
-            const saved = await window.pywebview.api.save_automation(spec);
+            const saved = await api.save_automation(spec);
             if (!saved.ok) {
               res = saved;
             } else {
-              const run = await window.pywebview.api.run_automation_now(saved.loop.id);
+              const run = await api.run_automation_now(saved.loop.id);
               res = { ok: run.ok, loop: saved.loop, run };
             }
           }
           if (res && res.loop && res.loop.id) editingLoopId = res.loop.id;
           const runPayload = (res && res.run) || res;
           renderLiveInitiationTrace(runPayload);
-          if (runPayload && runPayload.recommended_next_goal) {
+          if (runPayload && runPayload.recommended_next_goal && runPayload.status === "completed") {
             const recSource = `workflow:${runPayload.run_id || runPayload.id || "a2a"}`;
             window.__lastAppliedRecKey = `${recSource}:${runPayload.recommended_next_goal}`;
             applyRecommendedNextGoalToInputs(runPayload.recommended_next_goal, recSource, false);
           }
-          if (fb) {
-            fb.textContent = (res && res.ok)
-              ? `✓ Autonomous workflow initiated (status: ${String(runPayload.status || "completed").toUpperCase()}, ${(runPayload.a2a_events || []).length} A2A hops${runPayload.recommended_next_goal ? " · Finale next step loaded into Swarm input!" : ""}).`
-              : `Error initiating workflow: ${(res && res.error) || (runPayload && runPayload.error) || "failed"}`;
+          if (fb && runPayload) {
+            const stUp = String(runPayload.status || "completed").toUpperCase();
+            fb.textContent = (res && res.ok && runPayload.status !== "cancelled")
+              ? `✓ Join-Cut workflow ${stUp} (${(runPayload.a2a_events || []).length} hops${runPayload.recommended_next_goal ? " · Finale next step loaded into Swarm input!" : ""}).`
+              : `Workflow ${stUp}: ${(res && res.error) || runPayload.error || "stopped"}`;
           }
           await poll();
         });
@@ -15391,18 +15858,52 @@
         }).join("");
 
         svg.innerHTML = defs + bgClick + stageGuides + edgeSvg + nodeSvg;
+
+        // Evaluate live genus-0 Join-Cut invariants (non-retry chord cycles & m<=6 child arity)
+        const jcBadge = el("auto-jc-invariant-badge");
+        let nonRetryCycles = 0;
+        let maxOutArity = 0;
+        const outCountBySrc = new Map();
+        displayEdges.forEach((e) => {
+          if (e.isPreview || e.comm_type === "loop" || e.from === e.to || e.to === "loop_root") return;
+          const curCnt = (outCountBySrc.get(e.from) || 0) + 1;
+          outCountBySrc.set(e.from, curCnt);
+          if (curCnt > maxOutArity) maxOutArity = curCnt;
+          if (!forwardEdges.includes(e)) nonRetryCycles += 1;
+        });
+        if (jcBadge) {
+          if (nonRetryCycles > 0) {
+            jcBadge.textContent = `⚠ g≥1 CHORD (${nonRetryCycles} hop-capped)`;
+            jcBadge.className = "pill pill-warn";
+          } else if (maxOutArity > 6) {
+            jcBadge.textContent = `⚠ ARITY ${maxOutArity} > m=6 (AUTO-ROUTE)`;
+            jcBadge.className = "pill pill-warn";
+          } else {
+            jcBadge.textContent = `g=0 TREE · VALID (m≤6)`;
+            jcBadge.className = "pill pill-ok";
+          }
+        }
+
         const metrics = el("auto-sim-metrics");
         if (metrics) {
           const loopEdgesCount = manualEdges.filter((e) => e.comm_type === "loop").length;
-          metrics.textContent = `${simPhase} · ${manualSteps.length} node${manualSteps.length === 1 ? "" : "s"} · ${manualEdges.length} A2A link${manualEdges.length === 1 ? "" : "s"}${loopEdgesCount ? ` (${loopEdgesCount} loop)` : ""} · ${loopType}`;
+          metrics.textContent = `${simPhase} · ${manualSteps.length} node${manualSteps.length === 1 ? "" : "s"} · ${manualEdges.length} Join-Cut link${manualEdges.length === 1 ? "" : "s"}${loopEdgesCount ? ` (${loopEdgesCount} retry)` : ""} · ${loopType}`;
         }
       }
 
-      function stopAutoSimulation() {
+      async function stopAutoSimulation() {
         if (autoSimTimer) {
           clearInterval(autoSimTimer);
           autoSimTimer = null;
         }
+        const targetStopId = activeLiveAutomationLoopId || editingLoopId || "";
+        if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.stop_automation === "function") {
+          try {
+            await window.pywebview.api.stop_automation(targetStopId);
+          } catch (_) {}
+        }
+        activeLiveAutomationLoopId = "";
+        if (el("btn-auto-sim-stop")) el("btn-auto-sim-stop").textContent = "⏹ Stop";
         renderAutomationTopology("", "", "IDLE", null);
       }
 
@@ -15503,11 +16004,11 @@
                 id: `imported_${idx}_${pNode.id}_${cNode.id}`,
                 from: pNode.id,
                 to: cNode.id,
-                comm_type: isCritic ? "critique_gate" : "pass_off",
+                comm_type: isCritic ? "arbiter_gate" : "bridge_handoff",
                 condition: "always",
                 condition_expr: "",
                 max_loops: 3,
-                payload_mode: "full_envelope",
+                payload_mode: isCritic ? "raw_output" : "summary_only",
                 message_template: r.trigger || "",
               });
             }
@@ -15535,7 +16036,7 @@
               id: `imported_a2a_${idx}_${pNode.id}_${cNode.id}`,
               from: pNode.id,
               to: cNode.id,
-              comm_type: lk.comm_type || "pass_off",
+              comm_type: canonicalizeJoinCutComm(lk.comm_type || "bridge_handoff"),
               condition: lk.condition || "always",
               condition_expr: lk.condition_expr || "",
               max_loops: Number(lk.max_loops || 3),
@@ -15670,7 +16171,7 @@
             if (avatars && avatars.sabrina) el("brand-avatar").src = avatars.sabrina;
           },
           () => runHealthCheck(false),
-          refreshVaultStatus, refreshWorkspace, loadFleet, loadSkills, loadRoleBindings, loadPersistedSwarmSchemaIfAny,
+          refreshVaultStatus, refreshWorkspace, loadFleet, loadSkills, loadRoleBindings, loadPersistedSwarmSchemaIfAny, refreshDependenciesView,
         ];
         for (const load of startupSteps) {
           if (uiReloadInFlight) return;
