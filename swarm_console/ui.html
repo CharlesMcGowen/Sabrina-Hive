@@ -4,6 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Swarm Research Console</title>
+  <script>
+    try {
+      const savedTheme = localStorage.getItem("sabrina_ui_theme");
+      if (savedTheme === "obsidian" || savedTheme === "hive" || savedTheme === "royal_hive" || savedTheme === "daylight_comb") {
+        document.documentElement.dataset.uiTheme = savedTheme;
+      }
+    } catch (_err) {}
+  </script>
   <style>
     :root {
       --bg: #0b0e14;
@@ -24,6 +32,81 @@
       --purple-soft: rgba(167, 139, 250, 0.14);
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    }
+    html[data-ui-theme="hive"] {
+      --bg: #100c07;
+      --surface: #1d150b;
+      --surface-2: #271d10;
+      --border: #463319;
+      --text: #f9f1e4;
+      --muted: #bfa888;
+      --accent: #f59e0b;
+      --accent-soft: rgba(245, 158, 11, 0.17);
+      --green: #34d399;
+      --green-soft: rgba(52, 211, 153, 0.15);
+      --amber: #fbbf24;
+      --amber-soft: rgba(251, 191, 36, 0.18);
+      --red: #fb7185;
+      --red-soft: rgba(251, 113, 133, 0.16);
+      --purple: #d8b4fe;
+      --purple-soft: rgba(216, 180, 254, 0.15);
+    }
+    html[data-ui-theme="royal_hive"] {
+      --bg: #110b18;
+      --surface: #1f152e;
+      --surface-2: #2a1d3d;
+      --border: #493368;
+      --text: #f7f0ff;
+      --muted: #b7a2d1;
+      --accent: #fbbf24;
+      --accent-soft: rgba(251, 191, 36, 0.16);
+      --purple: #c084fc;
+      --purple-soft: rgba(192, 132, 252, 0.17);
+    }
+    html[data-ui-theme="daylight_comb"] {
+      --bg: #f8f3e8;
+      --surface: #fffdf8;
+      --surface-2: #f3ead8;
+      --border: #d8c39e;
+      --text: #281c0d;
+      --muted: #765f40;
+      --accent: #b45309;
+      --accent-soft: rgba(180, 83, 9, 0.13);
+      --green: #047857;
+      --green-soft: rgba(4, 120, 87, 0.12);
+      --amber: #b45309;
+      --amber-soft: rgba(180, 83, 9, 0.14);
+      --red: #be123c;
+      --red-soft: rgba(190, 18, 60, 0.12);
+      --purple: #6d28d9;
+      --purple-soft: rgba(109, 40, 217, 0.12);
+    }
+    html[data-ui-theme="hive"] body,
+    html[data-ui-theme="royal_hive"] body,
+    html[data-ui-theme="daylight_comb"] body {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='none' stroke='%23f59e0b' stroke-opacity='0.05' stroke-width='1'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0 31L0 81V50l28-16 28 16v31L28 97z'/%3E%3C/g%3E%3C/svg%3E");
+    }
+    .theme-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .theme-pill select {
+      border: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 2px 4px;
+      cursor: pointer;
+    }
+    .theme-pill select option {
+      background: var(--surface);
+      color: var(--text);
     }
 
     * { box-sizing: border-box; }
@@ -674,6 +757,14 @@
         <p id="swarm-goal" class="goal">Loading swarm state...</p>
       </div>
       <div class="header-badges">
+        <span class="theme-pill" title="Switch Console Design Theme (Alt+T)">
+          <select id="sc-ui-theme-select" aria-label="Console design theme">
+            <option value="obsidian">🌌 Obsidian</option>
+            <option value="hive">🐝 Rogue Colony</option>
+            <option value="royal_hive">👑 Royal Hive</option>
+            <option value="daylight_comb">☀️ Honeycomb Light</option>
+          </select>
+        </span>
         <span id="safety-badge" class="badge safety-false">execution_authorized: false</span>
         <span class="badge"><span id="sse-dot" class="dot warn"></span><span id="sse-label">Connecting SSE...</span></span>
         <button id="debug-badge" type="button" class="badge debug-badge-btn"><span id="debug-dot" class="dot live"></span><span id="debug-label">UI Debug: 0 issues</span></button>
@@ -2043,6 +2134,29 @@
           debugLog("INFO", "Debug", "Copied diagnostic JSON report to clipboard.");
         } catch (err) {
           debugLog("WARN", "Debug", `Clipboard copy unavailable: ${err}`);
+        }
+      });
+
+      const scThemeSelect = document.getElementById("sc-ui-theme-select");
+      const scThemes = ["obsidian", "hive", "royal_hive", "daylight_comb"];
+      function applyScUiTheme(themeId) {
+        const valid = scThemes.includes(themeId) ? themeId : "obsidian";
+        if (valid === "obsidian") delete document.documentElement.dataset.uiTheme;
+        else document.documentElement.dataset.uiTheme = valid;
+        if (scThemeSelect && scThemeSelect.value !== valid) scThemeSelect.value = valid;
+        try { localStorage.setItem("sabrina_ui_theme", valid); } catch (_err) {}
+      }
+      if (scThemeSelect) {
+        applyScUiTheme(document.documentElement.dataset.uiTheme || "obsidian");
+        scThemeSelect.addEventListener("change", () => applyScUiTheme(scThemeSelect.value));
+      }
+      window.addEventListener("keydown", (ev) => {
+        if (ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.key === "t" || ev.key === "T")) {
+          const tag = (ev.target && ev.target.tagName) ? ev.target.tagName.toLowerCase() : "";
+          if (tag === "input" || tag === "textarea") return;
+          ev.preventDefault();
+          const cur = document.documentElement.dataset.uiTheme || "obsidian";
+          applyScUiTheme(scThemes[(scThemes.indexOf(cur) + 1) % scThemes.length]);
         }
       });
 

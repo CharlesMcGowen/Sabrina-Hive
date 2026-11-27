@@ -18,7 +18,7 @@ def request(path, method="GET", payload=None):
 class Console(tk.Tk):
     THEMES = {
         "obsidian": {"label": "Obsidian", "bg": "#111827", "card": "#1f2937", "fg": "#e5e7eb", "accent": "#38bdf8"},
-        "hive": {"label": "Sabrina Hive", "bg": "#120d07", "card": "#241a0e", "fg": "#f9f1e4", "accent": "#f59e0b"},
+        "hive": {"label": "Rogue Colony", "bg": "#120d07", "card": "#241a0e", "fg": "#f9f1e4", "accent": "#f59e0b"},
         "royal_hive": {"label": "Royal Hive", "bg": "#130c1c", "card": "#251936", "fg": "#f7f0ff", "accent": "#fbbf24"},
         "daylight_comb": {"label": "Honeycomb Light", "bg": "#f8f3e8", "card": "#efe5d0", "fg": "#281c0d", "accent": "#b45309"},
     }

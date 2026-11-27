@@ -520,7 +520,7 @@ class ConnectorRegistry:
                 "client_id": cfg["client_id"],
                 "secret": cfg["secret"],
                 "user": {"client_user_id": user_id},
-                "client_name": "Sabrina Console",
+                "client_name": "Rogue Colony",
                 "products": ["transactions"],
                 "country_codes": ["US"],
                 "language": "en",

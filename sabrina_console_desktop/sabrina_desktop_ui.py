@@ -2734,7 +2734,7 @@ class SabrinaDesktopBridge:
                 "time": time.strftime("%H:%M:%S"),
                 "ago": "just now",
                 "badge": "KRAKEN_GUI",
-                "actor": "Sabrina Console",
+                "actor": "Rogue Colony",
                 "summary": msg,
             },
         )
@@ -6246,7 +6246,7 @@ class SabrinaDesktopBridge:
             age = round(max(0.0, time.monotonic() - self._remote_last_ts), 1) if checked else None
         return {
             "ok": True,
-            "identity": "Sabrina Console's workspace agent",
+            "identity": "Rogue Colony's workspace agent",
             "active_harness": self.harness_registry.active_harness_id,
             "workspace": {"attached": sandbox is not None, "root": str(sandbox.root) if sandbox else None,
                           "mode": self.workspace_mode,
@@ -6269,7 +6269,7 @@ class SabrinaDesktopBridge:
             self._append_chat("Sabrina", error)
             return {"ok": False, "error": error}
         facts = self._console_info("overview")
-        system = ("You are Sabrina, the assistant in Sabrina Console. Answer concisely and honestly. "
+        system = ("You are Sabrina, the assistant in Rogue Colony. Answer concisely and honestly. "
                   "No workspace is attached and this chat has no callable tools. Do not claim to have acted. "
                   "To use workspace tools, the operator can open a folder in the Workspace panel. "
                   "Current console information: " + json.dumps(facts, ensure_ascii=False))
@@ -7083,7 +7083,7 @@ def run_desktop_ui() -> None:
         sys.stdout = log_fp
         sys.stderr = log_fp
         print(f"\n=======================================================")
-        print(f"  Sabrina Console Session Started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Rogue Colony Session Started: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"  Python executable: {sys.executable}")
         print(f"  Workspace: {SABRINA_WORKSPACE}")
         print(f"=======================================================\n", flush=True)
@@ -7148,7 +7148,7 @@ def run_desktop_ui() -> None:
                 print(f"[POWERSHELL] Started {result['mission_id']} for {target}", flush=True)
             print(f"[INIT] Window created successfully. Starting pywebview loop...", flush=True)
             webview.start(debug=not FROZEN_DESKTOP)
-            print(f"[EXIT] Sabrina Console window closed cleanly at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+            print(f"[EXIT] Rogue Colony window closed cleanly at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
         else:
             raise RuntimeError(
                 "pywebview module is not available in the active Python environment. "

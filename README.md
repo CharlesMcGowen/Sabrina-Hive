@@ -1,8 +1,8 @@
-# Sabrina Console 🐝
+# Rogue Colony 🐝
 
 > **Swarm agentic framework for any task!**
 
-Sabrina Console is a desktop-first, extensible multi-agent orchestration framework. It coordinates autonomous agent swarms, live execution monitoring, dynamic plugin tool-buses, and hot-swappable native harness profiles.
+Rogue Colony is a desktop-first, extensible multi-agent orchestration framework. It coordinates autonomous agent swarms, live execution monitoring, dynamic plugin tool-buses, and hot-swappable native harness profiles.
 
 ---
 
@@ -44,7 +44,8 @@ Sabrina Console is a desktop-first, extensible multi-agent orchestration framewo
   - Granular coordinator approval workflows (`approve_writes`, `sandbox_auto`, `full_harness`).
 
 - **🎨 Themes & Template Customization**:
-  - Customizable UI themes (`robots`, `christmas`, `workshop`, `classic`) and motion styles.
+  - One-click topbar Console design theme switcher (`obsidian`, `hive`, `royal_hive`, `daylight_comb`) with `Alt+T` quick cycle and persistent `swarm_display.json` storage.
+  - Customizable swarm graph themes (`robots`, `hive` bees + `honeycomb` backdrop + `nectar` trails, `christmas`, `workshop`, `classic`) and motion styles.
   - Parameterized prompt and message templates (`automation_engine.py`) for automated loops and multi-agent QA gates.
   - Configurable model routes and role bindings (`custom_models.json`).
 
