@@ -89,6 +89,12 @@ sabrina_console_desktop/harnesses/external/*.py
 !sabrina_console_desktop/harnesses/external/swarm_system_bridges.py
 *.bak*
 
+# Test scripts (untracked/new test files)
+test_*.py
+*_test.py
+test_*.ps1
+tests/
+
 # IDE & OS files
 .DS_Store
 Thumbs.db
