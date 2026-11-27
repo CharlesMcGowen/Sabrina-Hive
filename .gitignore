@@ -95,39 +95,8 @@ test_*.py
 test_*.ps1
 tests/
 
-# Legacy pentest, exploit, recon, and one-off guild sweep tools (kept local only)
-sabrina_console_desktop/tools/juiceshop_agent/
-sabrina_console_desktop/tools/probe_juiceshop.py
-sabrina_console_desktop/tools/coder_agent/exploitgym_*.py
-sabrina_console_desktop/tools/exploit_gym_*.py
-sabrina_console_desktop/tools/exploitgym_weight_synthesizer.py
-sabrina_console_desktop/tools/exploitation_log.md
-sabrina_console_desktop/tools/engines/trials/qa_framing_*.py
-sabrina_console_desktop/tools/engines/subdomain_recon_engine.py
-sabrina_console_desktop/tools/access_control_prober.py
-sabrina_console_desktop/tools/ai_bot_hunter.py
-sabrina_console_desktop/tools/bounty_recon.py
-sabrina_console_desktop/tools/recon_ant.py
-sabrina_console_desktop/tools/smuggle_sweep.py
-sabrina_console_desktop/tools/sabrina_cve_variant_hunter.py
-sabrina_console_desktop/tools/prompt_builders/prompt_sabrina_recon_build.py
-sabrina_console_desktop/tools/run_v9_*.py
-sabrina_console_desktop/tools/run_v10_*.py
-sabrina_console_desktop/tools/run_v11_*.py
-sabrina_console_desktop/tools/run_v12_*.py
-sabrina_console_desktop/tools/run_v13_*.py
-sabrina_console_desktop/tools/run_v14_*.py
-sabrina_console_desktop/tools/run_v16_*.py
-sabrina_console_desktop/tools/run_v17_*.py
-sabrina_console_desktop/tools/run_v19_sabrina_self_forge_bugcrowd_tool.py
-sabrina_console_desktop/tools/run_cegar_repair_and_semantic_canary.py
-sabrina_console_desktop/tools/run_global_web_ai_portal_crawler.py
-sabrina_console_desktop/tools/run_guild_playwright_*.py
-sabrina_console_desktop/tools/run_wide_net_2500_gradio_and_playwright_sweep.py
-sabrina_console_desktop/tools/finalize_v10_ledger.py
-sabrina_console_desktop/tools/swarm_author_immune_system.py
-sabrina_console_desktop/tools/guild_browser_*.py
-sabrina_console_desktop/tools/guild_web_*.py
+# Tools directory (kept local for separate upload)
+sabrina_console_desktop/tools/
 
 # IDE & OS files
 .DS_Store
