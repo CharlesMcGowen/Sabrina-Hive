@@ -922,8 +922,12 @@ class SabrinaDesktopBridge:
             db_path=(control_dir / "automations.sqlite3") if self._isolated_test_mode else None,
             connector_registry=self.connector_registry,
             gemini_caller=self._call_private_automation_model,
-            swarm_caller=lambda g, r: self.launch_mission(goal=g, mode=r or "coordinator"),
+            swarm_caller=self._run_automation_swarm_step,
             agent_caller=self._call_swarm_llm,
+            join_cut_registry=self.join_cut_registry,
+            blackboard=self.blackboard,
+            workspace_tool_executor=self._execute_automation_workspace_tools,
+            branching_order=3,
         )
         if not self._isolated_test_mode and not coordinator_only:
             self.automation_engine.start_background_scheduler(poll_seconds=15.0)
@@ -1801,6 +1805,21 @@ class SabrinaDesktopBridge:
         current_ui_mtime = self._read_ui_asset_mtime()
         ui_dirty = current_ui_mtime > 0.0 and abs(current_ui_mtime - self._ui_loaded_mtime) > 1e-6
 
+        for prog in (self.automation_engine.get_active_progress() or {}).values():
+            if not isinstance(prog, dict):
+                continue
+            p_rec = str(prog.get("recommended_next_goal") or "").strip()
+            p_ts = float(prog.get("updated_at") or 0.0)
+            if p_rec and prog.get("status") == "completed":
+                if not self._latest_recommended_next or p_ts > float(self._latest_recommended_next.get("ts") or 0.0):
+                    self._latest_recommended_next = {
+                        "goal": p_rec,
+                        "source": f"workflow:{prog.get('run_id') or prog.get('loop_id') or 'join_cut'}",
+                        "run_id": str(prog.get("run_id") or ""),
+                        "goal_history": list(prog.get("goal_history") or []),
+                        "ts": p_ts,
+                    }
+
         best_rec: dict[str, Any] = dict(self._latest_recommended_next) if self._latest_recommended_next else {}
         for mo in swarm.get("mission_outputs") or []:
             if not isinstance(mo, dict):
@@ -1858,6 +1877,7 @@ class SabrinaDesktopBridge:
                 "loops": self.automation_engine.list_loops(),
                 "pending_approvals": self.automation_engine.list_pending_approvals(),
                 "connectors": self.connector_registry.list_connectors(),
+                "active_progress": self.automation_engine.get_active_progress(),
             },
             "backend_warnings": [
                 f"API :8087 unreachable (remote service on ego:8087 not running — local fallback active): {health.get('error')}"
@@ -4704,6 +4724,46 @@ class SabrinaDesktopBridge:
             "llm_ok": bool(isinstance(llm_res, dict) and llm_res.get("ok")),
         }
 
+    def _run_automation_swarm_step(self, goal: str, role: str) -> dict[str, Any]:
+        """Launch a swarm mission for an automation step and await its settled deliverable."""
+        mode = role if role in ("codex_thought_antigravity_implement", "windows_powershell_inspect") else "codex_thought_antigravity_implement"
+        launch_res = self.launch_mission(goal=goal, mode=mode)
+        if not isinstance(launch_res, dict) or not launch_res.get("ok"):
+            return dict(launch_res) if isinstance(launch_res, dict) else {"ok": False, "error": "Swarm launch failed"}
+        mid = str(launch_res.get("mission_id") or "").strip()
+        if mid and hasattr(self.swarm_runner, "wait_for_mission"):
+            settled = self.swarm_runner.wait_for_mission(mid, timeout=300.0)
+            if isinstance(settled, dict):
+                st = str(settled.get("state") or "")
+                passed = st in ("PASS", "COMPLETED", "DONE")
+                report_txt = str(settled.get("report_markdown") or settled.get("summary") or "").strip()
+                prefix = "PASS: " if passed else ("NEEDS_WORK: " if st in ("FAILED", "NEEDS_MORE_WORK", "ERROR") else "")
+                return {
+                    "ok": st not in ("FAILED", "ERROR", "CANCELLED"),
+                    "mission_id": mid,
+                    "state": st,
+                    "passed": passed,
+                    "text": f"{prefix}{report_txt}" if (prefix and not report_txt.upper().startswith(("PASS:", "NEEDS_WORK:"))) else report_txt,
+                }
+        return launch_res
+
+    def _execute_automation_workspace_tools(self, text: str, allow_writes: bool = False) -> tuple[bool, str, list[str]]:
+        """Execute safe read/search tool blocks (and gated workspace writes) for Join-Cut workflow agents."""
+        has_tools = False
+        tool_out = ""
+        written: list[str] = []
+        if hasattr(self.swarm_runner, "_execute_ide_tool_blocks"):
+            try:
+                has_tools, tool_out = self.swarm_runner._execute_ide_tool_blocks(text, allow_tests=False)
+            except Exception:
+                has_tools, tool_out = False, ""
+        if allow_writes and hasattr(self.swarm_runner, "_apply_workspace_writes"):
+            try:
+                written = list(self.swarm_runner._apply_workspace_writes(text) or [])
+            except Exception:
+                written = []
+        return has_tools, tool_out, written
+
     def save_and_initiate_automation(self, spec: dict[str, Any]) -> dict[str, Any]:
         try:
             res = self.automation_engine.save_and_initiate_loop(spec)
@@ -4712,6 +4772,112 @@ class SabrinaDesktopBridge:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def initiate_automation_async(self, spec: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self.automation_engine.initiate_loop_async(spec)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def stop_automation(self, target_id: str = "") -> dict[str, Any]:
+        try:
+            return self.automation_engine.cancel_run(target_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def validate_automation_topology(self, spec: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return {"ok": True, "topology": self.automation_engine.validate_workflow_topology(spec or {})}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @staticmethod
+    def _swarm_schema_agents(schema: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_agents = schema.get("agents") or schema.get("workers") or schema.get("nodes") or []
+        if isinstance(raw_agents, dict):
+            return [
+                {"id": str(key), **(value if isinstance(value, dict) else {})}
+                for key, value in raw_agents.items()
+            ]
+        return [item for item in raw_agents if isinstance(item, dict)] if isinstance(raw_agents, list) else []
+
+    @staticmethod
+    def _swarm_runtime_role_aliases() -> dict[str, str]:
+        return {
+            "sabrina": "coordinator",
+            "codex": "planner_architect",
+            "antigravity": "execution_specialist",
+            "claude": "critic_verifier",
+        }
+
+    def _schema_a2a_links(self, schema: dict[str, Any], links: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Translate runtime worker aliases to the matching IDs in the schema graph."""
+        agents = self._swarm_schema_agents(schema)
+        aliases = self._swarm_runtime_role_aliases()
+
+        def endpoint(value: Any) -> str:
+            key = str(value or "").strip()
+            if not key:
+                return key
+            direct = next((a for a in agents if key in {
+                str(a.get("id") or ""), str(a.get("role") or ""), str(a.get("name") or "")
+            }), None)
+            role = aliases.get(key, key)
+            match = direct or next((a for a in agents if str(a.get("role") or "") == role), None)
+            return str(match.get("id") or match.get("role") or key) if match else key
+
+        normalized: list[dict[str, Any]] = []
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            item = dict(link)
+            item["from"] = endpoint(item.get("from"))
+            item["to"] = endpoint(item.get("to"))
+            normalized.append(item)
+        return normalized
+
+    def _runtime_a2a_links(self, schema: dict[str, Any], links: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Translate schema agent IDs/roles back to runner worker aliases where known."""
+        agents = self._swarm_schema_agents(schema)
+        aliases = self._swarm_runtime_role_aliases()
+        role_to_alias = {role: alias for alias, role in aliases.items()}
+
+        def endpoint(value: Any) -> str:
+            key = str(value or "").strip()
+            if not key:
+                return key
+            direct = next((a for a in agents if key in {
+                str(a.get("id") or ""), str(a.get("role") or ""), str(a.get("name") or "")
+            }), None)
+            role = aliases.get(key, key)
+            match = direct or next((a for a in agents if str(a.get("role") or "") == role), None)
+            if not match:
+                return key
+            agent_role = str(match.get("role") or "")
+            return role_to_alias.get(agent_role) or str(match.get("id") or agent_role or key)
+
+        normalized: list[dict[str, Any]] = []
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            item = dict(link)
+            item["from"] = endpoint(item.get("from"))
+            item["to"] = endpoint(item.get("to"))
+            normalized.append(item)
+        return normalized
+
+    def _mirror_swarm_a2a_links_into_schema(self, links: list[dict[str, Any]]) -> None:
+        """Keep the schema file's graph edges aligned with the live runner configuration."""
+        try:
+            if not self._swarm_schema_path.is_file():
+                return
+            schema = json.loads(self._swarm_schema_path.read_text(encoding="utf-8"))
+            if not isinstance(schema, dict):
+                return
+            schema["a2a_links"] = self._schema_a2a_links(schema, links)
+            self._swarm_schema_path.write_text(json.dumps(schema, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     def _persist_swarm_a2a_links(self) -> list[dict[str, Any]]:
         links = self.swarm_runner.get_a2a_links()
         try:
@@ -4719,6 +4885,7 @@ class SabrinaDesktopBridge:
             self._swarm_a2a_links_path.write_text(json.dumps(links, indent=2), encoding="utf-8")
         except Exception:
             pass
+        self._mirror_swarm_a2a_links_into_schema(links)
         return links
 
     def get_swarm_a2a_links(self) -> dict[str, Any]:
@@ -5127,11 +5294,23 @@ class SabrinaDesktopBridge:
             return {"ok": False, "status": "ERROR", "error": str(exc)}
 
     def get_swarm_schema(self) -> dict[str, Any]:
-        """Return persisted active swarm schema from disk if present."""
+        """Return the active schema overlaid with the current runtime A2A graph."""
         try:
             if self._swarm_schema_path.is_file():
                 raw = self._swarm_schema_path.read_text(encoding="utf-8")
                 parsed = json.loads(raw)
+                if not isinstance(parsed, dict):
+                    raise ValueError("Persisted swarm schema must be a JSON object.")
+                runtime_links = self.swarm_runner.get_a2a_links()
+                runtime_links_file_exists = False
+                try:
+                    runtime_links_file_exists = isinstance(
+                        json.loads(self._swarm_a2a_links_path.read_text(encoding="utf-8")), list
+                    )
+                except Exception:
+                    pass
+                if runtime_links or runtime_links_file_exists:
+                    parsed["a2a_links"] = self._schema_a2a_links(parsed, runtime_links)
                 return {
                     "ok": True,
                     "exists": True,
@@ -5190,6 +5369,13 @@ class SabrinaDesktopBridge:
         if not isinstance(parsed, dict):
             return {"ok": False, "error": "Top-level schema must be a JSON object.", "format": fmt, "execution_authorized": False}
 
+        # A schema without an A2A section should preserve the deployed graph. If it
+        # includes a list (including []), that list is an explicit graph update.
+        a2a_links_explicit = isinstance(parsed.get("a2a_links"), list)
+        previous_runtime_links = self.swarm_runner.get_a2a_links()
+        if not a2a_links_explicit and previous_runtime_links:
+            parsed["a2a_links"] = self._schema_a2a_links(parsed, previous_runtime_links)
+
         # Enforce hard safety lock invariant
         parsed["execution_authorized"] = False
         unlocked = self._unlocked_providers()
@@ -5206,12 +5392,24 @@ class SabrinaDesktopBridge:
                 "execution_authorized": False,
             }
 
+        runtime_links_to_restore: list[dict[str, Any]] | None = None
+        if a2a_links_explicit:
+            runtime_links_to_restore = previous_runtime_links
+            runtime_links = self._runtime_a2a_links(parsed, parsed.get("a2a_links") or [])
+            applied_runtime_links = self.swarm_runner.set_a2a_links(runtime_links)
+            parsed["a2a_links"] = self._schema_a2a_links(parsed, applied_runtime_links)
+
         try:
             self._swarm_schema_path.parent.mkdir(parents=True, exist_ok=True)
             formatted = json.dumps(parsed, indent=2)
             self._swarm_schema_path.write_text(formatted, encoding="utf-8")
         except Exception as exc:
+            if runtime_links_to_restore is not None:
+                self.swarm_runner.set_a2a_links(runtime_links_to_restore)
             return {"ok": False, "error": f"Failed to write schema file: {exc}", "execution_authorized": False}
+
+        if a2a_links_explicit:
+            self._persist_swarm_a2a_links()
 
         updated_roles: list[str] = []
         if sync_role_bindings:

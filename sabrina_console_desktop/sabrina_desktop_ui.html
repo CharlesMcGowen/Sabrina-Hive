@@ -1839,7 +1839,7 @@
                 <button id="btn-launch-kraken-gui" class="btn-ok" type="button" title="Open the standalone Sabrina Kraken Live & $1,000 Paper Desktop Monitor">🖥 Launch Kraken Desktop Monitor</button>
                 <button id="btn-run-kraken-qa" class="btn-ghost" type="button" title="Run deterministic Product QA (imports, headless Tcl/Tk GUI smoke, UI parity, unit tests)">🧪 Run Product QA Smoke Check</button>
                 <button id="btn-kraken-paper-review" class="btn-ghost" type="button" title="Send the simulated portfolio totals to Claude and GPT, then have Gemini review their findings">Review paper results with Claude, GPT &amp; Gemini</button>
-                <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View replacement paper trial</button>
+                <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View Top 25 paper trial</button>
                 <button id="btn-swarm-kraken-qa" class="btn-ghost" type="button" title="Dispatch the 4-agent Swarm in Product QA mode to audit the Kraken GUI product">⚡ Swarm QA Mission on Kraken</button>
                 <button id="btn-swarm-manage-kraken" class="btn-primary" type="button" title="Deploy the Swarm to autonomously monitor order-books, turnover velocity, and QuantOrb safety">🤖 Deploy Swarm Kraken Manager</button>
               </div>
@@ -3544,8 +3544,24 @@
         const gainers = (tickBody.gainers_24h && tickBody.gainers_24h.gainers) || [];
         const tbody = section.querySelector("[data-km-gainer-list]");
         if (tbody && gainers.length) {
+          if (!tbody._drawerBound) {
+            tbody._drawerBound = true;
+            tbody.addEventListener("click", (ev) => {
+              const btn = ev.target.closest("[data-km-drawer-toggle]");
+              if (!btn) return;
+              ev.stopPropagation();
+              const sym = btn.getAttribute("data-km-drawer-toggle");
+              const drawer = tbody.querySelector(`tr[data-km-drawer-row="${CSS.escape(sym)}"]`);
+              if (!drawer) return;
+              const isClosed = drawer.style.display === "none";
+              drawer.style.display = isClosed ? "table-row" : "none";
+              btn.textContent = isClosed ? "▲ Tape" : "▼ Tape";
+            });
+          }
           const oldRows = new Map(Array.from(tbody.querySelectorAll("tr[data-km-gainer-row]"))
             .map((row) => [row.getAttribute("data-km-gainer-row"), row]));
+          const oldDrawers = new Map(Array.from(tbody.querySelectorAll("tr[data-km-drawer-row]"))
+            .map((row) => [row.getAttribute("data-km-drawer-row"), row]));
           const palette = ["#34d399", "#38bdf8", "#fbbf24", "#a78bfa", "#f472b6",
             "#2dd4bf", "#60a5fa", "#fb923c", "#c084fc", "#4ade80", "#f87171",
             "#818cf8", "#e879f9", "#facc15", "#22d3ee", "#fda4af", "#a3e635",
@@ -3575,6 +3591,14 @@
                 row.cells[1].appendChild(document.createTextNode(" "));
                 row.cells[1].appendChild(stk);
               }
+              const tapeBtn = document.createElement("button");
+              tapeBtn.type = "button";
+              tapeBtn.className = "km-btn-xs";
+              tapeBtn.setAttribute("data-km-drawer-toggle", sym);
+              tapeBtn.title = "Inspect Whale Tape & Orderflow Sweeps";
+              tapeBtn.textContent = "▼ Tape";
+              row.cells[1].appendChild(document.createTextNode(" "));
+              row.cells[1].appendChild(tapeBtn);
               row.cells[5].textContent = "—";
             }
             const cells = row.cells;
@@ -3629,7 +3653,14 @@
             cells[12].title = trd ? `24h Trades: ${trd.toLocaleString()} (Avg size: $${Math.round(avgTrd).toLocaleString()})` : "24h Trades";
             return row;
           });
-          tbody.replaceChildren(...rows);
+          const combined = [];
+          rows.forEach((r) => {
+            combined.push(r);
+            const sym = r.getAttribute("data-km-gainer-row");
+            const drw = oldDrawers.get(sym);
+            if (drw) combined.push(drw);
+          });
+          tbody.replaceChildren(...combined);
         }
         // Re-mark active Paper Lab single-pair positions when live WS quotes arrive
         const quotes = tickBody.quotes || {};
@@ -3714,7 +3745,20 @@
           richHost.style.display = "block";
           richHost.replaceChildren(sanitizePluginHtmlFragment(body.html));
           const effPlugin = pluginName || section.dataset.pluginName || "";
-          if (effPlugin === "kraken_monitor") annotateKrakenPaperStrategies(richHost, body.snapshot);
+          if (effPlugin === "kraken_monitor") {
+            annotateKrakenPaperStrategies(richHost, body.snapshot);
+            richHost.querySelectorAll("[data-km-drawer-toggle]").forEach((btnEl) => {
+              btnEl.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                const sym = btnEl.getAttribute("data-km-drawer-toggle");
+                const drawer = richHost.querySelector(`tr[data-km-drawer-row="${CSS.escape(sym)}"]`);
+                if (!drawer) return;
+                const isClosed = drawer.style.display === "none";
+                drawer.style.display = isClosed ? "table-row" : "none";
+                btnEl.textContent = isClosed ? "▲ Tape" : "▼ Tape";
+              });
+            });
+          }
           richHost.querySelectorAll("[data-plugin-op]").forEach((btnEl) => {
             btnEl.addEventListener("click", () => {
               const op = btnEl.getAttribute("data-plugin-op") || "";
@@ -9263,6 +9307,7 @@
         el("view-title").textContent = view === "plugin-settings" ? "App Connections" : (TITLES[view] || "Sabrina Console");
         if (view === "plugin-settings") refreshPluginConnections();
         if (view === "dependencies") refreshDependenciesView();
+        if (view === "models" && !schemaEditorDirty) void loadPersistedSwarmSchemaIfAny();
       }
       async function refreshPluginConnections() {
         const feedback = el("plugin-connection-feedback");
@@ -11323,6 +11368,7 @@
       };
       const SAMPLE_SWARM_SCHEMA = SWARM_SCHEMA_PRESETS.autonomous_seed.schema;
       let activeParsedSwarmSchema = JSON.parse(JSON.stringify(SAMPLE_SWARM_SCHEMA));
+      let schemaEditorDirty = false;
       let lastLoadedPresetKey = "autonomous_seed";
       let lastInvariantReport = null;
 
@@ -12228,6 +12274,7 @@
       }
 
       function commitBuilderSchemaMutation(mutatorFn, feedbackMsg = "") {
+        schemaEditorDirty = true;
         const next = ensureMutableSchema(activeParsedSwarmSchema);
         mutatorFn(next);
         next.execution_authorized = false;
@@ -13178,6 +13225,7 @@
 
       function handleSchemaFileLoad(file) {
         if (!file) return;
+        schemaEditorDirty = true;
         const reader = new FileReader();
         reader.onload = (ev) => {
           const text = String((ev && ev.target && ev.target.result) || "");
@@ -13205,9 +13253,11 @@
       }
 
       el("schema-preset-select").addEventListener("change", (ev) => {
+        schemaEditorDirty = true;
         loadSampleSwarmSchema(ev.target.value, false);
       });
       el("btn-schema-load-sample").addEventListener("click", () => {
+        schemaEditorDirty = true;
         const sel = el("schema-preset-select");
         loadSampleSwarmSchema(sel ? sel.value : "autonomous_seed", false);
       });
@@ -13231,7 +13281,10 @@
           await callBridge("Schema", "audit_swarm_schema", false, "schema", null, editor ? editor.value : "");
         }
       });
-      el("schema-json-editor").addEventListener("input", () => validateAndInspectSchemaEditor(false));
+      el("schema-json-editor").addEventListener("input", () => {
+        schemaEditorDirty = true;
+        validateAndInspectSchemaEditor(false);
+      });
 
       el("btn-schema-apply").addEventListener("click", async () => {
         const parsed = validateAndInspectSchemaEditor(true);
@@ -13255,6 +13308,7 @@
           if (fb) fb.textContent = "Saving schema & syncing role bindings…";
           const res = await callBridge("Schema", "save_swarm_schema", formatted, true);
           if (res && res.ok) {
+            schemaEditorDirty = false;
             if (pill) { pill.className = "pill pill-ok"; pill.textContent = "APPLIED LIVE"; }
             if (fb) fb.textContent = `✓ ${res.message || "Saved & applied schema."}`;
             const lbl = el("schema-file-label");
@@ -13301,11 +13355,15 @@
 
       async function loadPersistedSwarmSchemaIfAny() {
         try {
+          if (schemaEditorDirty) return;
           if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.get_swarm_schema === "function") {
             const res = await window.pywebview.api.get_swarm_schema();
+            if (schemaEditorDirty) return;
             if (res && res.ok && res.exists && res.raw_json) {
               const editor = el("schema-json-editor");
               if (editor) editor.value = res.raw_json;
+              activeParsedSwarmSchema = JSON.parse(res.raw_json);
+              schemaEditorDirty = false;
               const lbl = el("schema-file-label");
               if (lbl && res.path) lbl.textContent = `Active: ${res.path}`;
               validateAndInspectSchemaEditor();
@@ -14134,13 +14192,17 @@
         }
         const asMoney = number => new Intl.NumberFormat(undefined, {style:"currency", currency:"USD"}).format(number);
         const trial = result.trial;
-        const names = {cash:"Cash", relative_breakout:"ETH/BTC breakout", hold_eth:"Buy and hold ETH"};
+        const names = {cash:"Cash", incumbent:"Existing Strategy Lab rule", A:"Claude rule", B:"GPT rule", C:"Gemini rule"};
         const lines = (result.portfolios || []).map(p =>
           `${p.name} · generation ${p.generation} · ${p.status} · ${p.open_lots} open · ${asMoney(p.net_usd)}`);
         if (trial?.books) {
-          lines.push("", `Trial through ${new Date(trial.ends_at * 1000).toLocaleString()} · ${trial.on_time_bars} on-time observations`);
+          lines.push("", `Top 25 trial through ${new Date(trial.ends_at * 1000).toLocaleString()} · ${trial.observations} ranked observations · Primary: ${names[trial.primary] || trial.primary}`);
           Object.entries(trial.books).forEach(([name, book]) =>
-            lines.push(`${names[name] || name} · equity ${asMoney(book.equity_usd)} · ${book.closed} closed`));
+            lines.push(`${names[name] || name} · equity ${book.equity_usd == null ? "awaiting an executable quote" : asMoney(book.equity_usd)} · realized ${asMoney(book.realized_pnl_usd)} · ${book.closed} closed`));
+          if (result.windows) Object.entries(result.windows).forEach(([seconds, sample]) => {
+            if (sample.observed_pair_windows > 0) lines.push(`${Number(seconds)/60} min · ${sample.covered_costs} of ${sample.observed_pair_windows} complete pair windows covered trading costs`);
+          });
+          if (result.ranked_pairs?.length) lines.push("", `Top 25 at ${new Date(result.rank_at*1000).toLocaleTimeString()}`, result.ranked_pairs.join(", "));
         }
         if (trial?.finding || trial?.error || trial?.last_data_error) lines.push(trial.finding || trial.error || trial.last_data_error);
         feedback.textContent = `Paper service updated ${result.age_seconds}s ago · Replacement trial ${trial?.status || "awaiting registration"}`;

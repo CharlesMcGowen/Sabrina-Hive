@@ -1,6 +1,7 @@
 """SQLite-backed Automation Loop Engine & Gemini Multiple-Choice Workflow Co-Designer."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -17,9 +18,33 @@ try:
 except ImportError:
     from connector_registry import ConnectorRegistry  # type: ignore[no-redef]
 
+try:
+    from sabrina_console_desktop.join_cut_registry import JoinCutRegistry
+except ImportError:
+    try:
+        from join_cut_registry import JoinCutRegistry  # type: ignore[no-redef]
+    except ImportError:
+        JoinCutRegistry = None  # type: ignore[assignment,misc]
+
+try:
+    from swarm_console.eulerian_topology import (
+        EulerianSwarmTopology,
+        LogFinPromotionGate,
+        SharingPolicy,
+    )
+except ImportError:
+    EulerianSwarmTopology = None  # type: ignore[assignment,misc]
+    LogFinPromotionGate = None  # type: ignore[assignment,misc]
+    SharingPolicy = None  # type: ignore[assignment,misc]
+
 DEFAULT_AUTOMATIONS_DB = Path(__file__).resolve().parent / "data" / "automations.sqlite3"
 
 VALID_A2A_COMM_TYPES: tuple[str, ...] = (
+    "cut_spawn",
+    "bridge_handoff",
+    "arbiter_gate",
+    "wait_edge",
+    "log_fin_gate",
     "pass_off",
     "loop",
     "critique_gate",
@@ -36,6 +61,150 @@ VALID_A2A_CONDITIONS: tuple[str, ...] = (
     "on_error",
     "custom",
 )
+
+
+def resolve_join_cut_operator(comm_type: str, target_id: str = "") -> str:
+    """Map UI/stored A2A edge types onto formal genus-0 m-Eulerian Join-Cut operators."""
+    comm = str(comm_type or "pass_off").strip().lower()
+    if target_id == "loop_root":
+        return "SELF_RECYCLE"
+    if comm in ("cut_spawn", "delegate_spawn"):
+        return "CUT"
+    if comm in ("bridge_handoff", "pass_off"):
+        return "BRIDGE"
+    if comm in ("arbiter_gate", "critique_gate"):
+        return "ARBITER"
+    if comm == "wait_edge":
+        return "WAIT_EDGE"
+    if comm == "log_fin_gate":
+        return "LOG_FIN"
+    if comm == "blackboard_sync":
+        return "BLACKBOARD_SYNC"
+    if comm == "escalate_hitl":
+        return "HITL_GATE"
+    if comm == "loop":
+        return "TRANSIENT_RETRY"
+    return "BRIDGE"
+
+
+_STRUCTURED_NEEDS_WORK_RE = re.compile(
+    r"(?im)(?:^\s*(?:[\*`>#\-]+\s*)?(?:NEEDS_WORK|NEEDS_MORE_WORK|FAIL|LOOP_BACK|ISSUES_FOUND)\s*:)"
+    r"|(?:\b(?:needs_more_work|needs_work|loop_back|issues_found)\b)"
+    r"|(?:\"goal_met\"\s*:\s*false)"
+    r"|(?:\bgoal_met\s*=\s*false\b)"
+    r"|(?:\bverdict\s*:\s*(?:fail|needs_work|revise)\b)"
+)
+
+_STRUCTURED_PASS_RE = re.compile(
+    r"(?im)(?:^\s*(?:[\*`>#\-]+\s*)?(?:PASS|VERDICT\s*:\s*PASS)\s*:)"
+    r"|(?:\"goal_met\"\s*:\s*true)"
+    r"|(?:\bgoal_met\s*=\s*true\b)"
+)
+
+
+def evaluate_step_verdict(ok: bool, raw_txt: str, res_obj: dict[str, Any] | None = None) -> tuple[bool, bool, bool]:
+    """Parse structured PASS / NEEDS_WORK / LOW_CONFIDENCE signals without false-positive prose matches."""
+    txt = str(raw_txt or "")
+    txt_low = txt.lower()
+    res_d = res_obj if isinstance(res_obj, dict) else {}
+    if res_d.get("passed") is True or res_d.get("goal_met") is True:
+        explicit_pass = True
+    else:
+        explicit_pass = bool(_STRUCTURED_PASS_RE.search(txt))
+
+    if not ok or res_d.get("passed") is False or res_d.get("goal_met") is False:
+        needs_work = True
+    elif explicit_pass:
+        needs_work = False
+    else:
+        needs_work = bool(_STRUCTURED_NEEDS_WORK_RE.search(txt))
+
+    low_conf = (
+        bool(re.search(r"\blow_confidence\b", txt_low))
+        or (res_d.get("logprob") is not None and float(res_d["logprob"]) < -0.35)
+    )
+    return explicit_pass, needs_work, low_conf
+
+
+def analyze_workflow_topology(
+    steps: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    branching_m: int = 6,
+) -> dict[str, Any]:
+    """Analyze a workflow graph against genus-0 m-Eulerian Join-Cut invariants."""
+    norm_steps = normalize_workflow_steps(steps)
+    norm_edges = normalize_workflow_edges(edges)
+    valid_ids = {"loop_root", *(str(s["id"]) for s in norm_steps)}
+    forward_adj: dict[str, set[str]] = {}
+    out_arity: dict[str, int] = {}
+    cycle_edge_ids: list[str] = []
+    warnings: list[str] = []
+
+    def _reaches(src: str, dst: str, seen: set[str] | None = None) -> bool:
+        if src == dst:
+            return True
+        visited = seen if seen is not None else set()
+        if src in visited:
+            return False
+        visited.add(src)
+        for nxt in forward_adj.get(src, ()):
+            if _reaches(nxt, dst, visited):
+                return True
+        return False
+
+    for e in norm_edges:
+        u = str(e.get("from") or "")
+        v = str(e.get("to") or "")
+        if u not in valid_ids or v not in valid_ids:
+            continue
+        op = resolve_join_cut_operator(str(e.get("comm_type") or ""), v)
+        if op in ("TRANSIENT_RETRY", "SELF_RECYCLE") or u == v or v == "loop_root":
+            continue
+        out_arity[u] = out_arity.get(u, 0) + 1
+        if _reaches(v, u):
+            cycle_edge_ids.append(str(e["id"]))
+            warnings.append(
+                f"Edge '{e['id']}' ({u} -> {v}) forms a non-retry cycle (genus g >= 1 chord); hop cap enforced."
+            )
+        else:
+            forward_adj.setdefault(u, set()).add(v)
+
+    arity_violations = [
+        {"node_id": nid, "children": cnt, "max_m": branching_m}
+        for nid, cnt in out_arity.items()
+        if cnt > branching_m
+    ]
+    for av in arity_violations:
+        warnings.append(
+            f"Node '{av['node_id']}' has forward fan-out {av['children']} > m={branching_m} (will auto-route child branches)."
+        )
+
+    has_arbiter = any(
+        resolve_join_cut_operator(str(e.get("comm_type") or ""), str(e.get("to") or "")) == "ARBITER"
+        or s.get("step_type") == "qa"
+        or s.get("agent_role") == "critic_verifier"
+        for e in norm_edges
+        for s in norm_steps[:1]
+    ) or any(s.get("step_type") == "qa" or s.get("agent_role") == "critic_verifier" for s in norm_steps)
+    has_log_fin = any(
+        resolve_join_cut_operator(str(e.get("comm_type") or ""), str(e.get("to") or "")) == "LOG_FIN"
+        or e.get("condition") == "on_pass"
+        for e in norm_edges
+    )
+    genus_zero_valid = len(cycle_edge_ids) == 0
+    return {
+        "ok": genus_zero_valid and len(arity_violations) == 0,
+        "genus_zero_valid": genus_zero_valid,
+        "branching_m": branching_m,
+        "node_count": len(norm_steps),
+        "edge_count": len(norm_edges),
+        "cycle_edge_ids": cycle_edge_ids,
+        "arity_violations": arity_violations,
+        "has_arbiter_gate": has_arbiter,
+        "has_log_fin_gate": has_log_fin,
+        "warnings": warnings,
+    }
 
 CODESIGNER_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -289,8 +458,13 @@ def normalize_workflow_edges(raw_edges: Any) -> list[dict[str, Any]]:
             continue
         comm = str(item.get("comm_type") or "pass_off").strip().lower()
         if comm not in VALID_A2A_COMM_TYPES:
-            comm = "loop" if comm in ("retry", "cycle", "feedback") else "pass_off"
-        default_cond = "on_needs_work" if comm == "loop" else "always"
+            comm = "loop" if comm in ("retry", "cycle", "feedback", "transient_retry") else "pass_off"
+        if comm == "loop" and src != dst and dst != "loop_root":
+            default_cond = "on_needs_work"
+        elif comm == "log_fin_gate":
+            default_cond = "on_pass"
+        else:
+            default_cond = "always"
         cond = str(item.get("condition") or default_cond).strip().lower()
         if cond not in VALID_A2A_CONDITIONS:
             cond = default_cond
@@ -302,6 +476,7 @@ def normalize_workflow_edges(raw_edges: Any) -> list[dict[str, Any]]:
             max_payload_bytes = max(512, int(item.get("max_payload_bytes"))) if item.get("max_payload_bytes") else 0
         except (TypeError, ValueError):
             max_payload_bytes = 0
+        default_payload_mode = "summary_only" if comm == "bridge_handoff" else "full_envelope"
         eid = str(item.get("id") or f"edge_{idx}_{src}_{dst}").strip()
         if not eid or eid in seen_ids:
             eid = f"edge_{idx}_{uuid.uuid4().hex[:6]}"
@@ -311,10 +486,11 @@ def normalize_workflow_edges(raw_edges: Any) -> list[dict[str, Any]]:
             "from": src,
             "to": dst,
             "comm_type": comm,
+            "jc_op": resolve_join_cut_operator(comm, dst),
             "condition": cond,
             "condition_expr": str(item.get("condition_expr") or "").strip(),
             "max_loops": max_loops,
-            "payload_mode": str(item.get("payload_mode") or "full_envelope").strip(),
+            "payload_mode": str(item.get("payload_mode") or default_payload_mode).strip(),
             "message_template": str(item.get("message_template") or item.get("label") or "").strip(),
         }
         if max_payload_bytes > 0:
@@ -333,6 +509,10 @@ class AutomationEngine:
         gemini_caller: Callable[[str, dict[str, Any] | None], str] | None = None,
         swarm_caller: Callable[[str, str], dict[str, Any]] | None = None,
         agent_caller: Callable[[str, str, str, str], dict[str, Any]] | None = None,
+        join_cut_registry: Any | None = None,
+        blackboard: Any | None = None,
+        workspace_tool_executor: Callable[[str, bool], tuple[bool, str, list[str]]] | None = None,
+        branching_order: int = 3,
     ) -> None:
         self.db_path = Path(db_path) if db_path else DEFAULT_AUTOMATIONS_DB
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -340,10 +520,125 @@ class AutomationEngine:
         self.gemini_caller = gemini_caller
         self.swarm_caller = swarm_caller
         self.agent_caller = agent_caller
+        self.join_cut_registry = join_cut_registry
+        self.blackboard = blackboard
+        self.workspace_tool_executor = workspace_tool_executor
+        self.branching_order = max(2, int(branching_order or 3))
         self._lock = threading.RLock()
+        self._progress_lock = threading.Lock()
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._active_progress: dict[str, dict[str, Any]] = {}
         self._stop_event = threading.Event()
         self._worker_thread: threading.Thread | None = None
         self._init_db()
+
+    def _get_join_cut_registry(self) -> Any | None:
+        if self.join_cut_registry is not None:
+            return self.join_cut_registry
+        if JoinCutRegistry is None:
+            return None
+        with self._lock:
+            sidecar = getattr(self, "_default_jc_sidecar", None)
+            if sidecar is None:
+                jc_path = self.db_path.with_name(f"{self.db_path.stem}_join_cut.sqlite3")
+                sidecar = JoinCutRegistry(jc_path)
+                self._default_jc_sidecar = sidecar
+            return sidecar
+
+    def validate_workflow_topology(self, spec: dict[str, Any]) -> dict[str, Any]:
+        jc_reg = self._get_join_cut_registry()
+        m_cap = int(jc_reg.params.m) if jc_reg is not None else 6
+        return analyze_workflow_topology(
+            list(spec.get("steps") or []),
+            list(spec.get("edges") or []),
+            branching_m=m_cap,
+        )
+
+    def get_active_progress(self, loop_id: str | None = None) -> dict[str, Any]:
+        with self._progress_lock:
+            if loop_id:
+                rec = self._active_progress.get(loop_id)
+                return dict(rec) if isinstance(rec, dict) else {}
+            return {k: dict(v) for k, v in self._active_progress.items()}
+
+    def _set_progress(self, loop_id: str, payload: dict[str, Any] | None) -> None:
+        with self._progress_lock:
+            if payload is None:
+                self._active_progress.pop(loop_id, None)
+            else:
+                self._active_progress[loop_id] = {**payload, "updated_at": time.time()}
+
+    def cancel_run(self, target_id: str = "") -> dict[str, Any]:
+        """Signal cooperative cancellation for an active run_id or loop_id (or all active runs if empty)."""
+        clean = str(target_id or "").strip()
+        signaled: list[str] = []
+        with self._progress_lock:
+            if not clean:
+                for k, ev in self._cancel_events.items():
+                    ev.set()
+                    signaled.append(k)
+            else:
+                for k, ev in self._cancel_events.items():
+                    if k == clean:
+                        ev.set()
+                        signaled.append(k)
+                for lp_id, prog in self._active_progress.items():
+                    rid = str(prog.get("run_id") or "")
+                    if clean in (lp_id, rid):
+                        for key_cand in (lp_id, rid):
+                            ev = self._cancel_events.get(key_cand)
+                            if ev is not None:
+                                ev.set()
+                                if key_cand not in signaled:
+                                    signaled.append(key_cand)
+        return {"ok": True, "signaled": signaled}
+
+    def initiate_loop_async(self, spec: dict[str, Any]) -> dict[str, Any]:
+        """Save loop and launch execution on a background daemon thread so UI stays live and cancellable."""
+        merged = {**spec, "enabled": True}
+        saved_res = self.save_loop(merged)
+        if not saved_res.get("ok") or not saved_res.get("loop"):
+            return saved_res
+        loop_obj = saved_res["loop"]
+        loop_id = str(loop_obj["id"])
+        self._transient_loop_opts = getattr(self, "_transient_loop_opts", {})
+        for k in ("max_payload_bytes", "sbv_drift_threshold"):
+            if k in spec:
+                self._transient_loop_opts[(loop_id, k)] = spec[k]
+
+        cancel_ev = threading.Event()
+        with self._progress_lock:
+            self._cancel_events[loop_id] = cancel_ev
+        self._set_progress(
+            loop_id,
+            {
+                "loop_id": loop_id,
+                "status": "running",
+                "phase": "STARTING JOIN-CUT WORKFLOW",
+                "active_node_id": "loop_root",
+                "active_edge_id": "",
+                "completed_node_ids": ["loop_root"],
+            },
+        )
+
+        def _worker() -> None:
+            try:
+                self.run_loop_now(loop_id, cancel_event=cancel_ev)
+            except Exception as exc:
+                self._set_progress(
+                    loop_id,
+                    {"loop_id": loop_id, "status": "failed", "phase": f"ERROR: {exc}", "error": str(exc)},
+                )
+
+        t = threading.Thread(target=_worker, name=f"sabrina-jc-workflow-{loop_id}", daemon=True)
+        t.start()
+        return {
+            "ok": True,
+            "async": True,
+            "status": "running",
+            "loop": loop_obj,
+            "topology": self.validate_workflow_topology(loop_obj),
+        }
 
     @contextmanager
     def _db(self):
@@ -692,15 +987,36 @@ class AutomationEngine:
         max_payload_bytes: int | None = None,
     ) -> dict[str, Any]:
         from_id = str(edge.get("from") or "")
+        comm = str(edge.get("comm_type") or "pass_off")
+        jc_op = resolve_join_cut_operator(comm, str(edge.get("to") or ""))
         source_output = next(
             (o for o in reversed(prior_outputs) if o.get("node_id") == from_id),
             prior_outputs[-1] if prior_outputs else None,
         )
-        payload_mode = str(edge.get("payload_mode") or "full_envelope")
+        payload_mode = str(edge.get("payload_mode") or ("summary_only" if comm == "bridge_handoff" else "full_envelope"))
         raw_res = source_output.get("result") if isinstance(source_output, dict) else None
-        if payload_mode == "summary_only":
+
+        # Enforce SharingPolicy seam bounds on explicit Join-Cut bridge_handoff edges
+        seam_max_chars = 3200 if SharingPolicy is None else SharingPolicy().max_excerpt_chars
+        seam_capped = False
+        if comm == "bridge_handoff" and payload_mode != "raw_output":
+            txt_candidate = (
+                str(raw_res.get("text", ""))
+                if isinstance(raw_res, dict) and "text" in raw_res
+                else json.dumps(cls._compact_json_safe(raw_res, max_str_chars=seam_max_chars), default=str)
+            )
+            if len(txt_candidate) > seam_max_chars:
+                seam_capped = True
+            payload_val: Any = {
+                "seam": "bridge_sharing_policy",
+                "artifact_kind": "summary" if payload_mode == "summary_only" else "handoff",
+                "source_step": from_name,
+                "cantor_path": source_output.get("cantor_path") if isinstance(source_output, dict) else None,
+                "summary": cls._compact_text_preserving_ends(txt_candidate, seam_max_chars),
+            }
+        elif payload_mode == "summary_only":
             if isinstance(raw_res, dict) and raw_res.get("text"):
-                payload_val: Any = cls._compact_text_preserving_ends(str(raw_res["text"]), 1800)
+                payload_val = cls._compact_text_preserving_ends(str(raw_res["text"]), 1800)
             else:
                 payload_val = cls._compact_json_safe(raw_res, max_str_chars=1200) if raw_res else ""
         elif payload_mode == "raw_output":
@@ -730,12 +1046,13 @@ class AutomationEngine:
             "from_name": from_name,
             "to": edge.get("to", ""),
             "to_name": to_name,
-            "comm_type": edge.get("comm_type", "pass_off"),
+            "comm_type": comm,
+            "jc_op": jc_op,
             "condition": edge.get("condition", "always"),
             "hop": hop,
             "payload_mode": payload_mode,
             "payload_bytes": payload_bytes,
-            "budget_capped": budget_capped,
+            "budget_capped": budget_capped or seam_capped,
             "instruction": str(edge.get("message_template") or ""),
             "payload": payload_val,
         }
@@ -755,9 +1072,15 @@ class AutomationEngine:
             if isinstance(incoming_a2a, list)
             else ([incoming_a2a] if isinstance(incoming_a2a, dict) else [])
         )
-        prior_window = prior_outputs[-2:] if a2a_batch else prior_outputs[-3:]
-        prior_char_budget = 1200 if a2a_batch else 3600
-        compact_priors = self._compact_json_safe(prior_window, max_str_chars=prior_char_budget) if prior_window else []
+        if a2a_batch:
+            # Scope context strictly to upstream sender lineage so unrelated speculative LOG_da drafts do not leak across seams
+            sender_ids = {str(env_item.get("from") or "") for env_item in a2a_batch}
+            scoped_priors = [o for o in prior_outputs if str(o.get("node_id") or "") in sender_ids][-2:]
+            prior_char_budget = 900
+        else:
+            scoped_priors = prior_outputs[-3:]
+            prior_char_budget = 3600
+        compact_priors = self._compact_json_safe(scoped_priors, max_str_chars=prior_char_budget) if scoped_priors else []
         context_blob = json.dumps(compact_priors, default=str)
         a2a_section = ""
         if a2a_batch:
@@ -769,8 +1092,9 @@ class AutomationEngine:
                     if isinstance(raw_payload, str)
                     else json.dumps(self._compact_json_safe(raw_payload, max_str_chars=14000), default=str)
                 )
+                op_tag = env_item.get("jc_op") or str(env_item.get("comm_type", "pass_off")).upper()
                 blocks.append(
-                    f"Incoming A2A ({env_item.get('comm_type', 'pass_off').upper()} from "
+                    f"Incoming Join-Cut A2A ({op_tag} [{env_item.get('comm_type', 'pass_off')}] from "
                     f"{env_item.get('from_name', env_item.get('from', 'upstream'))}, hop #{env_item.get('hop', 1)}):\n"
                     + (f"Handoff Instruction: {env_item['instruction']}\n" if env_item.get("instruction") else "")
                     + f"Payload:\n{payload_str}"
@@ -790,10 +1114,20 @@ class AutomationEngine:
             role = str(step.get("agent_role") or loop.get("agent_role") or "execution_specialist")
             model_id = str(step.get("model_id") or loop.get("model_id") or "")
             prompt_tpl = str(step.get("prompt_template") or loop.get("goal") or f"Execute {role} responsibilities.")
+            allow_writes = (
+                step.get("kind") == "write"
+                and loop.get("approval_policy") == "never"
+            ) or bool(params.get("allow_workspace_writes"))
+            tool_hint = (
+                " You may inspect repository files before answering using fenced ```tool:search\\n<pattern>\\n``` "
+                "or ```tool:read_file\\n<path>:1-120\\n``` blocks."
+                if self.workspace_tool_executor is not None
+                else ""
+            )
             sys_prompt = (
-                f"You are an autonomous Sabrina swarm agent acting in role '{role}'. "
-                "Follow incoming A2A handoff instructions carefully. If acting as a critic/verifier, "
-                "prefix 'PASS:' when verified or 'NEEDS_WORK:' if another revision loop is needed."
+                f"You are an autonomous Sabrina Join-Cut swarm agent acting in role '{role}'. "
+                "Follow incoming Join-Cut seam & arbiter handoff instructions carefully. If acting as an arbiter/critic/verifier, "
+                f"prefix 'PASS:' when verified or 'NEEDS_WORK:' if a bounded retry is needed.{tool_hint}"
             )
             user_prompt = (
                 f"Loop Goal: {loop.get('goal', '')}\n\n"
@@ -802,7 +1136,25 @@ class AutomationEngine:
             )
             if self.agent_caller:
                 try:
-                    llm_res = self.agent_caller(role, model_id, sys_prompt, user_prompt)
+                    llm_res = dict(self.agent_caller(role, model_id, sys_prompt, user_prompt) or {})
+                    if self.workspace_tool_executor is not None and isinstance(llm_res.get("text"), str):
+                        has_tools, tool_obs, files_written = self.workspace_tool_executor(
+                            llm_res["text"], bool(allow_writes)
+                        )
+                        if has_tools and tool_obs:
+                            followup_prompt = (
+                                f"{user_prompt}\n\nWorkspace Tool Observations:\n{tool_obs}\n\n"
+                                "Provide your final deliverable incorporating these verified workspace observations."
+                            )
+                            llm_res2 = dict(self.agent_caller(role, model_id, sys_prompt, followup_prompt) or {})
+                            if llm_res2.get("ok", True) and llm_res2.get("text"):
+                                _, _, extra_written = self.workspace_tool_executor(
+                                    str(llm_res2["text"]), bool(allow_writes)
+                                )
+                                files_written = list(dict.fromkeys([*files_written, *extra_written]))
+                                llm_res = llm_res2
+                        if files_written:
+                            llm_res["files_written"] = files_written
                     return {"step": step.get("name", role), "type": "agent", "agent_role": role, "result": llm_res}
                 except Exception as exc:
                     return {"step": step.get("name", role), "type": "agent", "agent_role": role, "result": {"ok": False, "error": str(exc)}}
@@ -931,13 +1283,17 @@ class AutomationEngine:
 
         return {"step": step.get("name", "Unknown"), "type": step_type, "result": {"ok": False, "error": f"Unknown step_type {step_type}"}}
 
-    def run_loop_now(self, loop_id: str) -> dict[str, Any]:
+    def run_loop_now(self, loop_id: str, cancel_event: threading.Event | None = None) -> dict[str, Any]:
         loop = self.get_loop(loop_id)
         if not loop:
             return {"ok": False, "error": "Loop not found"}
         now = time.time()
         iteration = int(loop.get("current_iteration") or 0) + 1
         run_id = f"run_{uuid.uuid4().hex[:12]}"
+        eff_cancel = cancel_event or threading.Event()
+        with self._progress_lock:
+            self._cancel_events[loop_id] = eff_cancel
+            self._cancel_events[run_id] = eff_cancel
         with self._db() as db:
             db.execute(
                 """
@@ -953,7 +1309,13 @@ class AutomationEngine:
                 "UPDATE automation_loops SET status='running', current_iteration=?, last_run=?, updated_at=? WHERE id=?",
                 (iteration, now, now, loop_id),
             )
-        return self._advance_run(run_id)
+        try:
+            return self._advance_run(run_id, cancel_event=eff_cancel)
+        finally:
+            with self._progress_lock:
+                self._cancel_events.pop(run_id, None)
+                if self._cancel_events.get(loop_id) is eff_cancel:
+                    self._cancel_events.pop(loop_id, None)
 
     def _finalize_run(
         self,
@@ -964,6 +1326,10 @@ class AutomationEngine:
         edge_counts: dict[str, int],
         a2a_events: list[dict[str, Any]],
         goal_history: list[str] | None = None,
+        *,
+        fail_closed_reason: str = "",
+        cancelled: bool = False,
+        join_cut_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         now = time.time()
         run_id = run["id"]
@@ -993,44 +1359,80 @@ class AutomationEngine:
             effective_fb_goal = (goal_history[-1] if goal_history else "") or str(loop.get("goal") or "")
             recommended_next_goal = extract_recommended_next_goal(last_txt, effective_fb_goal)
 
-        if loop["loop_type"] in ("goal_until_done", "autonomous_a2a"):
+        terminal_failed = bool(fail_closed_reason) or cancelled
+        if not terminal_failed and outputs:
+            last_out = outputs[-1]
+            last_res = last_out.get("result") if isinstance(last_out.get("result"), dict) else {}
+            last_ok = bool(last_res.get("ok", True))
+            last_txt_check = str(last_res.get("text") if "text" in last_res else "")
+            _, last_needs_work, _ = evaluate_step_verdict(last_ok, last_txt_check, last_res)
+            if last_needs_work and (
+                last_out.get("type") == "qa"
+                or last_out.get("agent_role") in ("critic_verifier", "qa_verifier")
+            ):
+                terminal_failed = True
+                fail_closed_reason = fail_closed_reason or f"Gate '{last_out.get('step', 'Verifier')}' did not pass verification"
+
+        if not terminal_failed and loop["loop_type"] in ("goal_until_done", "autonomous_a2a"):
+            seen_nodes: set[str] = set()
             for out_item in reversed(outputs):
+                nid = str(out_item.get("node_id") or out_item.get("step") or "")
+                if nid and nid in seen_nodes:
+                    continue
+                if nid:
+                    seen_nodes.add(nid)
                 res_d = out_item.get("result")
                 if isinstance(res_d, dict):
-                    txt = str(res_d.get("text", "")).lower()
-                    if '"goal_met": true' in txt or "goal_met=true" in txt or txt.lstrip().startswith("pass:"):
+                    ok_d = bool(res_d.get("ok", True))
+                    txt_d = str(res_d.get("text", ""))
+                    exp_pass, n_work, _ = evaluate_step_verdict(ok_d, txt_d, res_d)
+                    if n_work:
+                        continue
+                    if exp_pass:
                         goal_met = True
                         break
-                    if out_item.get("type") == "recommend_next" and res_d.get("ok", True):
+                    if out_item.get("type") == "recommend_next" and ok_d:
                         goal_met = True
                         break
-            if not goal_met and any(ev.get("condition") == "on_pass" for ev in a2a_events):
-                if outputs and isinstance(outputs[-1].get("result"), dict) and outputs[-1]["result"].get("ok", True):
-                    goal_met = True
-            if int(run["iteration"]) >= int(loop["max_iterations"]):
+            if not goal_met and outputs:
+                last_res = outputs[-1].get("result")
+                if isinstance(last_res, dict) and last_res.get("ok", True):
+                    _, last_nw, _ = evaluate_step_verdict(True, str(last_res.get("text", "")), last_res)
+                    if not last_nw and any(ev.get("condition") == "on_pass" for ev in a2a_events):
+                        goal_met = True
+            if not goal_met and loop["loop_type"] == "goal_until_done" and int(run["iteration"]) >= int(loop["max_iterations"]):
                 goal_met = True
 
+        run_status = "cancelled" if cancelled else ("failed" if fail_closed_reason else "completed")
         next_run = None
-        new_loop_status = "completed" if (loop["loop_type"] == "goal_until_done" and goal_met) else "idle"
+        if run_status == "failed":
+            new_loop_status = "failed"
+        elif loop["loop_type"] == "goal_until_done" and goal_met:
+            new_loop_status = "completed"
+        else:
+            new_loop_status = "idle"
         new_enabled = 0 if new_loop_status == "completed" else (1 if loop["enabled"] else 0)
         if new_enabled and loop["loop_type"] == "recurring_interval":
             next_run = now + int(loop["interval_minutes"]) * 60
 
+        err_msg = "Cancelled by operator" if cancelled else (fail_closed_reason or None)
         with self._db() as db:
             db.execute(
                 """
                 UPDATE automation_runs
-                SET status='completed', current_step_index=?, execution_queue_json=NULL,
+                SET status=?, current_step_index=?, execution_queue_json=NULL,
                     edge_counts_json=?, a2a_events_json=?, pending_approval_json=NULL,
-                    step_outputs_json=?, goal_met=?, finished_at=?
+                    step_outputs_json=?, goal_met=?, error=?, finished_at=?
                 WHERE id=?
                 """,
                 (
+                    run_status,
                     idx,
                     json.dumps(edge_counts),
                     json.dumps(a2a_events),
                     json.dumps(outputs),
                     1 if goal_met else 0,
+                    err_msg,
                     now,
                     run_id,
                 ),
@@ -1039,15 +1441,33 @@ class AutomationEngine:
                 "UPDATE automation_loops SET status=?, enabled=?, next_run=?, updated_at=? WHERE id=?",
                 (new_loop_status, new_enabled, next_run, now, loop["id"]),
             )
+        self._set_progress(
+            loop["id"],
+            {
+                "loop_id": loop["id"],
+                "run_id": run_id,
+                "status": run_status,
+                "phase": f"{run_status.upper()} · {len(a2a_events)} Join-Cut hops",
+                "active_node_id": "",
+                "active_edge_id": "",
+                "completed_node_ids": ["loop_root", *[str(o.get("node_id") or "") for o in outputs if o.get("node_id")]],
+                "join_cut": join_cut_summary or {},
+                "recommended_next_goal": recommended_next_goal if run_status == "completed" else "",
+                "goal_history": list(goal_history) if goal_history else [],
+                "error": err_msg or "",
+            },
+        )
         return {
-            "ok": True,
-            "status": "completed",
+            "ok": run_status != "failed",
+            "status": run_status,
             "run_id": run_id,
             "goal_met": goal_met,
+            "error": err_msg,
             "recommended_next_goal": recommended_next_goal,
             "goal_history": list(goal_history) if goal_history else ([str(loop.get("goal") or "")] if loop.get("goal") else []),
             "outputs": outputs,
             "a2a_events": a2a_events,
+            "join_cut": join_cut_summary or {},
         }
 
     def _advance_run_graph(
@@ -1057,6 +1477,7 @@ class AutomationEngine:
         steps: list[dict[str, Any]],
         edges: list[dict[str, Any]],
         approved_override: dict[str, Any] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         run_id = run["id"]
         outputs: list[dict[str, Any]] = list(run.get("step_outputs") or [])
@@ -1086,7 +1507,160 @@ class AutomationEngine:
             src = _canon_id(str(e.get("from") or ""))
             dst = _canon_id(str(e.get("to") or ""))
             if (src == "loop_root" or src in id_map) and (dst == "loop_root" or dst in id_map):
-                norm_edges.append({**e, "from": src, "to": dst})
+                norm_edges.append(
+                    {
+                        **e,
+                        "from": src,
+                        "to": dst,
+                        "jc_op": resolve_join_cut_operator(str(e.get("comm_type") or ""), dst),
+                    }
+                )
+
+        forward_adj: dict[str, set[str]] = {}
+        cycle_edge_ids: set[str] = set()
+
+        def _can_reach_forward(src: str, dst: str, seen: set[str] | None = None) -> bool:
+            if src == dst:
+                return True
+            visited = seen if seen is not None else set()
+            if src in visited:
+                return False
+            visited.add(src)
+            for nxt in forward_adj.get(src, ()):
+                if _can_reach_forward(nxt, dst, visited):
+                    return True
+            return False
+
+        for e in norm_edges:
+            u, v = e["from"], e["to"]
+            if u == "loop_root" or v == "loop_root" or e["comm_type"] == "loop" or u == v:
+                continue
+            if _can_reach_forward(v, u):
+                cycle_edge_ids.add(e["id"])
+            else:
+                forward_adj.setdefault(u, set()).add(v)
+
+        jc_reg = self._get_join_cut_registry()
+        jc_leases: dict[str, dict[str, Any]] = {}
+        jc_settled_paths: list[str] = []
+        jc_pruned_paths: list[str] = []
+
+        topo = EulerianSwarmTopology(m=self.branching_order) if EulerianSwarmTopology is not None else None
+        promo_gate = (
+            LogFinPromotionGate(
+                topo,
+                checkers={
+                    "deliverable": lambda p: (
+                        bool(p.get("ok", True)) and not bool(p.get("needs_work", False)),
+                        "verified_log_fin",
+                    )
+                },
+            )
+            if (topo is not None and LogFinPromotionGate is not None)
+            else None
+        )
+        node_to_hub: dict[str, str] = {}
+        node_to_slot: dict[str, str] = {}
+        if topo is not None:
+            root_hub = topo.create_sphere(label=str(loop.get("name") or "root"), owner_worker_id="loop_root")
+            node_to_hub["loop_root"] = root_hub
+            node_to_slot["loop_root"] = root_hub
+
+        def _ensure_eulerian_slot(src_id: str, dst_id: str, jc_op: str) -> str:
+            if topo is None or dst_id == "loop_root":
+                return ""
+            if dst_id in node_to_slot:
+                return node_to_slot[dst_id]
+            src_hub = node_to_hub.get(src_id) or node_to_hub.get("loop_root") or ""
+            if not src_hub or src_hub not in topo.nodes:
+                return ""
+            try:
+                if jc_op == "ARBITER":
+                    arb_id = topo.expand_hub(src_hub, label=_node_name(dst_id), owner_worker_id=dst_id)
+                    node_to_hub[dst_id] = src_hub
+                    node_to_slot[dst_id] = arb_id
+                    return arb_id
+                if jc_op == "BRIDGE" and src_id != "loop_root":
+                    b_leaf = next(
+                        (nb for nb in topo.nodes[src_hub].neighbors if topo.nodes[nb].kind == "b_leaf"),
+                        None,
+                    )
+                    if b_leaf is not None:
+                        pol = SharingPolicy() if SharingPolicy is not None else None
+                        new_hub, _bridge_id = topo.graft_new_hub(
+                            b_leaf,
+                            policy=pol,
+                            hub_label=_node_name(dst_id),
+                            bridge_label=f"{src_id}->{dst_id}",
+                            hub_worker_id=dst_id,
+                        )
+                        node_to_hub[dst_id] = new_hub
+                        node_to_slot[dst_id] = new_hub
+                        return new_hub
+                node_to_hub[dst_id] = src_hub
+                b_slot = next(
+                    (nb for nb in topo.nodes[src_hub].neighbors if topo.nodes[nb].kind == "b_leaf"),
+                    src_hub,
+                )
+                node_to_slot[dst_id] = b_slot
+                return b_slot
+            except Exception:
+                node_to_hub[dst_id] = src_hub
+                node_to_slot[dst_id] = src_hub
+                return src_hub
+
+        def _settle_jc_node(nid: str, outcome: str, digest_text: str = "") -> str | None:
+            lease = jc_leases.pop(nid, None)
+            if jc_reg is None or not lease:
+                return None
+            c_path = str(lease["path"])
+            try:
+                if outcome == "retry":
+                    rel = jc_reg.release_transient(
+                        c_path, lease["owner"], int(lease["epoch"]), permanent_abort=False
+                    )
+                    if getattr(rel, "status", "") == "TOMBSTONED_PRUNED":
+                        jc_pruned_paths.append(c_path)
+                    return getattr(rel, "status", "RELEASED_FOR_RETRY")
+                if outcome == "cancelled":
+                    jc_reg.release_transient(
+                        c_path, lease["owner"], int(lease["epoch"]), permanent_abort=False
+                    )
+                    return "RELEASED_CANCELLED"
+                if outcome == "semantic_failure":
+                    jc_reg.settle_or_join(
+                        c_path, owner_id=lease["owner"], lease_epoch=int(lease["epoch"]), outcome="semantic_failure"
+                    )
+                    jc_pruned_paths.append(c_path)
+                    return "TOMBSTONED_PRUNED"
+                dig = hashlib.sha256(digest_text.encode("utf-8")).digest() if digest_text else None
+                jc_reg.settle_or_join(
+                    c_path,
+                    owner_id=lease["owner"],
+                    lease_epoch=int(lease["epoch"]),
+                    outcome="completed",
+                    result_digest=dig,
+                )
+                jc_settled_paths.append(c_path)
+                return "JOINED"
+            except Exception:
+                return None
+
+        def _settle_all_remaining_leases(default_outcome: str = "completed") -> None:
+            for nid in list(jc_leases.keys()):
+                _settle_jc_node(nid, default_outcome)
+
+        retry_target_nodes: set[str] = {
+            e["to"]
+            for e in norm_edges
+            if e["to"] != "loop_root" and (e["comm_type"] == "loop" or e["condition"] == "on_needs_work")
+        }
+        max_retry_by_target: dict[str, int] = {}
+        for e in norm_edges:
+            if e["to"] in retry_target_nodes:
+                max_retry_by_target[e["to"]] = max(
+                    max_retry_by_target.get(e["to"], 1), int(e.get("max_loops") or 3) + 1
+                )
 
         saved_queue = run.get("execution_queue")
         if isinstance(saved_queue, list):
@@ -1099,11 +1673,12 @@ class AutomationEngine:
                     eid = re_item["id"]
                     edge_counts[eid] = edge_counts.get(eid, 0) + 1
                     hop = edge_counts[eid]
+                    _ensure_eulerian_slot("loop_root", re_item["to"], re_item["jc_op"])
                     env = self._format_a2a_envelope(re_item, _node_name("loop_root"), _node_name(re_item["to"]), outputs, hop)
                     a2a_events.append(
                         {
                             k: env[k]
-                            for k in ("edge_id", "from", "from_name", "to", "to_name", "comm_type", "condition", "hop", "instruction")
+                            for k in ("edge_id", "from", "from_name", "to", "to_name", "comm_type", "jc_op", "condition", "hop", "instruction")
                         }
                     )
                     queue.append({"node_id": re_item["to"], "incoming_edge": re_item, "incoming_a2a": env})
@@ -1111,41 +1686,50 @@ class AutomationEngine:
                 non_loop_targets = {
                     e["to"]
                     for e in norm_edges
-                    if e["from"] != "loop_root" and e["to"] != "loop_root" and e["comm_type"] != "loop" and e["from"] != e["to"]
+                    if e["from"] != "loop_root"
+                    and e["to"] != "loop_root"
+                    and e["comm_type"] != "loop"
+                    and e["id"] not in cycle_edge_ids
+                    and e["from"] != e["to"]
                 }
                 entry_ids = [str(s["id"]) for s in steps if str(s["id"]) not in non_loop_targets]
                 if not entry_ids and steps:
                     entry_ids = [str(steps[0]["id"])]
                 for eid_node in entry_ids:
+                    _ensure_eulerian_slot("loop_root", eid_node, "CUT")
                     queue.append({"node_id": eid_node, "incoming_edge": None, "incoming_a2a": None})
-
-        forward_parents: dict[str, set[str]] = {}
-        for e in norm_edges:
-            if e["from"] != "loop_root" and e["to"] != "loop_root" and e["comm_type"] != "loop" and e["from"] != e["to"]:
-                forward_parents.setdefault(e["to"], set()).add(e["from"])
 
         resumed_first = approved_override is not None
         max_hops = max(32, len(steps) * 8)
         hops = 0
         defer_guard = 0
+        self_cycle_idx = 0
         last_step_idx = int(run.get("current_step_index") or 0)
         active_goal = str(loop.get("goal") or "")
         goal_history: list[str] = [active_goal] if active_goal else []
         latest_next_goal = ""
+        completed_node_ids: list[str] = ["loop_root", *[str(o.get("node_id") or "") for o in outputs if o.get("node_id")]]
+        fail_closed_reason = ""
+        cancelled = False
 
         while queue and hops < max_hops:
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled = True
+                break
+
             item = queue.pop(0)
             if isinstance(item.get("evolved_goal"), str) and item["evolved_goal"].strip():
                 active_goal = item["evolved_goal"].strip()
+            if isinstance(item.get("self_cycle_idx"), int):
+                self_cycle_idx = item["self_cycle_idx"]
             node_id = _canon_id(str(item.get("node_id") or ""))
             pair = id_map.get(node_id)
             if not pair:
                 continue
 
-            parents_needed = forward_parents.get(node_id) or set()
-            if len(parents_needed) > 1 and queue and defer_guard <= len(steps) * 2:
-                queued_ids = {_canon_id(str(q.get("node_id") or "")) for q in queue}
-                if parents_needed & queued_ids:
+            queued_other_ids = {_canon_id(str(q.get("node_id") or "")) for q in queue} - {node_id}
+            if queued_other_ids and defer_guard <= max(8, len(steps) * 4):
+                if any(_can_reach_forward(qid, node_id) for qid in queued_other_ids):
                     queue.append(item)
                     defer_guard += 1
                     continue
@@ -1175,6 +1759,7 @@ class AutomationEngine:
                         f"to '{_node_name(node_id)}' requires operator approval"
                     )
                 if needs_hitl:
+                    _settle_all_remaining_leases("completed")
                     paused_queue = [item] + queue
                     pending = {
                         "step_index": step_idx,
@@ -1208,6 +1793,18 @@ class AutomationEngine:
                             "UPDATE automation_loops SET status='waiting_approval', updated_at=? WHERE id=?",
                             (time.time(), loop["id"]),
                         )
+                    self._set_progress(
+                        loop["id"],
+                        {
+                            "loop_id": loop["id"],
+                            "run_id": run_id,
+                            "status": "waiting_approval",
+                            "phase": f"HITL GATE · {_node_name(node_id)}",
+                            "active_node_id": node_id,
+                            "active_edge_id": esc_edge["id"] if esc_edge else "",
+                            "completed_node_ids": list(completed_node_ids),
+                        },
+                    )
                     return {
                         "ok": True,
                         "status": "waiting_approval",
@@ -1215,6 +1812,60 @@ class AutomationEngine:
                         "pending_approval": pending,
                         "a2a_events": a2a_events,
                     }
+
+            cantor_path: str | None = None
+            sphere_meta: dict[str, float] | None = None
+            if jc_reg is not None:
+                try:
+                    owner_wid = f"{run_id}:{node_id}:h{hops + 1}"
+                    parent_src = str(inc_edges[-1].get("from") or "") if inc_edges else ""
+                    pref_parent = jc_leases.get(parent_src, {}).get("path") if parent_src else None
+                    cut_res = jc_reg.try_cut(
+                        "workflow_node",
+                        {
+                            "run_id": run_id,
+                            "self_cycle": self_cycle_idx,
+                            "node_id": node_id,
+                            "role": str(step.get("agent_role") or step.get("step_type") or "step"),
+                            "goal": active_goal,
+                        },
+                        owner_id=owner_wid,
+                        max_retries=max_retry_by_target.get(node_id, 4),
+                        preferred_parent=pref_parent,
+                    )
+                    if cut_res.allowed and cut_res.cantor_path is not None:
+                        cantor_path = cut_res.cantor_path
+                        jc_reg.mark_started(cantor_path, owner_wid, cut_res.lease_epoch)
+                        jc_leases[node_id] = {
+                            "path": cantor_path,
+                            "owner": owner_wid,
+                            "epoch": cut_res.lease_epoch,
+                        }
+                        n_rec = jc_reg.get_node(cantor_path)
+                        if n_rec is not None:
+                            sphere_meta = {
+                                "cx": round(n_rec.sphere.cx, 5),
+                                "cy": round(n_rec.sphere.cy, 5),
+                                "cz": round(n_rec.sphere.cz, 5),
+                                "r": round(n_rec.sphere.radius, 5),
+                            }
+                except Exception:
+                    cantor_path = None
+
+            active_inc_edge_id = str(inc_edges[-1].get("id") or "") if inc_edges else ""
+            self._set_progress(
+                loop["id"],
+                {
+                    "loop_id": loop["id"],
+                    "run_id": run_id,
+                    "status": "running",
+                    "phase": f"RUNNING {_node_name(node_id)}" + (f" [{cantor_path}]" if cantor_path else ""),
+                    "active_node_id": node_id,
+                    "active_edge_id": active_inc_edge_id,
+                    "cantor_path": cantor_path or "",
+                    "completed_node_ids": list(completed_node_ids),
+                },
+            )
 
             step_loop_view = {**loop, "goal": active_goal}
             step_res = self._execute_single_step(
@@ -1226,18 +1877,27 @@ class AutomationEngine:
             )
             step_res["node_id"] = node_id
             step_res["active_goal"] = active_goal
+            if cantor_path is not None:
+                step_res["cantor_path"] = cantor_path
+            if sphere_meta is not None:
+                step_res["bounding_sphere"] = sphere_meta
+            if node_id in node_to_slot:
+                step_res["eulerian_slot"] = node_to_slot[node_id]
             if inc_a2a_batch:
                 step_res["a2a_from"] = {
                     "from": inc_a2a_batch[-1].get("from"),
                     "comm_type": inc_a2a_batch[-1].get("comm_type"),
+                    "jc_op": inc_a2a_batch[-1].get("jc_op"),
                     "hop": inc_a2a_batch[-1].get("hop"),
                 }
                 if len(inc_a2a_batch) > 1:
                     step_res["a2a_coalesced_from"] = [
-                        {"from": x.get("from"), "comm_type": x.get("comm_type"), "hop": x.get("hop")}
+                        {"from": x.get("from"), "comm_type": x.get("comm_type"), "jc_op": x.get("jc_op"), "hop": x.get("hop")}
                         for x in inc_a2a_batch
                     ]
             outputs.append(step_res)
+            if node_id not in completed_node_ids:
+                completed_node_ids.append(node_id)
             hops += 1
 
             res_obj = step_res.get("result") if isinstance(step_res.get("result"), dict) else {}

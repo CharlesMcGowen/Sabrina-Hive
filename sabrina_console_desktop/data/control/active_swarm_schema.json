@@ -130,5 +130,51 @@
       "state": "ACTIVE",
       "goal": "Execute m-Eulerian RSI Join-Cut Macro-Cycle on Genus-0 Planar Topology"
     }
+  ],
+  "a2a_links": [
+    {
+      "id": "live_si_coord_plan",
+      "from": "sabrina",
+      "to": "eulerian-eval-hub",
+      "comm_type": "delegate_spawn",
+      "condition": "always",
+      "condition_expr": "",
+      "max_loops": 1,
+      "payload_mode": "full_envelope",
+      "message_template": "Decompose self-improvement architecture invariants across A2A engine, recovery_policy, and evo_bench."
+    },
+    {
+      "id": "live_si_plan_exec",
+      "from": "eulerian-eval-hub",
+      "to": "join-cut-bridge-worker",
+      "comm_type": "pass_off",
+      "condition": "always",
+      "condition_expr": "",
+      "max_loops": 1,
+      "payload_mode": "full_envelope",
+      "message_template": "Synthesize concrete self-improvement patch blueprint with diamond fan-in & hop-bound proofs."
+    },
+    {
+      "id": "live_si_exec_critic",
+      "from": "join-cut-bridge-worker",
+      "to": "outer-port-verifier",
+      "comm_type": "critique_gate",
+      "condition": "always",
+      "condition_expr": "",
+      "max_loops": 1,
+      "payload_mode": "full_envelope",
+      "message_template": "Audit against 5-point mathematical & code-grounded rubric."
+    },
+    {
+      "id": "live_si_critic_loop_exec",
+      "from": "outer-port-verifier",
+      "to": "join-cut-bridge-worker",
+      "comm_type": "loop",
+      "condition": "on_needs_work",
+      "condition_expr": "",
+      "max_loops": 2,
+      "payload_mode": "full_envelope",
+      "message_template": "Refine missing hop-bounds, diamond fan-in coalescing, or method citations until PASS."
+    }
   ]
 }
