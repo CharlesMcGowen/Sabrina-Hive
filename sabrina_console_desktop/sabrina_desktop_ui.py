@@ -2514,6 +2514,10 @@ class SabrinaDesktopBridge:
         )
         return res
 
+    def get_kraken_replacement_status(self) -> dict[str, Any]:
+        from sabrina_console_desktop.kraken_model_review import replacement_status
+        return replacement_status()
+
     def run_kraken_model_review(self) -> dict[str, Any]:
         try:
             from sabrina_console_desktop.kraken_model_review import fetch_paper_review_data, review

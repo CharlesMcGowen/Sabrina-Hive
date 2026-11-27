@@ -1,0 +1,11 @@
+{
+  "name": "sabrina-swarm",
+  "displayName": "Sabrina Swarm Bridge",
+  "description": "Connects Antigravity to Sabrina Swarm and Desktop Console for mission coordination, blackboard messaging, and telemetry.",
+  "version": "1.0.0",
+  "suggestedPrompts": [
+    "Check Sabrina swarm status and active workers",
+    "Read the latest messages from Sabrina's blackboard",
+    "Post an update to Sabrina swarm blackboard"
+  ]
+}

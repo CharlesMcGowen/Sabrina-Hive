@@ -37,8 +37,9 @@ def classify(text, status=None):
         return 'access_denied'
     # Gradio can complete successfully while its upstream model API rejects access.
     plain = re.sub(r'<[^>]+>', '', low).strip().lstrip('🔒❌⚠️ ').strip()
+    plain = re.sub(r'^(?:\*{1,2}|_{1,2}|`{1,3})', '', plain).lstrip()
     service_error = bool(re.match(r'(?:error(?:\s+(?:generating response|during chat|parsing chat messages|fetching url))?\s*:|an error occurred while)', plain))
-    if re.match(r'please (?:sign in|log in)\b', plain):
+    if re.match(r'(?:please\s+)?(?:sign in|log in)\b', plain):
         return 'auth_required'
     if re.match(r"\{['\"]success['\"]:\s*false\b", plain) and 'api key is required' in plain:
         return 'auth_required'

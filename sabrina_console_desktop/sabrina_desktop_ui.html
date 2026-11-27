@@ -1728,7 +1728,7 @@
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/research help">Research help</button>
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/plugin list">List plugins</button>
 <button type="button" class="btn-ghost chat-cmd" data-cmd='/plugin run kraken_console {"operation":"status"}'>Kraken status</button>
-<button type="button" class="btn-ghost chat-cmd" data-cmd='/plugin run kraken_monitor {"operation":"snapshot"}'>Kraken monitor</button>
+<button type="button" class="btn-ghost chat-cmd" data-cmd='/plugin run kraken_monitor {"operation":"dashboard"}'>Kraken monitor</button>
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/plugin help">Plugin help</button>
 
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/mission ">/mission</button>
@@ -1839,6 +1839,7 @@
                 <button id="btn-launch-kraken-gui" class="btn-ok" type="button" title="Open the standalone Sabrina Kraken Live & $1,000 Paper Desktop Monitor">🖥 Launch Kraken Desktop Monitor</button>
                 <button id="btn-run-kraken-qa" class="btn-ghost" type="button" title="Run deterministic Product QA (imports, headless Tcl/Tk GUI smoke, UI parity, unit tests)">🧪 Run Product QA Smoke Check</button>
                 <button id="btn-kraken-paper-review" class="btn-ghost" type="button" title="Send the simulated portfolio totals to Claude and GPT, then have Gemini review their findings">Review paper results with Claude, GPT &amp; Gemini</button>
+                <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View replacement paper trial</button>
                 <button id="btn-swarm-kraken-qa" class="btn-ghost" type="button" title="Dispatch the 4-agent Swarm in Product QA mode to audit the Kraken GUI product">⚡ Swarm QA Mission on Kraken</button>
                 <button id="btn-swarm-manage-kraken" class="btn-primary" type="button" title="Deploy the Swarm to autonomously monitor order-books, turnover velocity, and QuantOrb safety">🤖 Deploy Swarm Kraken Manager</button>
               </div>
@@ -3688,8 +3689,11 @@
           note.className = "km-mono km-small " + (blocked ? "km-amber" : "km-muted");
           note.style.marginTop = "5px";
           note.style.overflowWrap = "anywhere";
-          const label = current ? "Active strategy: " + current : "Active strategy unavailable";
-          note.textContent = blocked ? label + " • Replacement blocked: no distinct candidate" : label;
+          const retired = verdict.new_entries_allowed === false;
+          const label = current ? "Strategy: " + current : "Strategy unavailable";
+          const retirement = retired ? (verdict.retirement_status === "EXIT_ONLY" ? "Retired: exit only • " : "Retired: no new entries • ") : "";
+          const reason = verdict.reason === "waiting_for_existing_exits" ? "waiting for existing positions to exit" : (verdict.reason === "previously_failed" ? "candidate previously failed" : "no distinct candidate");
+          note.textContent = retirement + label + (blocked ? " • Replacement blocked: " + reason : "");
           card.appendChild(note);
         });
       }
@@ -14118,6 +14122,31 @@
           }
         });
       }
+      el("btn-kraken-replacement-status")?.addEventListener("click", async () => {
+        const feedback = el("kraken-qa-feedback");
+        const receipt = el("kraken-qa-receipt");
+        feedback.textContent = "Reading the paper portfolios and replacement trial…";
+        receipt.style.display = "none";
+        const result = await callBridge("Kraken", "get_kraken_replacement_status");
+        if (!result?.ok) {
+          feedback.textContent = result?.error || "Could not read the paper service.";
+          return;
+        }
+        const asMoney = number => new Intl.NumberFormat(undefined, {style:"currency", currency:"USD"}).format(number);
+        const trial = result.trial;
+        const names = {cash:"Cash", relative_breakout:"ETH/BTC breakout", hold_eth:"Buy and hold ETH"};
+        const lines = (result.portfolios || []).map(p =>
+          `${p.name} · generation ${p.generation} · ${p.status} · ${p.open_lots} open · ${asMoney(p.net_usd)}`);
+        if (trial?.books) {
+          lines.push("", `Trial through ${new Date(trial.ends_at * 1000).toLocaleString()} · ${trial.on_time_bars} on-time observations`);
+          Object.entries(trial.books).forEach(([name, book]) =>
+            lines.push(`${names[name] || name} · equity ${asMoney(book.equity_usd)} · ${book.closed} closed`));
+        }
+        if (trial?.finding || trial?.error || trial?.last_data_error) lines.push(trial.finding || trial.error || trial.last_data_error);
+        feedback.textContent = `Paper service updated ${result.age_seconds}s ago · Replacement trial ${trial?.status || "awaiting registration"}`;
+        receipt.textContent = lines.join("\n");
+        receipt.style.display = "block";
+      });
       const krakenReviewButton = el("btn-kraken-paper-review");
       if (krakenReviewButton) {
         krakenReviewButton.addEventListener("click", async () => {

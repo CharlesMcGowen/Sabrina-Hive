@@ -34,6 +34,16 @@
       "sender": "hive_council",
       "time": "04:20:28 PM",
       "text": "# Sabrina Swarm Mission Dispatched: `m-1c9f2610`\n\n- **Verdict:** PASS\n- **Anti-FOMO Blocker Removal:** Verified. `MAX_PRE_MOON_GAIN_PCT` expanded to 350.0%; `ohlc_blowoff_blocked` (>95%) and `pos_6h_blowoff_blocked` (top 10% 6h high penalty) disabled in `kraken_jev_live_gate.py`.\n- **Stale Trade Ejection:** Verified. Removed `cur_bps >= 115` / `88` profit requirement on time exits in `kraken_paper_1000_forward.py`. Stalled trades now liquidate unconditionally at `max_hold_sec` to free portfolio slots.\n- **Trend-Dip Continuation:** Verified. `momentum_cross()` in `kraken_entry_safety.py` now triggers on pullbacks resuming within established >1.5% upward trends.\n- **Artifact:** `sabrina_console_desktop/artifacts/m-1c9f2610.md` generated."
+    },
+    {
+      "sender": "operator",
+      "time": "05:37:53 PM",
+      "text": "/mission Analyze Kraken TREAD book depth and place post-only limit tests"
+    },
+    {
+      "sender": "Sabrina Coordinator",
+      "time": "05:37:56 PM",
+      "text": "[DISPATCHED] Mission [m-36acd8d0] launched with 4 worker(s) (ratio 1:4)."
     }
   ]
 }
