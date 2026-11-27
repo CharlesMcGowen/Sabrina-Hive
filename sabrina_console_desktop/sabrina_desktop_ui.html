@@ -1859,7 +1859,8 @@
                 <button id="btn-run-kraken-qa" class="btn-ghost" type="button" title="Run deterministic Product QA (imports, headless Tcl/Tk GUI smoke, UI parity, unit tests)">🧪 Run Product QA Smoke Check</button>
                 <button id="btn-kraken-paper-review" class="btn-ghost" type="button" title="Send the simulated portfolio totals to Claude and GPT, then have Gemini review their findings">Review paper results with Claude, GPT &amp; Gemini</button>
                 <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View Top 25 paper trial</button>
-                <button id="btn-kraken-top25-picks" class="btn-ghost" type="button">View Top 25 picks</button>
+                <button id="btn-kraken-named-analysts" class="btn-ghost" type="button">View analyst decisions</button>
+                <button id="btn-kraken-top25-picks" class="btn-ghost" type="button">View momentum baseline</button>
                 <button id="btn-swarm-kraken-qa" class="btn-ghost" type="button" title="Dispatch the 4-agent Swarm in Product QA mode to audit the Kraken GUI product">⚡ Swarm QA Mission on Kraken</button>
                 <button id="btn-swarm-manage-kraken" class="btn-primary" type="button" title="Deploy the Swarm to autonomously monitor order-books, turnover velocity, and QuantOrb safety">🤖 Deploy Swarm Kraken Manager</button>
               </div>
@@ -14523,6 +14524,40 @@
           }
         });
       }
+      el("btn-kraken-named-analysts")?.addEventListener("click", async () => {
+        const feedback = el("kraken-qa-feedback"), receipt = el("kraken-qa-receipt");
+        feedback.textContent = "Reading the attributed decision journal…";
+        receipt.style.display = "none";
+        const result = await callBridge("Kraken","get_kraken_replacement_status");
+        const view = result?.analysts;
+        if (!view?.run) {
+          feedback.textContent = result?.error || "Waiting for the first attributed analyst round.";
+          return;
+        }
+        const lines = [];
+        for (const analyst of view.analysts) {
+          lines.push(`${analyst.model || analyst.provider} · ${analyst.route || ""} · ${analyst.status}`);
+          const j = analyst.journal;
+          if (!j) { lines.push(analyst.reason || "Awaiting a recorded decision.",""); continue; }
+          lines.push(`${j.timestamp_utc} · ${j.regime} · ${j.bias} · confidence ${j.confidence}`, j.rationale);
+          const scored = Object.entries(analyst.grades || {});
+          for (const [h,g] of scored) lines.push(`${h} min · ${g.correct}/${g.graded} directional calls correct · ${g.abstentions} abstentions · ${g.abstention_net_positive}/${g.abstention_priced} abstained pairs subsequently covered costs`);
+          for (const item of j.entries) {
+            const iv=item.invalidation;
+            lines.push(`${item.symbol} · ${item.regime} · ${item.bias} (${item.confidence}) · ${item.recommended_action} · ${item.horizon_minutes} min`,
+                       item.thesis, [iv ? `Invalidation ${iv.field} ${iv.crosses} ${iv.value}` : "", (item.risk_flags || []).join(", "), item.paper_status, ...(item.reasons || [])].filter(Boolean).join(" · "));
+          }
+          lines.push("");
+        }
+        lines.push(`Existing Kraken decisions · ${view.native_source?.jev_checkpoint || "JEV"} and v0.4 ensemble`);
+        for (const m of view.markets) {
+          const j=m.native?.jev, v=m.native?.v04;
+          lines.push(`#${m.rank} ${m.symbol} · JEV ${j?.reason || "not scored"} · v0.4 ${v?.passes_ultra_gate == null ? "not scored" : v.passes_ultra_gate ? "entry gate passed" : "entry gate closed"}`);
+        }
+        feedback.textContent=`Analyst evidence from ${new Date(view.evidence_at * 1000).toLocaleString()} · paper journal`;
+        receipt.textContent=lines.join("\n");
+        receipt.style.display="block";
+      });
       el("btn-kraken-top25-picks")?.addEventListener("click", async () => {
         const feedback = el("kraken-qa-feedback");
         const receipt = el("kraken-qa-receipt");
@@ -14560,7 +14595,7 @@
         };
         show(latest, ended ? "Most recent forecast" : "Open forecast");
         if (view.last_graded && view.last_graded.id !== latest.id) show(view.last_graded, "Last completed forecast");
-        feedback.textContent = `15-minute Top 25 paper forecasts · updated ${new Date(view.as_of * 1000).toLocaleString()}`;
+        feedback.textContent = `Experimental momentum baseline · updated ${new Date(view.as_of * 1000).toLocaleString()}`;
         receipt.textContent = lines.join("\n");
         receipt.style.display = "block";
       });

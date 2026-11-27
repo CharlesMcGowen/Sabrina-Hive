@@ -4987,7 +4987,9 @@
             parentNode = nodesById.get(n.recoveryFor) || rootNode;
           } else {
             const rawP = n._rawParent || "sabrina";
-            parentNode = nodesById.get(rawP)
+            const rawParentLow = rawP.toLowerCase();
+            parentNode = (rawParentLow === "sabrina" || rawParentLow === "coordinator" ? rootNode : null)
+              || nodesById.get(rawP)
               || nodesById.get(rawP.toLowerCase())
               || roleToNode.get(rawP.toLowerCase())
               || (rLow === "planner_architect" || rLow === "research_scout" || rLow === "rag_scout" ? rootNode : null)
