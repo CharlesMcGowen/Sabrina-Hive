@@ -1,8 +1,8 @@
 """Air-Gapped Pre-Cached Wheelhouse Sync and Verification Tool for Sabrina Systems.
 
 Coordinates and verifies offline Python dependency repositories across Sabrina nodes:
-1. Windows Workstation (`windows-workstation`): C:\\Users\\charl\\OneDrive\\Documents\\Sabrina\\artifacts\\wheels
-2. Remote Lab Node (`ego-lab`): /home/ego/bot/Sabrina-windows-sync/artifacts/wheels
+1. Windows Workstation (`windows-workstation`): `<WORKSPACE_ROOT>/artifacts/wheels`
+2. Remote Lab Node (`lab-node`): `<REMOTE_ROOT>/artifacts/wheels`
 
 Features:
 - Categorizes cached wheels into universal (py3-none-any) vs platform-specific binaries.
@@ -23,11 +23,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-LOCAL_WHEELHOUSE = ROOT / "artifacts" / "wheels"
+try:
+    from sabrina_console_desktop.sabrina_config import LAB_HOST as DEFAULT_REMOTE_HOST, WHEELHOUSE_DIR as _CFG_WHEELHOUSE
+    LOCAL_WHEELHOUSE = Path(_CFG_WHEELHOUSE)
+except ImportError:
+    DEFAULT_REMOTE_HOST = os.environ.get("SABRINA_LAB_HOST", "localhost")
+    LOCAL_WHEELHOUSE = ROOT / "artifacts" / "wheels"
 LOCAL_CACHE = ROOT / "artifacts" / "cache"
-DEFAULT_REMOTE_HOST = "ego.local"
-DEFAULT_REMOTE_USER = "ego"
-DEFAULT_REMOTE_DIR = "/home/ego/bot/Sabrina-windows-sync/artifacts/wheels"
+DEFAULT_REMOTE_USER = os.environ.get("SABRINA_LAB_USER", "sabrina")
+DEFAULT_REMOTE_DIR = os.environ.get("SABRINA_REMOTE_WHEELHOUSE", "/opt/sabrina/artifacts/wheels")
 
 
 def inspect_wheelhouse(wheelhouse_dir: Path | str = LOCAL_WHEELHOUSE) -> dict:
@@ -93,8 +97,9 @@ def sync_universal_wheels_to_remote(
     if not universal:
         return {"ok": False, "error": "No universal wheels found in local wheelhouse."}
 
-    print(f"--> Ensuring remote directory {remote_dir} on {user}@{host}...")
-    ssh_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", f"{user}@{host}", f"mkdir -p {remote_dir}"]
+    target = host if host in ("ego", "ego.local") else f"{user}@{host}"
+    print(f"--> Ensuring remote directory {remote_dir} on {target}...")
+    ssh_cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", target, f"mkdir -p {remote_dir}"]
     try:
         proc = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=10)
         if proc.returncode != 0:
@@ -102,12 +107,12 @@ def sync_universal_wheels_to_remote(
     except Exception as exc:
         return {"ok": False, "error": f"SSH connection failed: {exc}"}
 
-    print(f"--> Transferring {len(universal)} universal wheels to {host}...")
+    print(f"--> Transferring {len(universal)} universal wheels to {target}...")
     transferred = 0
     errors = []
     for whl in universal:
         src = LOCAL_WHEELHOUSE / whl
-        scp_cmd = ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", str(src), f"{user}@{host}:{remote_dir}/{whl}"]
+        scp_cmd = ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", str(src), f"{target}:{remote_dir}/{whl}"]
         p = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=15)
         if p.returncode == 0:
             transferred += 1

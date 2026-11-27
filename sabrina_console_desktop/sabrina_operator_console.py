@@ -16,11 +16,68 @@ def request(path, method="GET", payload=None):
     with urllib.request.urlopen(req, timeout=5) as response: return json.loads(response.read().decode())
 
 class Console(tk.Tk):
+    THEMES = {
+        "obsidian": {"label": "Obsidian", "bg": "#111827", "card": "#1f2937", "fg": "#e5e7eb", "accent": "#38bdf8"},
+        "hive": {"label": "Sabrina Hive", "bg": "#120d07", "card": "#241a0e", "fg": "#f9f1e4", "accent": "#f59e0b"},
+        "royal_hive": {"label": "Royal Hive", "bg": "#130c1c", "card": "#251936", "fg": "#f7f0ff", "accent": "#fbbf24"},
+        "daylight_comb": {"label": "Honeycomb Light", "bg": "#f8f3e8", "card": "#efe5d0", "fg": "#281c0d", "accent": "#b45309"},
+    }
     def __init__(self):
         super().__init__(); self.title("Sabrina Operator Console"); self.geometry("900x650"); self.minsize(760,540)
+        self._display_prefs_path=Path(__file__).resolve().parent/"data/control/swarm_display.json"
+        self._ui_theme_id=self._load_saved_theme_id()
         self.status=tk.StringVar(value="Connecting…"); self.cards={}; self._jobs=[]; self._caps=[]; self._measurement={}; self._trace_reader=DesktopTraceReader(); self._trace_runs=[]; self._selected_run_id=""; self._trace_events_page=0; self._trace_page_size=100; self._perf_view=None; self._main_book=None; self._trace_tab_frame=None; self._refreshing=False; self.after_idle(self._start_console)
+    def _load_saved_theme_id(self) -> str:
+        try:
+            prefs=json.loads(self._display_prefs_path.read_text(encoding="utf-8"))
+            tid=str(prefs.get("ui_theme") or "obsidian")
+            return tid if tid in self.THEMES else "obsidian"
+        except Exception:
+            return "obsidian"
+    def _save_theme_id(self, theme_id: str) -> None:
+        try:
+            self._display_prefs_path.parent.mkdir(parents=True, exist_ok=True)
+            existing={}
+            if self._display_prefs_path.is_file():
+                try: existing=json.loads(self._display_prefs_path.read_text(encoding="utf-8"))
+                except Exception: existing={}
+            if not isinstance(existing, dict): existing={}
+            existing["ui_theme"]=theme_id
+            self._display_prefs_path.write_text(json.dumps(existing), encoding="utf-8")
+        except Exception:
+            pass
+    def apply_ui_theme(self, theme_id: str, persist: bool = True) -> None:
+        if theme_id not in self.THEMES:
+            theme_id = "obsidian"
+        self._ui_theme_id = theme_id
+        pal = self.THEMES[theme_id]
+        style = ttk.Style(self)
+        self.configure(bg=pal["bg"])
+        for name in ("TFrame", "TLabel", "TNotebook", "TNotebook.Tab"):
+            style.configure(name, background=pal["bg"], foreground=pal["fg"])
+        style.map("TNotebook.Tab", background=[("selected", pal["card"])], foreground=[("selected", pal["accent"])])
+        style.configure("Title.TLabel", background=pal["bg"], foreground=pal["accent"], font=("Segoe UI", 18, "bold"))
+        style.configure("Card.TFrame", background=pal["card"])
+        style.configure("Card.TLabel", background=pal["card"], foreground=pal["fg"])
+        style.configure("TButton", background=pal["card"], foreground=pal["fg"])
+        for widget_attr in ("jobs", "reviews", "skill_detail"):
+            w = getattr(self, widget_attr, None)
+            if w is not None:
+                try: w.configure(bg=pal["card"], fg=pal["fg"])
+                except Exception: pass
+        if persist:
+            self._save_theme_id(theme_id)
+    def _on_theme_combo_selected(self, _event=None) -> None:
+        sel = getattr(self, "theme_combo", None)
+        if sel is None: return
+        label_val = sel.get()
+        for tid, meta in self.THEMES.items():
+            if meta["label"] == label_val:
+                self.apply_ui_theme(tid, persist=True)
+                break
     def _start_console(self):
         self._build()
+        self.apply_ui_theme(self._ui_theme_id, persist=False)
         self._poll()
         print('Operator console ready', flush=True)
     def _build(self):
@@ -38,6 +95,11 @@ class Console(tk.Tk):
         ttk.Label(self,textvariable=self.activity,wraplength=850).pack(anchor='w',padx=18,pady=(8,2))
         ttk.Label(self,textvariable=self.desktop_step,wraplength=850).pack(anchor='w',padx=18)
         controls=ttk.Frame(self); controls.pack(fill="x",padx=18,pady=12); ttk.Button(controls,text="Refresh",command=self.refresh).pack(side="left",padx=3); ttk.Button(controls,text="Open Web Dashboard",command=lambda:subprocess.Popen(["cmd","/c","start","",API])).pack(side="left",padx=3); ttk.Button(controls,text="Open Swarm Chat (:8095)",command=lambda:subprocess.Popen(["cmd","/c","start","","http://127.0.0.1:8095"])).pack(side="left",padx=3)
+        ttk.Label(controls,text="Theme:").pack(side="left",padx=(14,4))
+        self.theme_combo=ttk.Combobox(controls,state="readonly",width=16,values=[m["label"] for m in self.THEMES.values()])
+        self.theme_combo.set(self.THEMES[self._ui_theme_id]["label"])
+        self.theme_combo.pack(side="left",padx=3)
+        self.theme_combo.bind("<<ComboboxSelected>>",self._on_theme_combo_selected)
         book=ttk.Notebook(self); self._main_book=book; book.pack(fill="both",expand=True,padx=18,pady=(0,14)); operations,calendar,capabilities,lab,models,journal=ttk.Frame(book),ttk.Frame(book),ttk.Frame(book),ttk.Frame(book),ttk.Frame(book),ttk.Frame(book); book.add(operations,text="Scheduled jobs"); book.add(calendar,text="Calendar"); book.add(capabilities,text="Capabilities"); book.add(lab,text="Lab queue"); book.add(models,text="Models"); book.add(journal,text="LinkedIn action journal")
         ttk.Label(operations,text="Operations scheduler only. Lab inference is shown in Lab queue; desktop tasks are shown in Workflows.",wraplength=800).pack(anchor="w",padx=8,pady=4)
         self.workshop_status=tk.StringVar(value='Windows workshop schedules: checking status...')
@@ -171,7 +233,8 @@ class Console(tk.Tk):
             except Exception as exc:
                 self.after(0,lambda error=str(exc):self._lab_unavailable(error))
             try:
-                base=os.environ.get('SABRINA_OLLAMA_BASE_URL','http://ego.local:11434').rstrip('/')
+                from sabrina_config import OLLAMA_BASE_URL as _CFG_OLLAMA_BASE_URL
+                base=os.environ.get('SABRINA_OLLAMA_BASE_URL',_CFG_OLLAMA_BASE_URL).rstrip('/')
                 with urllib.request.urlopen(base+'/api/tags',timeout=5) as response: installed=json.load(response).get('models',[])
                 with urllib.request.urlopen(base+'/api/ps',timeout=5) as response: loaded=json.load(response).get('models',[])
                 self.after(0,lambda:self._show_models(installed,loaded))

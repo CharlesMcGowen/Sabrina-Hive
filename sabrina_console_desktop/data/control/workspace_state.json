@@ -1,11 +1,10 @@
 {
-  "active_root": "C:\\Users\\charl\\OneDrive\\Documents\\Sabrina",
+  "active_root": ".",
   "mode": "approve_writes",
   "policy_profile": "sandboxed_edit",
   "allow_local_venv_fallback": true,
   "recent_workspaces": [
-    "C:\\Users\\charl\\OneDrive\\Documents\\Sabrina",
-    "C:\\Users\\charl\\OneDrive\\Documents\\Sabrina\\freqtrade_pivot",
-    "C:\\Users\\charl\\OneDrive\\Documents\\Sabrina\\sabrina_console_desktop"
+    ".",
+    "./sabrina_console_desktop"
   ]
 }

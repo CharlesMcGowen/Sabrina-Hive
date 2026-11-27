@@ -10,7 +10,7 @@ services:
       - HITL_HOST=0.0.0.0
       - HITL_PORT=8890
       - HITL_DB_PATH=/data/approvals.db
-      - HITL_PUBLIC_URL=http://192.168.1.133:8890
+      - HITL_PUBLIC_URL=${HITL_PUBLIC_URL:-http://127.0.0.1:8890}
       - HITL_WEBHOOK_URL=${HITL_WEBHOOK_URL:-}
       - PYTHONUNBUFFERED=1
     volumes:

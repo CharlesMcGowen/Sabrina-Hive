@@ -30,10 +30,14 @@ import stat as statmod
 import sys
 from pathlib import Path
 
+import os
 import paramiko
 
-DEFAULT_HOST = "192.168.2.69"
-DEFAULT_USER = "ego"
+try:
+    from sabrina_config import LAB_IP as DEFAULT_HOST
+except ImportError:
+    DEFAULT_HOST = os.environ.get("SABRINA_LAB_IP", "127.0.0.1")
+DEFAULT_USER = os.environ.get("SABRINA_LAB_USER", "sabrina")
 
 EXCLUDE_DIR_NAMES = {
     ".git", "__pycache__", ".pytest_cache", ".vscode", "node_modules",

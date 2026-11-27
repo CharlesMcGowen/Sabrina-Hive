@@ -966,18 +966,13 @@ def _probe_lookup_theorem_or_reference(runtime, args):
     }
 
 
-ARENA_VERIFIED_EXTERNAL_GUILDS = (
-    "hf-gradio-htchu-coderhelper",
-    "hf-gradio-jayeshmurthi49-byte-agentic-rag-chatbot-api",
-    "hf-gradio-himakesh-parth-ai-tutor",
-    "hf-gradio-onlymhmd-qwen-32b-chat",
-    "hf-gradio-affanaiengr-rag",
-    "hf-gradio-rstanley2026-rodney-digital-twin",
-    "hf-gradio-dkt3-digital-twin",
-    "hf-gradio-parmeshlata-portfolio-chatbot",
-    "hf-gradio-free234-snap-rag-assistant",
-    "hf-gradio-nakaassoumatine-einstein-chatbot",
-)
+try:
+    from sabrina_config import EXTERNAL_PORTAL_IDS as ARENA_VERIFIED_EXTERNAL_GUILDS
+except ImportError:
+    try:
+        from sabrina_console_desktop.sabrina_config import EXTERNAL_PORTAL_IDS as ARENA_VERIFIED_EXTERNAL_GUILDS  # type: ignore[no-redef]
+    except ImportError:
+        ARENA_VERIFIED_EXTERNAL_GUILDS = ()
 
 
 def _probe_consult_external_guild(runtime, args):

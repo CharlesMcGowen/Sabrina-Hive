@@ -38,9 +38,12 @@ MAX_NEW_TOKENS = 512
 MAX_EDITS = 2_000
 MAX_RPC_BYTES = 2_000_000
 MAX_INSPECT_TENSORS = 200
-DEFAULT_REMOTE_ROOT = "/home/ego/bot/sabrina_win_arena"
-DEFAULT_REMOTE_HOST = "ego.local"
-DEFAULT_REMOTE_USER = "ego"
+try:
+    from sabrina_config import LAB_HOST as DEFAULT_REMOTE_HOST
+except ImportError:
+    DEFAULT_REMOTE_HOST = os.environ.get("SABRINA_LAB_HOST", "localhost")
+DEFAULT_REMOTE_ROOT = os.environ.get("SABRINA_REMOTE_ROOT", "/opt/sabrina/workspace")
+DEFAULT_REMOTE_USER = os.environ.get("SABRINA_LAB_USER", "sabrina")
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
 

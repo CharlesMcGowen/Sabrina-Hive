@@ -17,7 +17,7 @@ SERVER_INFO = {
     "name": "livingarchive-hitl-gate",
     "version": "1.0.0",
 }
-BASE_URL = os.environ.get("HITL_GATE_URL", "http://192.168.1.133:8890").rstrip("/")
+BASE_URL = os.environ.get("HITL_GATE_URL", "http://127.0.0.1:8890").rstrip("/")
 
 TOOLS = [
     {

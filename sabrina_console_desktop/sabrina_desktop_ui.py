@@ -41,7 +41,12 @@ except ImportError:  # launched from inside sabrina_console_desktop
 from sabrina_console_desktop.agent_browser_service import BrowserSession
 from sabrina_console_desktop.agent_browser_service.fleet import FleetBrowserSession
 from sabrina_console_desktop.agent_browser_service.visible import VisibleBrowserSession
-from sabrina_console_desktop.agent_desktop_service import DesktopSession, available_windows
+from sabrina_console_desktop.agent_desktop_service import (
+    DesktopSession,
+    available_displays,
+    available_windows,
+    desktop_runtime_status,
+)
 from sabrina_console_desktop.interactive_tools import create_interactive_session, list_interactive_backends
 from sabrina_console_desktop.context_first_coordinator import is_model_cooled_down
 from sabrina_console_desktop.windows_skill_runtime import MODE as WINDOWS_POWERSHELL_MODE
@@ -188,12 +193,18 @@ def _read_desktop_html(path: Path) -> str:
         image = base64.b64encode(asset.read_bytes()).decode("ascii")
         html = html.replace(legacy_art, f'url("data:image/jpeg;base64,{image}")')
     return html
+try:
+    from sabrina_console_desktop.sabrina_config import OLLAMA_BASE_URL as _CFG_OLLAMA_BASE_URL
+except ImportError:
+    from sabrina_config import OLLAMA_BASE_URL as _CFG_OLLAMA_BASE_URL  # type: ignore[no-redef]
+
 API_8087 = os.environ.get("SABRINA_SWARM_CONTROL_API_BASE", "http://127.0.0.1:8087").rstrip("/")
 API_8095 = os.environ.get("SABRINA_SWARM_API_BASE", "http://127.0.0.1:8095").rstrip("/")
-OLLAMA_BASE = os.environ.get(
-    "SABRINA_OLLAMA_BASE_URL", "http://127.0.0.1:11434" if FROZEN_DESKTOP else "http://ego.local:11434",
+OLLAMA_BASE = (
+    os.environ.get("SABRINA_OLLAMA_BASE_URL", "").strip()
+    or ("http://127.0.0.1:11434" if FROZEN_DESKTOP else _CFG_OLLAMA_BASE_URL)
 ).rstrip("/")
-ASSETS_DIR = ROOT / "swarm_console" / "assets" if FROZEN_DESKTOP else Path(r"c:\Users\charl\OneDrive\Documents\Sabrina\swarm_console\assets")
+ASSETS_DIR = (ROOT / "swarm_console" / "assets") if FROZEN_DESKTOP else (ROOT.parent / "swarm_console" / "assets")
 SWARM_SYNC_FILE = ROOT / "data" / "live_antigravity_swarm.json"
 
 
@@ -770,6 +781,16 @@ class SabrinaDesktopBridge:
         self._unsupported_models: set[str] = set()
         self._latest_recommended_next: dict[str, Any] = {}
         control_dir = ROOT / "data" / "control"
+        if self._isolated_test_mode:
+            isolated_paths = (role_bindings_path, vault_path, custom_models_path, swarm_artifacts_dir,
+                              getattr(vault, "vault_path", None))
+            isolated_path = next((Path(p) for p in isolated_paths if p is not None), None)
+            if isolated_path is None:
+                self._isolated_control_temp = tempfile.TemporaryDirectory(prefix="sabrina-bridge-test-")
+                control_dir = Path(self._isolated_control_temp.name)
+            else:
+                control_dir = isolated_path.parent
+            control_dir.mkdir(parents=True, exist_ok=True)
         bindings_file = role_bindings_path or (control_dir / "role_bindings.json")
         self._swarm_display_path = Path(bindings_file).with_name("swarm_display.json")
         vault_file = vault_path or (control_dir / "provider_vault.json")
@@ -931,6 +952,18 @@ class SabrinaDesktopBridge:
         )
         if not self._isolated_test_mode and not coordinator_only:
             self.automation_engine.start_background_scheduler(poll_seconds=15.0)
+        from tools.sabrina_auth import ConsoleAuthStore
+        auth_file = (
+            role_bindings_path.parent / "console_auth.json"
+            if role_bindings_path is not None
+            else (control_dir / "console_auth.json")
+        )
+        self.console_auth = ConsoleAuthStore(auth_path=auth_file)
+        self._api_token_path: Path | None = (
+            (role_bindings_path.parent / "api.token")
+            if role_bindings_path is not None
+            else None
+        )
         self._restore_workspace_state()
         if not self._isolated_test_mode and not coordinator_only:
             self._trigger_remote_refresh(force=True)
@@ -1319,10 +1352,15 @@ class SabrinaDesktopBridge:
         active_prompt_state: dict[str, Any] = {}
         frontier_research_state: dict[str, Any] = {}
         api_8095_ok = False
+        try:
+            from tools.sabrina_auth import api_auth_headers
+            auth_hdrs_8095 = api_auth_headers(token_path=getattr(self, "_api_token_path", None))
+        except Exception:
+            auth_hdrs_8095 = {}
 
         # Step 1: Poll :8095 alongside :8087 with independent timeout & error isolation
         try:
-            ap_data = _http_json(f"{API_8095}/api/active-prompt/state", timeout=1.5)
+            ap_data = _http_json(f"{API_8095}/api/active-prompt/state", timeout=1.5, headers=auth_hdrs_8095)
             if isinstance(ap_data, dict) and ap_data.get("ok"):
                 active_prompt_state = ap_data
                 api_8095_ok = True
@@ -1330,7 +1368,7 @@ class SabrinaDesktopBridge:
             pass
 
         try:
-            fr_data = _http_json(f"{API_8095}/api/frontier-research/state", timeout=1.5)
+            fr_data = _http_json(f"{API_8095}/api/frontier-research/state", timeout=1.5, headers=auth_hdrs_8095)
             if isinstance(fr_data, dict):
                 frontier_research_state = fr_data
                 api_8095_ok = True
@@ -1339,7 +1377,7 @@ class SabrinaDesktopBridge:
 
         remote_telemetry_8095: dict[str, Any] = {}
         try:
-            tel_data = _http_json(f"{API_8095}/api/swarm/telemetry", timeout=1.5)
+            tel_data = _http_json(f"{API_8095}/api/swarm/telemetry", timeout=1.5, headers=auth_hdrs_8095)
             if isinstance(tel_data, dict) and tel_data.get("ok"):
                 remote_telemetry_8095 = dict(tel_data.get("telemetry_by_agent") or {})
         except Exception:
@@ -1423,46 +1461,25 @@ class SabrinaDesktopBridge:
             "ui_dirty": False,
         }
 
-    def get_swarm_display(self) -> dict[str, Any]:
-        try:
-            prefs = json.loads(self._swarm_display_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        return prefs if isinstance(prefs, dict) else {}
+    UI_THEME_CHOICES = ("obsidian", "hive", "royal_hive", "daylight_comb")
+    UI_THEME_BG_COLORS = {
+        "obsidian": "#0b0e14",
+        "hive": "#100c07",
+        "royal_hive": "#110b18",
+        "daylight_comb": "#f8f3e8",
+    }
 
-    def save_swarm_display(
-        self,
-        theme: str,
-        motion: str,
-        link_style: str | None = None,
-        link_speed: str | None = None,
-        backdrop: str | None = None,
-    ) -> dict[str, Any]:
-        settings = {"theme": theme, "motion": motion}
-        if link_style is not None:
-            settings["link_style"] = link_style
-        if link_speed is not None:
-            settings["link_speed"] = link_speed
-        if backdrop is not None:
-            settings["backdrop"] = backdrop
-        choices = {
-            "theme": ("robots", "christmas", "workshop", "classic"),
-            "motion": ("system", "on", "paused"),
-            "link_style": ("theme", "snow_bridge", "pulse", "still"),
-            "link_speed": ("slow", "normal", "fast"),
-            "backdrop": ("standard", "workshop"),
-        }
-        if any(value not in choices[key] for key, value in settings.items()):
-            return {"ok": False, "error": "Invalid graph appearance"}
+    def _write_swarm_display_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
         path = self._swarm_display_path
         temporary_path = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
+            merged = {**self.get_swarm_display(), **updates}
             with tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", dir=path.parent, prefix="swarm_display-", suffix=".tmp", delete=False,
             ) as stream:
                 temporary_path = Path(stream.name)
-                json.dump({**self.get_swarm_display(), **settings}, stream)
+                json.dump(merged, stream)
             temporary_path.replace(path)
         except OSError as exc:
             return {"ok": False, "error": str(exc)}
@@ -1472,7 +1489,65 @@ class SabrinaDesktopBridge:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-        return {"ok": True}
+        return {"ok": True, "prefs": merged}
+
+    def get_swarm_display(self) -> dict[str, Any]:
+        try:
+            prefs = json.loads(self._swarm_display_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return prefs if isinstance(prefs, dict) else {}
+
+    def get_ui_theme(self) -> dict[str, Any]:
+        prefs = self.get_swarm_display()
+        ui_theme = str(prefs.get("ui_theme") or "obsidian")
+        if ui_theme not in self.UI_THEME_CHOICES:
+            ui_theme = "obsidian"
+        return {
+            "ok": True,
+            "ui_theme": ui_theme,
+            "themes": list(self.UI_THEME_CHOICES),
+        }
+
+    def save_ui_theme(self, ui_theme: str) -> dict[str, Any]:
+        normalized = str(ui_theme or "").strip().lower()
+        if normalized not in self.UI_THEME_CHOICES:
+            return {"ok": False, "error": f"Invalid UI theme: {ui_theme!r}"}
+        res = self._write_swarm_display_settings({"ui_theme": normalized})
+        if not res.get("ok"):
+            return res
+        return {"ok": True, "ui_theme": normalized}
+
+    def save_swarm_display(
+        self,
+        theme: str,
+        motion: str,
+        link_style: str | None = None,
+        link_speed: str | None = None,
+        backdrop: str | None = None,
+        ui_theme: str | None = None,
+    ) -> dict[str, Any]:
+        settings = {"theme": theme, "motion": motion}
+        if link_style is not None:
+            settings["link_style"] = link_style
+        if link_speed is not None:
+            settings["link_speed"] = link_speed
+        if backdrop is not None:
+            settings["backdrop"] = backdrop
+        if ui_theme is not None:
+            settings["ui_theme"] = ui_theme
+        choices = {
+            "theme": ("robots", "hive", "christmas", "workshop", "classic"),
+            "motion": ("system", "on", "paused"),
+            "link_style": ("theme", "nectar", "snow_bridge", "pulse", "still"),
+            "link_speed": ("slow", "normal", "fast"),
+            "backdrop": ("standard", "honeycomb", "workshop"),
+            "ui_theme": self.UI_THEME_CHOICES,
+        }
+        if any(value not in choices[key] for key, value in settings.items()):
+            return {"ok": False, "error": "Invalid graph appearance"}
+        res = self._write_swarm_display_settings(settings)
+        return {"ok": True} if res.get("ok") else res
 
     def _get_execution_kind_map(self) -> dict[str, str]:
         cached = getattr(self, "_capability_execution_kinds", None)
@@ -1499,7 +1574,48 @@ class SabrinaDesktopBridge:
             return self._get_execution_kind_map().get(cap_name, "code")
         return "code"
 
+    def _locked_response(self) -> dict[str, Any] | None:
+        if getattr(self, "console_auth", None) is not None and self.console_auth.is_locked:
+            return {
+                "ok": False,
+                "error": "Console is locked. Unlock with your passphrase.",
+                "auth_locked": True,
+                "execution_authorized": False,
+            }
+        return None
+
+    def get_auth_status(self) -> dict[str, Any]:
+        return {"ok": True, **self.console_auth.status()}
+
+    def setup_console_auth(self, passphrase: str) -> dict[str, Any]:
+        return self.console_auth.setup(passphrase)
+
+    def unlock_console(self, passphrase: str) -> dict[str, Any]:
+        return self.console_auth.unlock(passphrase)
+
+    def lock_console(self) -> dict[str, Any]:
+        return self.console_auth.lock()
+
+    def change_console_auth(self, current_passphrase: str, new_passphrase: str) -> dict[str, Any]:
+        return self.console_auth.change(current_passphrase, new_passphrase)
+
+    def disable_console_auth(self, current_passphrase: str) -> dict[str, Any]:
+        return self.console_auth.disable(current_passphrase)
+
+    def get_api_token(self) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
+        from tools.sabrina_auth import load_or_create_api_token
+        return {"ok": True, "token": load_or_create_api_token(getattr(self, "_api_token_path", None))}
+
     def get_snapshot(self) -> dict[str, Any]:
+        if getattr(self, "console_auth", None) is not None and self.console_auth.is_locked:
+            return {
+                "auth_locked": True,
+                "auth": self.console_auth.status(),
+                "execution_authorized": False,
+                "time_str": time.strftime("%H:%M:%S"),
+            }
         self._trigger_remote_refresh(force=False)
         with self._remote_lock:
             remote = dict(self._remote_cache)
@@ -1840,6 +1956,8 @@ class SabrinaDesktopBridge:
             swarm["recommended_next_goal"] = best_rec["goal"]
 
         return {
+            "auth_locked": False,
+            "auth": self.console_auth.status() if getattr(self, "console_auth", None) is not None else {"configured": False, "locked": False},
             "api_ok": api_ok,
             "api_8095_ok": api_8095_ok,
             "ui_asset_mtime": current_ui_mtime,
@@ -2370,6 +2488,8 @@ class SabrinaDesktopBridge:
         desktop_headed: bool = False,
     ) -> dict[str, Any]:
         """Launch a mission using the 3-Layer Context-First Coordinator architecture."""
+        if (locked := self._locked_response()) is not None:
+            return locked
         browser_session = None
         if browser_backend or browser_url:
             try:
@@ -2408,6 +2528,17 @@ class SabrinaDesktopBridge:
             return {"ok": True, "windows": available_windows()}
         except RuntimeError as exc:
             return {"ok": False, "error": str(exc), "windows": []}
+
+    def get_desktop_runtime_info(self) -> dict[str, Any]:
+        """Return Windows 11 agent-desktop version, permissions, surfaces, and display DPI geometry."""
+        try:
+            return {
+                "ok": True,
+                "status": desktop_runtime_status(),
+                "displays": available_displays(),
+            }
+        except RuntimeError as exc:
+            return {"ok": False, "error": str(exc), "status": {}, "displays": []}
 
     def list_interactive_backends(self) -> dict[str, Any]:
         return {"ok": True, "backends": list_interactive_backends()}
@@ -2534,6 +2665,18 @@ class SabrinaDesktopBridge:
         )
         return res
 
+    def get_kraken_analyst_round(self, run_id: str) -> dict[str, Any]:
+        from sabrina_console_desktop.kraken_model_review import analyst_round
+        return analyst_round(run_id)
+
+    def get_kraken_pair_report(self, symbol: str) -> dict[str, Any]:
+        from sabrina_console_desktop.kraken_pair_analyst import get_pair_report
+        return get_pair_report(self, symbol, http_json=_http_json)
+
+    def read_kraken_pair_report(self, report_id: str) -> dict[str, Any]:
+        from sabrina_console_desktop.kraken_pair_analyst import read_pair_report
+        return read_pair_report(report_id)
+
     def get_kraken_replacement_status(self) -> dict[str, Any]:
         from sabrina_console_desktop.kraken_model_review import replacement_status
         return replacement_status()
@@ -2626,6 +2769,8 @@ class SabrinaDesktopBridge:
         plugin_capabilities: list[str] | None = None,
         auto_followups: int = 0,
     ) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
         clean_goal = (goal or "").strip()
         if not clean_goal:
             return {
@@ -3048,6 +3193,8 @@ class SabrinaDesktopBridge:
 
     def send_chat_async(self, text: str, mode: str, target: str) -> dict[str, Any]:
         """Non-blocking Operator Chat dispatch so long hive_council / model turns never freeze the pywebview UI."""
+        if (locked := self._locked_response()) is not None:
+            return locked
         clean = (text or "").strip()
         if not clean:
             return {"ok": False, "error": "Empty message."}
@@ -3163,6 +3310,8 @@ class SabrinaDesktopBridge:
                 "reply": format_cycle_report(result, engine.last_author)}
 
     def send_chat(self, text: str, mode: str, target: str) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
         clean = (text or "").strip()
         if not clean:
             return {"ok": False, "error": "Empty message."}
@@ -3931,7 +4080,7 @@ class SabrinaDesktopBridge:
             "embed", "tts", "imagen", "nano-banana", "flash-lite-image", "flash-image", "pro-image",
             "gpt-image", "chatgpt-image", "gpt-audio", "gpt-live", "computer-use", "robotics",
             "whisper", "veo", "aqa", "moderation", "omni-moderation", "realtime",
-            "transcribe", "lyria", "genie", "decision",
+            "transcribe", "lyria", "genie", "decision", "shieldgemma",
         )
 
         def _push(cand_model: str) -> None:
@@ -4342,6 +4491,10 @@ class SabrinaDesktopBridge:
             if is_auth_err:
                 auth_failed_providers.add(prov)
                 continue
+            is_timeout_err = "timed out" in err_low or "timeout" in err_low
+            if is_timeout_err:
+                broken_models.add(mkey)
+                continue
             is_net_err = any(
                 tok in err_low
                 for tok in (
@@ -4349,8 +4502,6 @@ class SabrinaDesktopBridge:
                     "name or service not known",
                     "network is unreachable",
                     "connection refused",
-                    "timed out",
-                    "timeout",
                     "connection reset",
                     "failed to establish a new connection",
                 )
@@ -4506,6 +4657,8 @@ class SabrinaDesktopBridge:
         probe: bool = True,
         config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
         try:
             res = self.vault.set_key(provider, api_key, config=config)
             probe_res: dict[str, Any] = {}
@@ -4585,6 +4738,8 @@ class SabrinaDesktopBridge:
             return {"ok": False, "error": str(exc)}
 
     def delete_vault_key(self, provider: str) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
         try:
             res = self.vault.delete_key(provider)
             self.registry.refresh_models(force=True)
@@ -4976,12 +5131,16 @@ class SabrinaDesktopBridge:
         return {"ok": True, "connectors": self.connector_registry.list_connectors()}
 
     def list_plugin_connections(self) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
         try:
             return {"ok": True, "connections": self.connector_registry.list_plugin_connections()}
         except Exception:
             return {"ok": False, "error": "Unable to read plugin connections from the vault."}
 
     def save_plugin_connection(self, name: str, values: dict[str, Any]) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
         try:
             self.connector_registry.save_plugin_config(name, values)
             return {"ok": True, "connections": self.connector_registry.list_plugin_connections()}
@@ -4989,6 +5148,8 @@ class SabrinaDesktopBridge:
             return {"ok": False, "error": "Unable to save plugin connection. Check the fields and vault access."}
 
     def save_connector_config(self, connector_id: str, values: dict[str, Any]) -> dict[str, Any]:
+        if (locked := self._locked_response()) is not None:
+            return locked
         try:
             res = self.connector_registry.save_config(connector_id, values)
             return {**res, "connectors": self.connector_registry.list_connectors()}
@@ -5080,6 +5241,115 @@ class SabrinaDesktopBridge:
         except (RoleBindingResolutionError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
 
+    def _attach_model_performance_metrics(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not items:
+            return items
+        theta_stats: dict[str, dict[str, Any]] = {}
+        qual_stats: dict[str, dict[str, Any]] = {}
+        eval_db = Path(__file__).resolve().parent / "data" / "sabrina_evaluations.sqlite3"
+        if eval_db.is_file():
+            try:
+                conn = sqlite3.connect(f"file:{eval_db}?mode=ro", uri=True, timeout=1.0)
+                try:
+                    for model_id, pass_rate, sample_count, mean_seconds, theta in conn.execute(
+                        "SELECT model_id, pass_rate, sample_count, mean_seconds, theta FROM model_theta_routing"
+                    ):
+                        mid = str(model_id or "").strip()
+                        if not mid:
+                            continue
+                        n = max(1, int(sample_count or 0))
+                        slot = theta_stats.setdefault(mid, {"samples": 0, "pass_sum": 0.0, "sec_sum": 0.0, "theta_sum": 0.0})
+                        slot["samples"] += n
+                        slot["pass_sum"] += float(pass_rate or 0.0) * n
+                        slot["sec_sum"] += float(mean_seconds or 0.0) * n
+                        slot["theta_sum"] += float(theta or 0.0) * n
+                    for model_id, role, qualified, critical_violations in conn.execute(
+                        "SELECT model_id, role, qualified, critical_violations FROM eval_qualifications"
+                    ):
+                        mid = str(model_id or "").strip()
+                        if not mid:
+                            continue
+                        qslot = qual_stats.setdefault(mid, {"qualified_roles": [], "below_roles": [], "critical_violations": 0})
+                        r_lbl = str(role or "").strip()
+                        if int(qualified or 0):
+                            if r_lbl and r_lbl not in qslot["qualified_roles"]:
+                                qslot["qualified_roles"].append(r_lbl)
+                        else:
+                            if r_lbl and r_lbl not in qslot["below_roles"]:
+                                qslot["below_roles"].append(r_lbl)
+                        qslot["critical_violations"] += int(critical_violations or 0)
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+        ledger_stats: dict[str, dict[str, Any]] = {}
+        ledger_path = usage_ledger.DEFAULT_LEDGER
+        if ledger_path.is_file():
+            try:
+                with ledger_path.open(encoding="utf-8") as handle:
+                    for line in handle:
+                        if not line.strip():
+                            continue
+                        row = json.loads(line)
+                        raw_m = str(row.get("model") or "").strip()
+                        if not raw_m:
+                            continue
+                        keys = {raw_m, usage_ledger.bare_model(raw_m)}
+                        ok_flag = 1 if row.get("ok") else 0
+                        tok = int(row.get("input_tokens") or 0) + int(row.get("output_tokens") or 0)
+                        if tok == 0:
+                            tok = int(row.get("tokens_total_reported") or 0)
+                        cost = row.get("cost_usd")
+                        lat_ms = row.get("latency_ms")
+                        for k in keys:
+                            slot = ledger_stats.setdefault(
+                                k,
+                                {"calls": 0, "ok_calls": 0, "tokens": 0, "cost_usd": 0.0, "has_cost": False, "lat_sum_ms": 0.0, "lat_cnt": 0},
+                            )
+                            slot["calls"] += 1
+                            slot["ok_calls"] += ok_flag
+                            slot["tokens"] += tok
+                            if isinstance(cost, (int, float)):
+                                slot["cost_usd"] += float(cost)
+                                slot["has_cost"] = True
+                            if isinstance(lat_ms, (int, float)) and lat_ms >= 0:
+                                slot["lat_sum_ms"] += float(lat_ms)
+                                slot["lat_cnt"] += 1
+            except Exception:
+                pass
+
+        enriched: list[dict[str, Any]] = []
+        for item in items:
+            copy_item = dict(item)
+            mid = str(copy_item.get("id") or "").strip()
+            bare = usage_ledger.bare_model(mid)
+            th = theta_stats.get(mid) or theta_stats.get(bare)
+            ql = qual_stats.get(mid) or qual_stats.get(bare)
+            ld = ledger_stats.get(mid) or ledger_stats.get(bare)
+            if th or ql or ld:
+                m_out: dict[str, Any] = {}
+                if th and th["samples"] > 0:
+                    m_out["mean_seconds"] = round(th["sec_sum"] / th["samples"], 2)
+                    m_out["pass_rate"] = round(th["pass_sum"] / th["samples"], 4)
+                    m_out["eval_samples"] = th["samples"]
+                    m_out["theta"] = round(th["theta_sum"] / th["samples"], 3)
+                if ql:
+                    m_out["qualified_roles"] = ql["qualified_roles"]
+                    m_out["below_threshold_roles"] = ql["below_roles"]
+                    m_out["critical_violations"] = ql["critical_violations"]
+                if ld and ld["calls"] > 0:
+                    m_out["calls"] = ld["calls"]
+                    m_out["ok_rate"] = round(ld["ok_calls"] / ld["calls"], 4)
+                    m_out["tokens"] = ld["tokens"]
+                    if ld["has_cost"]:
+                        m_out["cost_usd"] = round(ld["cost_usd"], 6)
+                    if "mean_seconds" not in m_out and ld["lat_cnt"] > 0:
+                        m_out["mean_seconds"] = round((ld["lat_sum_ms"] / ld["lat_cnt"]) / 1000.0, 2)
+                copy_item["metrics"] = m_out
+            enriched.append(copy_item)
+        return enriched
+
     def search_models(
         self,
         query: str = "",
@@ -5104,6 +5374,8 @@ class SabrinaDesktopBridge:
                 offset=int(offset),
                 refresh=bool(refresh),
             )
+            if isinstance(res.get("items"), list):
+                res["items"] = self._attach_model_performance_metrics(res["items"])
             return {"ok": True, **res}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "items": [], "total": 0}
@@ -6309,10 +6581,17 @@ class SabrinaDesktopBridge:
                 else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
             )
             from swarm_console.workspace_sandbox import WorkspaceSandbox
+            forgejo_pypi_url = ""
+            try:
+                if self.connector_registry.is_configured("forgejo"):
+                    forgejo_pypi_url = self._forgejo_client().pypi_simple_url(include_token=False)
+            except Exception:
+                forgejo_pypi_url = ""
             sb = WorkspaceSandbox(
                 ws_root,
                 allow_local_venv_fallback=True,
                 policy_profile=self.workspace_policy_profile if self.workspace_policy_profile in VALID_POLICY_PROFILES else "sandboxed_edit",
+                pypi_index_url=forgejo_pypi_url or None,
             )
             cache_info = sb.execute_tool("manage_dependencies", {"action": "cache_info"})
             list_info = sb.execute_tool("manage_dependencies", {"action": "list"})
@@ -6335,6 +6614,7 @@ class SabrinaDesktopBridge:
                 "cached_wheels_count": cache_info.get("cached_wheels_count", 0),
                 "cached_wheels": cache_info.get("cached_wheels", []),
                 "cache_dir": cache_info.get("cache_dir", ""),
+                "forgejo_pypi_url": cache_info.get("forgejo_pypi_url", ""),
                 "installed_packages": packages,
                 "installed_count": len(packages),
                 "active_revision": active_profile.revision,
@@ -6352,10 +6632,17 @@ class SabrinaDesktopBridge:
                 else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
             )
             from swarm_console.workspace_sandbox import WorkspaceSandbox
+            forgejo_pypi_url = ""
+            try:
+                if not wheelhouse_only and self.connector_registry.is_configured("forgejo"):
+                    forgejo_pypi_url = self._forgejo_client().pypi_simple_url(include_token=True)
+            except Exception:
+                forgejo_pypi_url = ""
             sb = WorkspaceSandbox(
                 ws_root,
                 allow_local_venv_fallback=True,
                 policy_profile="sandboxed_edit",
+                pypi_index_url=forgejo_pypi_url or None,
             )
             res = sb.execute_tool(
                 "manage_dependencies",
@@ -6384,6 +6671,183 @@ class SabrinaDesktopBridge:
                 {"action": "cache_wheel", "packages": packages},
             )
             return res
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Cross-System Mesh & Lab Synchronization Endpoints
+    # ------------------------------------------------------------------
+
+    def get_cross_system_status(self) -> dict[str, Any]:
+        """Return connectivity, diff status, and sync topology between Windows and ego-lab."""
+        try:
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            from sabrina_console_desktop.cross_system_manager import CrossSystemManager
+            mgr = CrossSystemManager(local_root=ws_root)
+            return mgr.get_mesh_status()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def diff_cross_system_code(self) -> dict[str, Any]:
+        """Diff local workstation code tree with ego-lab remote worktree."""
+        try:
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            from sabrina_console_desktop.cross_system_manager import CrossSystemManager
+            mgr = CrossSystemManager(local_root=ws_root)
+            return mgr.diff_remote_tree()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def sync_code_to_ego(self, dry_run: bool = True) -> dict[str, Any]:
+        """Deploy modified source code to ego-lab with backup preservation and syntax checks."""
+        try:
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            from sabrina_console_desktop.cross_system_manager import CrossSystemManager
+            mgr = CrossSystemManager(local_root=ws_root)
+            return mgr.sync_to_ego(dry_run=bool(dry_run))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def sync_wheelhouse_to_ego(self) -> dict[str, Any]:
+        """Synchronize universal air-gapped wheels to ego-lab."""
+        try:
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            from sabrina_console_desktop.cross_system_manager import CrossSystemManager
+            mgr = CrossSystemManager(local_root=ws_root)
+            return mgr.sync_universal_wheelhouse()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # ------------------------------------------------------------------
+    # Self-Hosted Forgejo (Git, PyPI & RSI Artifact Registry) Endpoints
+    # ------------------------------------------------------------------
+
+    def _cross_system_ego_host(self) -> str:
+        try:
+            from sabrina_console_desktop.cross_system_manager import DEFAULT_EGO_HOST
+        except ImportError:
+            from cross_system_manager import DEFAULT_EGO_HOST  # type: ignore[no-redef]
+        return DEFAULT_EGO_HOST
+
+    def _forgejo_client(self):
+        try:
+            from sabrina_console_desktop.forgejo_client import ForgejoClient
+        except ImportError:
+            from forgejo_client import ForgejoClient  # type: ignore[no-redef]
+        cfg = self.connector_registry.get_config("forgejo")
+        default_url = f"http://{self._cross_system_ego_host()}:3003"
+        return ForgejoClient(
+            base_url=cfg.get("base_url") or default_url,
+            owner=cfg.get("owner") or "ego",
+            token=cfg.get("api_token") or "",
+        )
+
+    def get_forgejo_status(self) -> dict[str, Any]:
+        """Return Forgejo connection config, health probe, PyPI URL, and hosted packages."""
+        try:
+            cfg = self.connector_registry.get_config("forgejo")
+            configured = self.connector_registry.is_configured("forgejo")
+            client = self._forgejo_client()
+            ver = client.get_version()
+            reachable = bool(ver.get("ok"))
+            packages: list[dict[str, Any]] = []
+            if reachable:
+                pkg_res = client.list_packages(limit=50)
+                if pkg_res.get("ok") and isinstance(pkg_res.get("data"), list):
+                    packages = [
+                        {
+                            "name": p.get("name", ""),
+                            "version": p.get("version", ""),
+                            "type": p.get("type", ""),
+                        }
+                        for p in pkg_res["data"]
+                        if isinstance(p, dict)
+                    ]
+            return {
+                "ok": True,
+                "configured": configured,
+                "reachable": reachable,
+                "base_url": client.base_url,
+                "owner": client.owner,
+                "repo_name": cfg.get("repo_name") or "sabrina",
+                "pypi_simple_url": client.pypi_simple_url(include_token=False),
+                "version": ver.get("version", "") if reachable else "",
+                "packages": packages,
+                "packages_count": len(packages),
+                "probe_error": "" if reachable else str(ver.get("error") or ""),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def save_forgejo_config(
+        self,
+        base_url: str,
+        owner: str,
+        api_token: str = "",
+        repo_name: str = "sabrina",
+    ) -> dict[str, Any]:
+        """Save Forgejo endpoint/token securely in ConnectorRegistry and probe health."""
+        try:
+            payload: dict[str, Any] = {
+                "base_url": (base_url or "").strip(),
+                "owner": (owner or "").strip(),
+                "repo_name": (repo_name or "sabrina").strip(),
+            }
+            if (api_token or "").strip():
+                payload["api_token"] = api_token.strip()
+            self.connector_registry.save_config("forgejo", payload)
+            return self.get_forgejo_status()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def deploy_forgejo_container(self, dry_run: bool = False) -> dict[str, Any]:
+        """Deploy/start the Forgejo container on ego (/mnt/14tb/forgejo)."""
+        try:
+            from agent_stack.forgejo.deploy_to_ego import deploy_forgejo
+            return deploy_forgejo(dry_run=bool(dry_run))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def sync_wheelhouse_to_forgejo(self) -> dict[str, Any]:
+        """Upload local cached *.whl files to Forgejo's PyPI registry."""
+        try:
+            if not self.connector_registry.is_configured("forgejo"):
+                return {"ok": False, "error": "Configure Forgejo URL, owner, and API token first."}
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            wh = ws_root / "artifacts" / "wheels"
+            if not wh.is_dir():
+                wh = (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent) / "artifacts" / "wheels"
+            return self._forgejo_client().sync_wheelhouse(wh)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def publish_rsi_artifacts_to_forgejo(self) -> dict[str, Any]:
+        """Publish Evo-Bench scorecards and mission reports to Forgejo Generic registry."""
+        try:
+            if not self.connector_registry.is_configured("forgejo"):
+                return {"ok": False, "error": "Configure Forgejo URL, owner, and API token first."}
+            art_dir = self.swarm_runner.artifacts_dir
+            return self._forgejo_client().publish_rsi_artifacts(art_dir)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -6611,6 +7075,7 @@ def run_desktop_ui() -> None:
     import datetime
     crash_log = ROOT / "console-launch.log"
     log_fp = None
+    ego_proxy = None
     try:
         if FROZEN_DESKTOP:
             SABRINA_WORKSPACE.mkdir(parents=True, exist_ok=True)
@@ -6629,23 +7094,35 @@ def run_desktop_ui() -> None:
         if not html_path.is_file():
             raise FileNotFoundError(f"Console UI template not found at {html_path}")
 
-        bridge = SabrinaDesktopBridge()
+        special_local_mode = (len(sys.argv) == 3 and sys.argv[1] == "--replay-release") or sys.argv[1:] == ["--powershell-check"]
+        bridge = SabrinaDesktopBridge(coordinator_only=not special_local_mode)
+        exposed_bridge: Any = bridge
+        if not special_local_mode:
+            from sabrina_console_desktop.ego_console_proxy import EgoConnection, EgoConsoleProxy
+            review_base = Path(os.environ.get("LOCALAPPDATA") or str(ROOT / "data"))
+            ego_proxy = EgoConsoleProxy(bridge, EgoConnection(), review_base / "SabrinaConsole" / "EgoReviews")
+            ego_proxy.start()
+            exposed_bridge = ego_proxy
         if webview is not None:
             replay_id = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == "--replay-release" else ""
             powershell_check = sys.argv[1:] == ["--powershell-check"]
             title = "Sabrina Operator Console"
+            if ego_proxy is not None:
+                title += " — Ego"
             if replay_id:
                 title += " — Release Review"
             elif powershell_check:
                 title += " — PowerShell"
+            saved_ui_theme = str(bridge.get_swarm_display().get("ui_theme") or "obsidian")
+            win_bg = SabrinaDesktopBridge.UI_THEME_BG_COLORS.get(saved_ui_theme, "#0b0e14")
             win = webview.create_window(
                 title,
                 html=_read_desktop_html(html_path),
-                js_api=bridge,
+                js_api=exposed_bridge,
                 width=1280,
                 height=820,
                 min_size=(960, 640),
-                background_color="#0b0e14",
+                background_color=win_bg,
                 text_select=True,
             )
             bridge._window = win
@@ -6700,6 +7177,8 @@ def run_desktop_ui() -> None:
             pass
         raise
     finally:
+        if ego_proxy is not None:
+            ego_proxy.stop()
         if log_fp and not log_fp.closed:
             try:
                 log_fp.close()

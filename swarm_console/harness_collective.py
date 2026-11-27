@@ -724,7 +724,7 @@ class ExternalCLIHarnessAdapter(BaseHarness):
 
 
 class MLXEgoPortalHarness(BaseHarness):
-    """Collective Harness spanning local MLX / Ollama (`ego.local`) and virtual SQLite portals (`harnesses.external`)."""
+    """Collective Harness spanning configured local MLX / Ollama endpoints and virtual SQLite portals (`harnesses.external`)."""
 
     def __init__(
         self,
@@ -732,18 +732,23 @@ class MLXEgoPortalHarness(BaseHarness):
         ollama_base_url: str | None = None,
         llm_caller: Callable[[str, str, str, str], dict[str, Any]] | None = None,
     ) -> None:
+        try:
+            from sabrina_console_desktop.sabrina_config import DEFAULT_LOCAL_MODEL, OLLAMA_BASE_URL
+        except ImportError:
+            OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+            DEFAULT_LOCAL_MODEL = "ollama/local-model"
         eff_endpoint = (
             ollama_base_url
-            or os.environ.get("SABRINA_OLLAMA_BASE_URL", "http://ego.local:11434").rstrip("/")
+            or os.environ.get("SABRINA_OLLAMA_BASE_URL", OLLAMA_BASE_URL).rstrip("/")
         )
         super().__init__(
             config
             or HarnessConfig(
                 harness_id="mlx_ego_portal",
-                name="MLX / Ego Portal Collective Harness",
+                name="MLX / Local Portal Collective Harness",
                 kind="mlx_portal",
-                description="Pairs local MLX / Ollama endpoints (ego.local) and virtual SQLite portals (harnesses.external) with Sabrina's sandbox diff staging and diagnostic verification loop.",
-                default_model="ollama/qwen2.5-coder:14b",
+                description="Pairs configured local MLX / Ollama endpoints and virtual SQLite portals (harnesses.external) with Sabrina's sandbox diff staging and diagnostic verification loop.",
+                default_model=DEFAULT_LOCAL_MODEL,
                 endpoint=eff_endpoint,
                 capabilities=HarnessCapabilities(
                     diffs=True,

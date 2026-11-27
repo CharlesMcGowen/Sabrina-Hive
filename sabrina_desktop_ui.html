@@ -4,6 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Sabrina Operator Console</title>
+  <script>
+    try {
+      const savedTheme = localStorage.getItem("sabrina_ui_theme");
+      if (savedTheme === "obsidian" || savedTheme === "hive" || savedTheme === "royal_hive" || savedTheme === "daylight_comb") {
+        document.documentElement.dataset.uiTheme = savedTheme;
+      }
+    } catch (_err) {}
+  </script>
   <style>
     .swarm-overview-bar { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin:0; }
     .swarm-overview-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); align-items:start; gap:8px; margin-bottom:0; }
@@ -35,6 +43,7 @@
       --muted: #8b98b0;
       --cyan: #38bdf8;
       --cyan-soft: rgba(56, 189, 248, 0.14);
+      --cyan-border: rgba(56, 189, 248, 0.4);
       --green: #34d399;
       --green-soft: rgba(52, 211, 153, 0.14);
       --amber: #fbbf24;
@@ -43,8 +52,247 @@
       --red-soft: rgba(248, 113, 113, 0.14);
       --purple: #a78bfa;
       --purple-soft: rgba(167, 139, 250, 0.14);
+      --comb-pattern: none;
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Inter, sans-serif;
+    }
+    html[data-ui-theme="hive"] {
+      --bg: #100c07;
+      --sidebar: #161008;
+      --surface: #1d150b;
+      --surface-2: #271d10;
+      --border: #463319;
+      --text: #f9f1e4;
+      --muted: #bfa888;
+      --cyan: #f59e0b;
+      --cyan-soft: rgba(245, 158, 11, 0.17);
+      --cyan-border: rgba(245, 158, 11, 0.45);
+      --green: #34d399;
+      --green-soft: rgba(52, 211, 153, 0.15);
+      --amber: #fbbf24;
+      --amber-soft: rgba(251, 191, 36, 0.18);
+      --red: #fb7185;
+      --red-soft: rgba(251, 113, 133, 0.16);
+      --purple: #d8b4fe;
+      --purple-soft: rgba(216, 180, 254, 0.15);
+      --comb-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='none' stroke='%23f59e0b' stroke-opacity='0.065' stroke-width='1'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0 31L0 81V50l28-16 28 16v31L28 97z'/%3E%3C/g%3E%3C/svg%3E");
+    }
+    html[data-ui-theme="royal_hive"] {
+      --bg: #110b18;
+      --sidebar: #170f22;
+      --surface: #1f152e;
+      --surface-2: #2a1d3d;
+      --border: #493368;
+      --text: #f7f0ff;
+      --muted: #b7a2d1;
+      --cyan: #fbbf24;
+      --cyan-soft: rgba(251, 191, 36, 0.16);
+      --cyan-border: rgba(251, 191, 36, 0.45);
+      --green: #34d399;
+      --green-soft: rgba(52, 211, 153, 0.15);
+      --amber: #f59e0b;
+      --amber-soft: rgba(245, 158, 11, 0.18);
+      --red: #fb7185;
+      --red-soft: rgba(251, 113, 133, 0.16);
+      --purple: #c084fc;
+      --purple-soft: rgba(192, 132, 252, 0.17);
+      --comb-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='none' stroke='%23fbbf24' stroke-opacity='0.06' stroke-width='1'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0 31L0 81V50l28-16 28 16v31L28 97z'/%3E%3C/g%3E%3C/svg%3E");
+    }
+    html[data-ui-theme="daylight_comb"] {
+      --bg: #f8f3e8;
+      --sidebar: #f0e7d4;
+      --surface: #fffdf8;
+      --surface-2: #f3ead8;
+      --border: #d8c39e;
+      --text: #281c0d;
+      --muted: #765f40;
+      --cyan: #b45309;
+      --cyan-soft: rgba(180, 83, 9, 0.13);
+      --cyan-border: rgba(180, 83, 9, 0.38);
+      --green: #047857;
+      --green-soft: rgba(4, 120, 87, 0.12);
+      --amber: #b45309;
+      --amber-soft: rgba(180, 83, 9, 0.14);
+      --red: #be123c;
+      --red-soft: rgba(190, 18, 60, 0.12);
+      --purple: #6d28d9;
+      --purple-soft: rgba(109, 40, 217, 0.12);
+      --comb-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='none' stroke='%23b45309' stroke-opacity='0.06' stroke-width='1'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0 31L0 81V50l28-16 28 16v31L28 97z'/%3E%3C/g%3E%3C/svg%3E");
+    }
+    html[data-ui-theme="hive"] .sidebar,
+    html[data-ui-theme="royal_hive"] .sidebar,
+    html[data-ui-theme="daylight_comb"] .sidebar {
+      background-image: var(--comb-pattern);
+      background-size: 46px 80px;
+    }
+    html[data-ui-theme="hive"] .topbar,
+    html[data-ui-theme="royal_hive"] .topbar {
+      background-image: linear-gradient(90deg, rgba(245, 158, 11, 0.05), transparent 55%);
+    }
+    html[data-ui-theme="hive"] .brand img,
+    html[data-ui-theme="royal_hive"] .brand img,
+    html[data-ui-theme="daylight_comb"] .brand img {
+      border-color: var(--cyan-border);
+    }
+    html[data-ui-theme="hive"] .nav-btn.active,
+    html[data-ui-theme="royal_hive"] .nav-btn.active,
+    html[data-ui-theme="daylight_comb"] .nav-btn.active,
+    html[data-ui-theme="hive"] .subtab-btn.active,
+    html[data-ui-theme="royal_hive"] .subtab-btn.active,
+    html[data-ui-theme="daylight_comb"] .subtab-btn.active,
+    html[data-ui-theme="hive"] .tier-btn.active,
+    html[data-ui-theme="royal_hive"] .tier-btn.active,
+    html[data-ui-theme="daylight_comb"] .tier-btn.active,
+    html[data-ui-theme="hive"] button:not(.btn-ok):not(.btn-err):not(.btn-ghost):not(.nav-btn):not(.subtab-btn):not(.a2a-comm-card),
+    html[data-ui-theme="royal_hive"] button:not(.btn-ok):not(.btn-err):not(.btn-ghost):not(.nav-btn):not(.subtab-btn):not(.a2a-comm-card),
+    html[data-ui-theme="daylight_comb"] button:not(.btn-ok):not(.btn-err):not(.btn-ghost):not(.nav-btn):not(.subtab-btn):not(.a2a-comm-card) {
+      border-color: var(--cyan-border);
+    }
+    html[data-ui-theme="hive"] button:not(.btn-ok):not(.btn-err):not(.btn-ghost):not(.nav-btn):not(.subtab-btn):not(.a2a-comm-card):hover,
+    html[data-ui-theme="royal_hive"] button:not(.btn-ok):not(.btn-err):not(.btn-ghost):not(.nav-btn):not(.subtab-btn):not(.a2a-comm-card):hover,
+    html[data-ui-theme="daylight_comb"] button:not(.btn-ok):not(.btn-err):not(.btn-ghost):not(.nav-btn):not(.subtab-btn):not(.a2a-comm-card):hover {
+      background: var(--cyan-soft);
+      filter: brightness(1.08);
+    }
+    html[data-ui-theme="hive"] .topo-wrap,
+    html[data-ui-theme="royal_hive"] .topo-wrap {
+      background:
+        var(--comb-pattern) 0 0 / 52px 90px,
+        radial-gradient(circle at 50% 32%, rgba(245, 158, 11, 0.10), rgba(14, 10, 5, 0.98) 76%);
+    }
+    html[data-ui-theme="daylight_comb"] .topo-wrap {
+      background:
+        var(--comb-pattern) 0 0 / 52px 90px,
+        radial-gradient(circle at 50% 32%, rgba(245, 158, 11, 0.14), rgba(252, 247, 236, 0.98) 78%);
+    }
+    html[data-ui-theme="hive"] #topo-joincut-svg,
+    html[data-ui-theme="royal_hive"] #topo-joincut-svg {
+      background: radial-gradient(ellipse at 50% 10%, rgba(180, 83, 9, 0.30), transparent 65%), var(--bg);
+    }
+    html[data-ui-theme="daylight_comb"] #topo-joincut-svg {
+      background: radial-gradient(ellipse at 50% 10%, rgba(245, 158, 11, 0.22), transparent 65%), #21180d;
+    }
+    html[data-ui-theme="hive"] .topo-appearance,
+    html[data-ui-theme="royal_hive"] .topo-appearance,
+    html[data-ui-theme="daylight_comb"] .topo-appearance,
+    html[data-ui-theme="hive"] .web-legend,
+    html[data-ui-theme="royal_hive"] .web-legend,
+    html[data-ui-theme="daylight_comb"] .web-legend,
+    html[data-ui-theme="hive"] .topo-ws-list-box,
+    html[data-ui-theme="royal_hive"] .topo-ws-list-box,
+    html[data-ui-theme="daylight_comb"] .topo-ws-list-box,
+    html[data-ui-theme="hive"] .a2a-link-banner,
+    html[data-ui-theme="royal_hive"] .a2a-link-banner,
+    html[data-ui-theme="daylight_comb"] .a2a-link-banner,
+    html[data-ui-theme="hive"] .inv-banner,
+    html[data-ui-theme="royal_hive"] .inv-banner,
+    html[data-ui-theme="daylight_comb"] .inv-banner {
+      background: var(--surface-2);
+    }
+    html[data-ui-theme="daylight_comb"] .topo-appearance label { color: var(--text); }
+    html[data-ui-theme="hive"] .topo-ws-item,
+    html[data-ui-theme="royal_hive"] .topo-ws-item,
+    html[data-ui-theme="daylight_comb"] .topo-ws-item,
+    html[data-ui-theme="hive"] .bb-chat-card,
+    html[data-ui-theme="royal_hive"] .bb-chat-card,
+    html[data-ui-theme="daylight_comb"] .bb-chat-card,
+    html[data-ui-theme="hive"] .schema-editor,
+    html[data-ui-theme="royal_hive"] .schema-editor,
+    html[data-ui-theme="daylight_comb"] .schema-editor {
+      background: var(--bg);
+      border-color: var(--border);
+      color: var(--text);
+    }
+    html[data-ui-theme="hive"] .bb-chat-card,
+    html[data-ui-theme="royal_hive"] .bb-chat-card,
+    html[data-ui-theme="daylight_comb"] .bb-chat-card {
+      border-left: 3.5px solid var(--cyan);
+    }
+    html[data-ui-theme="hive"] .bb-chat-card:hover,
+    html[data-ui-theme="royal_hive"] .bb-chat-card:hover,
+    html[data-ui-theme="daylight_comb"] .bb-chat-card:hover,
+    html[data-ui-theme="hive"] .topo-ws-item:hover,
+    html[data-ui-theme="royal_hive"] .topo-ws-item:hover,
+    html[data-ui-theme="daylight_comb"] .topo-ws-item:hover {
+      background: var(--surface);
+      border-color: var(--cyan);
+    }
+    html[data-ui-theme="hive"] #live-mission-banner,
+    html[data-ui-theme="royal_hive"] #live-mission-banner,
+    html[data-ui-theme="daylight_comb"] #live-mission-banner {
+      background: linear-gradient(135deg, var(--surface), var(--surface-2)) !important;
+      border-color: var(--cyan-border) !important;
+    }
+    html[data-ui-theme="hive"] #lmb-progress-bar,
+    html[data-ui-theme="royal_hive"] #lmb-progress-bar,
+    html[data-ui-theme="daylight_comb"] #lmb-progress-bar {
+      background: linear-gradient(90deg, #b45309, #f59e0b, #fde047) !important;
+    }
+    html[data-ui-theme="hive"] .lmb-step,
+    html[data-ui-theme="royal_hive"] .lmb-step,
+    html[data-ui-theme="daylight_comb"] .lmb-step {
+      background: var(--bg) !important;
+      border-color: var(--border) !important;
+    }
+    html[data-ui-theme="hive"] .lmb-step.active,
+    html[data-ui-theme="royal_hive"] .lmb-step.active,
+    html[data-ui-theme="daylight_comb"] .lmb-step.active {
+      border-color: var(--cyan) !important;
+      background: var(--cyan-soft) !important;
+      box-shadow: 0 0 10px var(--cyan-soft);
+    }
+    html[data-ui-theme="hive"] #console-auth-overlay > div,
+    html[data-ui-theme="royal_hive"] #console-auth-overlay > div,
+    html[data-ui-theme="daylight_comb"] #console-auth-overlay > div,
+    html[data-ui-theme="hive"] #console-security-modal > div,
+    html[data-ui-theme="royal_hive"] #console-security-modal > div,
+    html[data-ui-theme="daylight_comb"] #console-security-modal > div {
+      background: var(--surface) !important;
+      border-color: var(--border) !important;
+      color: var(--text) !important;
+    }
+    .theme-switcher-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px 6px 2px 3px;
+      border-radius: 999px;
+      border: 1px solid var(--cyan-border);
+      background: var(--surface-2);
+      transition: border-color 0.16s ease, background 0.16s ease;
+    }
+    .theme-switcher-pill:hover {
+      border-color: var(--cyan);
+    }
+    .theme-cycle-btn {
+      padding: 2px 6px;
+      min-width: 24px;
+      height: 22px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      background: var(--cyan-soft);
+      color: var(--cyan);
+      font-size: 12px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .theme-switcher-pill select {
+      border: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 11.5px;
+      font-weight: 600;
+      padding: 2px 4px;
+      border-radius: 999px;
+      cursor: pointer;
+      outline: none;
+    }
+    .theme-switcher-pill select option {
+      background: var(--surface);
+      color: var(--text);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -242,7 +490,9 @@
     #topo-joincut-svg {
       width: 100%; min-width: 720px; min-height: 360px; display: block;
       background: radial-gradient(ellipse at 50% 10%, rgba(22, 78, 99, 0.34), transparent 65%), #0a101b;
+      touch-action: none; cursor: grab; user-select: none;
     }
+    #topo-joincut-svg.is-dragging { cursor: grabbing; }
     #topo-joincut-svg .joincut-sphere { transition: opacity 180ms ease; }
     #topo-joincut-svg .joincut-active-halo { animation: joincut-pulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
     @keyframes joincut-pulse { 50% { opacity: 0.22; transform: scale(1.28); } }
@@ -272,6 +522,24 @@
     .topo-appearance select { min-height: 26px; padding: 3px 8px; font-size: 11.5px; }
     .topo-appearance select:disabled { opacity: 0.55; }
     .topo-appearance select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+    #topo-svg[data-sprite-theme="hive"] {
+      background:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='none' stroke='%23f59e0b' stroke-opacity='0.11' stroke-width='1.1'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0 31L0 81V50l28-16 28 16v31L28 97z'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 56px 97px,
+        radial-gradient(ellipse at 50% 8%, rgba(245, 158, 11, 0.24), transparent 64%),
+        linear-gradient(155deg, #1e1509, #100b05 74%);
+    }
+    #topo-svg[data-backdrop="honeycomb"] {
+      min-height: clamp(410px, 43vw, 550px);
+      background:
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='%23f59e0b' fill-opacity='0.035' stroke='%23fbbf24' stroke-opacity='0.18' stroke-width='1.2'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0 31L0 81V50l28-16 28 16v31L28 97z'/%3E%3C/g%3E%3C/svg%3E") 0 0 / 56px 97px,
+        radial-gradient(circle at 22% 24%, rgba(251, 191, 36, 0.16), transparent 42%),
+        radial-gradient(circle at 78% 68%, rgba(217, 119, 6, 0.15), transparent 46%),
+        linear-gradient(160deg, #241809, #120c05 76%);
+    }
+    #topo-svg[data-sprite-theme="hive"] .topo-sprite-well,
+    #topo-svg[data-backdrop="honeycomb"] .topo-sprite-well { fill: #291d0c; stroke: #d97706; }
+    #topo-svg[data-sprite-theme="hive"] .dag-card,
+    #topo-svg[data-backdrop="honeycomb"] .dag-card { fill: #1b1309; }
     #topo-svg[data-sprite-theme="christmas"] {
       background:
         radial-gradient(circle at 17px 27px, #d4f5ff6b 0 1px, transparent 1.5px) 0 0 / 117px 91px,
@@ -986,8 +1254,18 @@
         <div class="topbar-right">
           <span id="deploy-health-badge" class="badge" title="Active Python Modules &amp; Deployment Health"><span id="deploy-health-dot" class="dot ok"></span><span id="deploy-health-label">Modules: --</span></span>
           <span id="ui-live-badge" class="badge" title="Reload UI applies a changed frontend without restarting the coordinator"><span id="ui-live-dot" class="dot ok"></span><span id="ui-live-label">UI Ready</span></span>
+          <div class="theme-switcher-pill" title="Switch Sabrina Operator Console design theme (Alt+T to cycle)">
+            <button id="btn-cycle-ui-theme" class="theme-cycle-btn" type="button" aria-label="Cycle design theme" title="Cycle Console Design Theme (Alt+T)">🐝</button>
+            <select id="ui-theme-select" aria-label="Console design theme">
+              <option value="obsidian">🌌 Obsidian</option>
+              <option value="hive">🐝 Sabrina Hive</option>
+              <option value="royal_hive">👑 Royal Hive</option>
+              <option value="daylight_comb">☀️ Honeycomb Light</option>
+            </select>
+          </div>
           <button id="btn-reload-ui" class="btn-ghost" type="button" title="Hot-reload HTML/CSS/JS without restarting Python">Reload UI</button>
           <button id="btn-debug-pill" class="badge" type="button" style="cursor:pointer;"><span id="debug-dot" class="dot ok"></span><span id="debug-label">UI Debug: 0 issues</span></button>
+          <button id="btn-console-auth" class="btn-ghost" type="button" title="Console Passphrase Lock &amp; Local API Token">🔒 Security</button>
           <button id="btn-refresh" class="btn-ghost" type="button">Refresh Now</button>
         </div>
       </header>
@@ -997,6 +1275,7 @@
         <section id="view-swarm" class="view active">
           <div class="swarm-overview-bar">
             <span id="swarm-monitor-connection" class="muted" role="status">Connecting to the coordinator…</span>
+            <button id="btn-ego-review" class="btn-ghost" type="button" title="Open code changes collected from Ego for review">Review Ego changes</button>
             <button id="btn-monitor-new-mission" class="btn-ok" type="button">New mission</button>
           </div>
           <div class="swarm-overview-grid">
@@ -1182,6 +1461,7 @@
                   <label for="topo-sprite-theme">Characters</label>
                   <select id="topo-sprite-theme">
                     <option value="robots">Robots</option>
+                    <option value="hive">Hive Bees</option>
                     <option value="christmas">Christmas</option>
                     <option value="classic">Classic</option>
                   </select>
@@ -1190,6 +1470,7 @@
                   <label for="topo-backdrop">Backdrop</label>
                   <select id="topo-backdrop">
                     <option value="standard">Standard</option>
+                    <option value="honeycomb">Honeycomb Hive</option>
                     <option value="workshop">Santa’s Workshop</option>
                   </select>
                 </div>
@@ -1205,6 +1486,7 @@
                   <label for="topo-link-style">Links</label>
                   <select id="topo-link-style" title="Choose how handoffs move between nodes">
                     <option value="theme">Match theme</option>
+                    <option value="nectar">Nectar Trail</option>
                     <option value="snow_bridge">Snow Bridge</option>
                     <option value="pulse">Pulses</option>
                     <option value="still">Still</option>
@@ -1232,6 +1514,7 @@
               <div class="row" role="tablist" aria-label="Live topology view" style="gap:6px; padding:6px 0;">
                 <button id="btn-topology-hierarchy" class="btn-primary" type="button" role="tab" aria-selected="true" style="padding:4px 9px; font-size:11px;">Worker tree</button>
                 <button id="btn-topology-joincut-3d" class="btn-ghost" type="button" role="tab" aria-selected="false" style="padding:4px 9px; font-size:11px;">Join-Cut 3D</button>
+                <button id="btn-topology-joincut-reset" class="btn-ghost" type="button" style="padding:4px 8px; font-size:10.5px;">Reset angle</button>
                 <span id="topo-joincut-summary" class="mono muted" style="font-size:10.5px; margin-left:auto;">Waiting for live Join-Cut coordinates</span>
               </div>
               <div id="topo-hierarchy-view">
@@ -1859,7 +2142,9 @@
                 <button id="btn-run-kraken-qa" class="btn-ghost" type="button" title="Run deterministic Product QA (imports, headless Tcl/Tk GUI smoke, UI parity, unit tests)">🧪 Run Product QA Smoke Check</button>
                 <button id="btn-kraken-paper-review" class="btn-ghost" type="button" title="Send the simulated portfolio totals to Claude and GPT, then have Gemini review their findings">Review paper results with Claude, GPT &amp; Gemini</button>
                 <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View Top 25 paper trial</button>
-                <button id="btn-kraken-top25-picks" class="btn-ghost" type="button">View Top 25 picks</button>
+                <button id="btn-kraken-named-analysts" class="btn-ghost" type="button">View analyst decisions</button>
+                <select id="kraken-analyst-round" aria-label="Choose an analyst journal round" hidden></select>
+                <button id="btn-kraken-top25-picks" class="btn-ghost" type="button">View momentum baseline</button>
                 <button id="btn-swarm-kraken-qa" class="btn-ghost" type="button" title="Dispatch the 4-agent Swarm in Product QA mode to audit the Kraken GUI product">⚡ Swarm QA Mission on Kraken</button>
                 <button id="btn-swarm-manage-kraken" class="btn-primary" type="button" title="Deploy the Swarm to autonomously monitor order-books, turnover velocity, and QuantOrb safety">🤖 Deploy Swarm Kraken Manager</button>
               </div>
@@ -3007,6 +3292,52 @@
               </div>
             </div>
           </div>
+
+          <!-- Cross-System Lab Mesh & Air-Gapped Code Maintenance -->
+          <div class="panel" style="margin-top:12px;">
+            <div class="panel-head">
+              <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+                <h3 class="panel-title">🌐 Cross-System Maintenance &amp; Lab Mesh</h3>
+                <span id="mesh-ego-badge" class="pill pill-idle mono" style="font-size:11px;">ego-lab: checking…</span>
+              </div>
+              <div class="row" style="gap:6px;">
+                <button id="btn-mesh-diff" class="btn-ghost" type="button">Compare Code Trees</button>
+                <button id="btn-mesh-dry-sync" class="btn-ghost" type="button">Dry-Run Sync</button>
+                <button id="btn-mesh-deploy" class="btn-primary" type="button">Deploy to Lab</button>
+                <button id="btn-mesh-sync-wheels" class="btn-ghost" type="button">Sync Wheels to Lab</button>
+              </div>
+            </div>
+            <p class="muted" style="font-size:12px; margin-bottom:8px;">
+              Maintains code synchronization, automated syntax verification, and universal wheelhouse mirroring between <code>windows-workstation</code> and <code>ego-lab</code> (<code>ssh ego</code> / <code>/home/ego/bot/Sabrina-windows-sync</code>).
+            </p>
+            <div id="mesh-action-feedback" class="feedback mono" style="margin-top:6px; font-size:11.5px; white-space:pre-wrap;"></div>
+          </div>
+
+          <!-- Self-Hosted Forgejo (Git, PyPI & RSI Artifact Registry on /mnt/14tb) -->
+          <div class="panel" style="margin-top:12px;">
+            <div class="panel-head">
+              <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
+                <h3 class="panel-title">🧱 Self-Hosted Forgejo Registry (<code>/mnt/webapps-nvme/agent_stack/forgejo</code>)</h3>
+                <span id="forgejo-status-badge" class="pill pill-idle mono" style="font-size:11px;">Forgejo: checking…</span>
+                <span id="forgejo-pkg-count-badge" class="pill pill-idle mono" style="font-size:11px;">0 hosted packages</span>
+              </div>
+              <div class="row" style="gap:6px; flex-wrap:wrap;">
+                <button id="btn-forgejo-deploy" class="btn-ghost" type="button">Deploy Container to ego</button>
+                <button id="btn-forgejo-sync-wheels" class="btn-ok" type="button">Push Wheels to PyPI</button>
+                <button id="btn-forgejo-publish-rsi" class="btn-ghost" type="button">Publish RSI Scorecards</button>
+              </div>
+            </div>
+            <p class="muted" style="font-size:12px; margin-bottom:8px;">
+              Single-container Git + PyPI + OCI + Generic artifact registry on <code>ego</code>. PyPI Index: <code id="forgejo-pypi-url-label">http://127.0.0.1:3003/api/packages/ego/pypi/simple</code>
+            </p>
+            <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
+              <input id="forgejo-url-input" type="text" placeholder="http://127.0.0.1:3003" style="flex:1.4; min-width:200px; padding:5px 8px; font-size:12px;" />
+              <input id="forgejo-owner-input" type="text" placeholder="Owner (ego)" style="width:110px; padding:5px 8px; font-size:12px;" />
+              <input id="forgejo-token-input" type="password" placeholder="API Token (saved encrypted)" style="flex:1; min-width:180px; padding:5px 8px; font-size:12px;" autocomplete="off" />
+              <button id="btn-forgejo-save" class="btn-primary" type="button">Save &amp; Probe</button>
+            </div>
+            <div id="forgejo-action-feedback" class="feedback mono" style="margin-top:6px; font-size:11.5px; white-space:pre-wrap;"></div>
+          </div>
         </section>
       </div>
     </main>
@@ -3292,6 +3623,18 @@
         return "$" + Number(v || 0).toFixed(0);
       }
 
+      function formatSignedUsdCompactJs(v, suffix = "") {
+        const num = Number(v) || 0;
+        const sign = num > 0 ? "+" : (num < 0 ? "-" : "");
+        const abs = Math.abs(num);
+        let core;
+        if (abs >= 1e9) core = "$" + (abs / 1e9).toFixed(2) + "B";
+        else if (abs >= 1e6) core = "$" + (abs / 1e6).toFixed(2) + "M";
+        else if (abs >= 1e3) core = "$" + (abs / 1e3).toFixed(1) + "K";
+        else core = "$" + abs.toFixed(0);
+        return sign + core + suffix;
+      }
+
       function drawKrakenGainersChart(canvas, spec, hoverXRatio = null) {
         if (!canvas || !spec || !Array.isArray(spec.series)) return;
         const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -3312,6 +3655,69 @@
           ctx.fillStyle = "#8b98b0";
           ctx.font = "12px 'Segoe UI', sans-serif";
           ctx.fillText("Waiting for live Kraken 24h top gainers stream…", 18, cssH / 2);
+          ctx.restore();
+          return;
+        }
+
+        if (spec.mode === "momentum") {
+          const padL = 104, padR = 205, padT = 18, padB = 18;
+          const plotW = Math.max(80, cssW - padL - padR);
+          const plotH = Math.max(120, cssH - padT - padB);
+          const vals = series.map((s) => {
+            if (s.momentum_usd_day !== undefined && s.momentum_usd_day !== null) return Number(s.momentum_usd_day) || 0;
+            return (Number(s.vol_24h_usd) || 0) * ((Number(s.change_pct_24h) || 0) / 100.0);
+          });
+          const hasNeg = vals.some((v) => v < 0);
+          const maxAbs = Math.max(1, ...vals.map((v) => Math.abs(v)));
+          const zeroX = hasNeg ? padL + plotW * 0.5 : padL;
+          const halfW = hasNeg ? plotW * 0.5 : plotW;
+          const rowH = plotH / series.length;
+
+          if (hasNeg) {
+            ctx.strokeStyle = "rgba(148,163,184,0.4)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(zeroX, padT);
+            ctx.lineTo(zeroX, padT + plotH);
+            ctx.stroke();
+          }
+
+          series.forEach((s, i) => {
+            const y = padT + i * rowH;
+            const barH = Math.max(10, Math.min(20, rowH - 6));
+            const by = y + (rowH - barH) / 2;
+            const momDay = vals[i];
+            const momHr = (s.momentum_usd_hr !== undefined && s.momentum_usd_hr !== null) ? (Number(s.momentum_usd_hr) || 0) : (momDay / 24.0);
+            const pct = Number(s.change_pct_24h) || 0;
+            const bw = Math.max(3, (Math.abs(momDay) / maxAbs) * halfW);
+            const bx = momDay >= 0 ? zeroX : zeroX - bw;
+
+            ctx.fillStyle = "#cbd5e1";
+            ctx.font = "600 11px ui-monospace, Consolas, monospace";
+            ctx.textAlign = "right";
+            ctx.fillText(`#${s.rank} ${s.symbol}`, padL - 10, by + barH - 3);
+
+            ctx.fillStyle = "rgba(36,50,77,0.45)";
+            ctx.fillRect(padL, by, plotW, barH);
+
+            ctx.fillStyle = momDay >= 0 ? (s.color || "#34d399") : "#f87171";
+            ctx.globalAlpha = 0.85;
+            ctx.fillRect(bx, by, bw, barH);
+            ctx.globalAlpha = 1.0;
+            if (s.held) {
+              ctx.strokeStyle = "#fbbf24";
+              ctx.lineWidth = 1.5;
+              ctx.strokeRect(bx, by, bw, barH);
+            }
+
+            ctx.fillStyle = momDay >= 0 ? "#34d399" : "#f87171";
+            ctx.textAlign = "left";
+            ctx.fillText(
+              `${formatSignedUsdCompactJs(momDay, "/d")} · ${formatSignedUsdCompactJs(momHr, "/h")} (${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%)`,
+              padL + plotW + 8,
+              by + barH - 3
+            );
+          });
           ctx.restore();
           return;
         }
@@ -3519,7 +3925,7 @@
           canvas.dataset.boundHover = "1";
           canvas.addEventListener("mousemove", (ev) => {
             const st = pluginChartState.get(pluginName);
-            if (!st || !st.spec || st.spec.mode === "bars") return;
+            if (!st || !st.spec || st.spec.mode === "bars" || st.spec.mode === "momentum") return;
             const rect = canvas.getBoundingClientRect();
             const padL = 54, padR = 128;
             const plotW = Math.max(120, rect.width - padL - padR);
@@ -3550,6 +3956,105 @@
         if (fb) fb.textContent = "Updating " + operation + "…";
         const res = await callBridge("PluginTabs", "run_plugin_tab_operation", name, operation, argsObj || {});
         renderPluginTabOutput(section, res, name);
+      }
+
+      function addKrakenReportButton(cell, symbol, stock) {
+        if (!cell || stock || !symbol.endsWith("/USD") || cell.querySelector("[data-km-pair-report]")) return;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "km-btn-xs";
+        button.setAttribute("data-km-pair-report", symbol);
+        button.textContent = "Pair report";
+        cell.append(" ", button);
+      }
+
+      function bindKrakenPairReports(section) {
+        const tbody = section.querySelector("[data-km-gainer-list]");
+        if (!tbody) return;
+        for (const row of tbody.querySelectorAll("[data-km-gainer-row]")) {
+          const cell = row.cells[1];
+          const stock = cell && Array.from(cell.querySelectorAll(".km-mini-badge")).some(badge => badge.textContent === "xSTOCK");
+          addKrakenReportButton(cell, row.getAttribute("data-km-gainer-row"), stock);
+        }
+        if (!section.querySelector("[data-km-report-panel]")) {
+          const panel = document.createElement("div");
+          panel.className = "km-subcard";
+          panel.setAttribute("data-km-report-panel", "1");
+          panel.setAttribute("aria-live", "polite");
+          panel.hidden = true;
+          tbody.closest("table").parentElement.after(panel);
+        }
+        const state = section._pairReport || (section._pairReport = { sequence: 0 });
+        const render = () => {
+          const panel = section.querySelector("[data-km-report-panel]");
+          if (!panel || !state.symbol) return;
+          panel.hidden = false;
+          const title = document.createElement("h3");
+          title.className = "km-card-title";
+          title.textContent = state.symbol + " · Analyst report";
+          panel.replaceChildren(title);
+          if (!state.result || !state.result.ok) {
+            const status = document.createElement("p");
+            status.textContent = state.result ? state.result.error : state.pending;
+            panel.appendChild(status);
+            return;
+          }
+          const body = state.result;
+          for (const part of body.sections) {
+            const heading = document.createElement("h4");
+            heading.textContent = part.title;
+            panel.appendChild(heading);
+            for (const line of part.paragraphs) {
+              const p = document.createElement("p");
+              p.textContent = line;
+              panel.appendChild(p);
+            }
+          }
+          const marks = document.createElement("button");
+          marks.type = "button";
+          marks.className = "km-btn-xs";
+          marks.setAttribute("data-km-refresh-report", body.report.id);
+          marks.textContent = "Refresh journal outcomes";
+          panel.appendChild(marks);
+          if (body.report.history && body.report.history.length) {
+            const archive = document.createElement("details");
+            const heading = document.createElement("summary");
+            heading.textContent = "Other journal entries for " + state.symbol;
+            archive.appendChild(heading);
+            for (const item of body.report.history) {
+              const record = document.createElement("button");
+              record.type = "button";
+              record.className = "km-btn-xs";
+              record.setAttribute("data-km-refresh-report", item.id);
+              record.textContent = new Date(item.issued_at * 1000).toLocaleString() + " · " + item.action.replaceAll("_", " ").toLowerCase();
+              archive.append(" ", record);
+            }
+            panel.appendChild(archive);
+          }
+        };
+        render();
+        if (state.bound) return;
+        state.bound = true;
+        section.addEventListener("click", async (ev) => {
+          const btn = ev.target.closest("[data-km-pair-report], [data-km-refresh-report]");
+          if (!btn || !section.contains(btn)) return;
+          const id = btn.getAttribute("data-km-refresh-report");
+          const symbol = id ? state.symbol : btn.getAttribute("data-km-pair-report");
+          if (!id && !state.result && symbol === state.symbol) return;
+          const seq = ++state.sequence;
+          state.symbol = symbol;
+          state.result = null;
+          state.pending = id ? "Reading the journal…" : "Scoring " + symbol + " with JEV and preparing the report…";
+          render();
+          const panel = section.querySelector("[data-km-report-panel]");
+          if (panel) panel.scrollIntoView({block:"nearest"});
+          const reply = id ? await callBridge("Kraken", "read_kraken_pair_report", id)
+                           : await callBridge("Kraken", "get_kraken_pair_report", symbol);
+          if (seq !== state.sequence || !section.isConnected) return;
+          state.result = reply && reply.ok && reply.report && reply.report.symbol === symbol && Array.isArray(reply.sections)
+            ? reply : {ok:false, error:(reply && reply.error) || "The selected report is unavailable."};
+          render();
+        });
       }
 
       function applyKrakenWsTickDelta(section, pluginName, tickBody) {
@@ -3596,10 +4101,10 @@
           const rows = gainers.map((g, index) => {
             const sym = String(g.symbol || "?");
             let row = oldRows.get(sym);
-            if (!row || row.cells.length !== 13) {
+            if (!row || row.cells.length !== 15) {
               row = document.createElement("tr");
               row.setAttribute("data-km-gainer-row", sym);
-              for (let i = 0; i < 13; i++) row.appendChild(document.createElement("td"));
+              for (let i = 0; i < 15; i++) row.appendChild(document.createElement("td"));
               const name = document.createElement("strong");
               name.textContent = sym;
               row.cells[1].replaceChildren(name);
@@ -3625,6 +4130,7 @@
               tapeBtn.textContent = "▼ Tape";
               row.cells[1].appendChild(document.createTextNode(" "));
               row.cells[1].appendChild(tapeBtn);
+              addKrakenReportButton(row.cells[1], sym, g.is_stock);
               row.cells[5].textContent = "—";
             }
             const cells = row.cells;
@@ -3677,6 +4183,21 @@
             cells[12].className = "km-mono km-small";
             cells[12].textContent = trd ? trd.toLocaleString() : "—";
             cells[12].title = trd ? `24h Trades: ${trd.toLocaleString()} (Avg size: $${Math.round(avgTrd).toLocaleString()})` : "24h Trades";
+
+            const volUsd = Number(g.vol_24h_usd) || 0;
+            const momDay = (g.momentum_usd_day !== undefined && g.momentum_usd_day !== null)
+              ? (Number(g.momentum_usd_day) || 0)
+              : (volUsd * (change / 100.0));
+            const momHr = (g.momentum_usd_hr !== undefined && g.momentum_usd_hr !== null)
+              ? (Number(g.momentum_usd_hr) || 0)
+              : (momDay / 24.0);
+            const momCls = momDay >= 0 ? "km-pos" : "km-neg";
+            cells[13].className = "km-mono " + momCls;
+            cells[13].textContent = formatSignedUsdCompactJs(momDay, " / day");
+            cells[13].title = "p = V_USD × (%ΔP / 24h)";
+            cells[14].className = "km-mono " + momCls;
+            cells[14].textContent = formatSignedUsdCompactJs(momHr, " / hr");
+            cells[14].title = "p / 24h";
             return row;
           });
           const combined = [];
@@ -3686,7 +4207,11 @@
             const drw = oldDrawers.get(sym);
             if (drw) combined.push(drw);
           });
-          tbody.replaceChildren(...combined);
+          const curChildren = Array.from(tbody.children);
+          const orderChanged = curChildren.length !== combined.length || combined.some((node, i) => curChildren[i] !== node);
+          if (orderChanged) {
+            tbody.replaceChildren(...combined);
+          }
         }
         // Re-mark active Paper Lab single-pair positions when live WS quotes arrive
         const quotes = tickBody.quotes || {};
@@ -3769,14 +4294,31 @@
         if ((displayMode === "html" || displayMode === "dashboard") && body && typeof body === "object" && typeof body.html === "string" && richHost) {
           out.style.display = "none";
           richHost.style.display = "block";
-          richHost.replaceChildren(sanitizePluginHtmlFragment(body.html));
           const effPlugin = pluginName || section.dataset.pluginName || "";
+          const prevFeed = richHost.querySelector(".km-feed");
+          const prevFeedScroll = prevFeed ? prevFeed.scrollTop : 0;
+          const prevOpenDrawers = new Set(
+            Array.from(richHost.querySelectorAll("tr[data-km-drawer-row]"))
+              .filter((r) => r.style.display !== "none")
+              .map((r) => r.getAttribute("data-km-drawer-row"))
+          );
+          richHost.replaceChildren(sanitizePluginHtmlFragment(body.html));
           if (effPlugin === "kraken_monitor") {
+            const newFeed = richHost.querySelector(".km-feed");
+            if (newFeed && prevFeedScroll > 0) newFeed.scrollTop = prevFeedScroll;
+            bindKrakenPairReports(section);
             annotateKrakenPaperStrategies(richHost, body.snapshot);
             richHost.querySelectorAll("[data-km-drawer-toggle]").forEach((btnEl) => {
+              const sym = btnEl.getAttribute("data-km-drawer-toggle");
+              if (prevOpenDrawers.has(sym)) {
+                const drawer = richHost.querySelector(`tr[data-km-drawer-row="${CSS.escape(sym)}"]`);
+                if (drawer) {
+                  drawer.style.display = "table-row";
+                  btnEl.textContent = "▲ Tape";
+                }
+              }
               btnEl.addEventListener("click", (ev) => {
                 ev.stopPropagation();
-                const sym = btnEl.getAttribute("data-km-drawer-toggle");
                 const drawer = richHost.querySelector(`tr[data-km-drawer-row="${CSS.escape(sym)}"]`);
                 if (!drawer) return;
                 const isClosed = drawer.style.display === "none";
@@ -3796,7 +4338,7 @@
             });
           });
           if (body.chart_spec && effPlugin) {
-            requestAnimationFrame(() => bindKrakenChartCanvas(section, effPlugin, body.chart_spec));
+            bindKrakenChartCanvas(section, effPlugin, body.chart_spec);
           }
           return;
         }
@@ -3810,15 +4352,25 @@
         }
       }
 
-      async function refreshPluginTab(name) {
+      const pluginTabInFlight = new Map();
+
+      async function refreshPluginTab(name, { silent = false } = {}) {
         const section = el("view-" + pluginTabId(name));
         if (!section) return;
-        section.querySelector(".plugin-tab-feedback").textContent = "Loading…";
-        const savedFilter = pluginFilterState.get(name);
-        const res = (name === "kraken_monitor" && savedFilter)
-          ? await callBridge("PluginTabs", "run_plugin_tab_operation", name, "dashboard", savedFilter)
-          : await callBridge("PluginTabs", "run_plugin_tab", name);
-        renderPluginTabOutput(section, res, name);
+        if (pluginTabInFlight.get(name)) return;
+        pluginTabInFlight.set(name, true);
+        try {
+          if (!silent) {
+            section.querySelector(".plugin-tab-feedback").textContent = "Loading…";
+          }
+          const savedFilter = pluginFilterState.get(name);
+          const res = (name === "kraken_monitor" && savedFilter)
+            ? await callBridge("PluginTabs", "run_plugin_tab_operation", name, "dashboard", savedFilter)
+            : await callBridge("PluginTabs", "run_plugin_tab", name);
+          renderPluginTabOutput(section, res, name);
+        } finally {
+          pluginTabInFlight.set(name, false);
+        }
       }
 
       function buildPluginTab(tab) {
@@ -3871,15 +4423,17 @@
           }
         });
         if (tab.refresh_seconds > 0) {
+          if (pluginTabTimers.has(viewName)) clearInterval(pluginTabTimers.get(viewName));
           // The timer runs only while this tab is the active view.
           pluginTabTimers.set(viewName, setInterval(() => {
-            if (section.classList.contains("active")) refreshPluginTab(tab.plugin);
+            if (section.classList.contains("active")) refreshPluginTab(tab.plugin, { silent: true });
           }, tab.refresh_seconds * 1000));
         }
         if (tab.plugin === "kraken_monitor") {
+          if (pluginWsTimers.has(viewName)) clearInterval(pluginWsTimers.get(viewName));
           let wsBusy = false;
           pluginWsTimers.set(viewName, setInterval(async () => {
-            if (!section.classList.contains("active") || !section.dataset.loaded || wsBusy) return;
+            if (!section.classList.contains("active") || !section.dataset.loaded || wsBusy || pluginTabInFlight.get("kraken_monitor")) return;
             wsBusy = true;
             try {
               const filt = pluginFilterState.get("kraken_monitor") || { asset_class: "crypto", limit: 25, chart_mode: "trajectory" };
@@ -3926,21 +4480,6 @@
           st.includes("SPAWNING") ||
           st.includes("AUTONOMOUS")
         );
-      }
-
-      function resolveWorkerParentIndex(worker) {
-        const p = String((worker && worker.parent_node) || "").toLowerCase().trim();
-        if (p === "sabrina") return 0;
-        if (p === "codex") return 1;
-        if (p === "antigravity") return 2;
-        if (p === "claude") return 3;
-        if (p === "desktop") return 4;
-        const role = String((worker && worker.role) || "").toLowerCase();
-        if (role.includes("plan") || role.includes("architect") || role.includes("spec") || role.includes("codex")) return 1;
-        if (role.includes("verif") || role.includes("critic") || role.includes("audit") || role.includes("review")) return 3;
-        if (role.includes("desktop") || role.includes("cursor") || role.includes("gate")) return 4;
-        if (role.includes("exec") || role.includes("impl") || role.includes("scout") || role.includes("worker")) return 2;
-        return 0;
       }
 
       function workerStateStyle(statusStr, fallbackColor) {
@@ -4311,7 +4850,7 @@
           const gatePenalty = Math.abs(Math.min(0, confGate)) * 0.45;
           const effectiveCeiling = maxTotalAgents !== null ? maxTotalAgents : RENDER_SAFETY_FUSE;
           const explicitDepthExpansion = !isZeroPredefSeed && maxDepth !== null && maxDepth > blueprintMaxDepth;
-          const maxAlgoDepth = maxDepth !== null ? maxDepth : 14;
+          const maxAlgoDepth = maxDepth !== null ? maxDepth : Number.POSITIVE_INFINITY;
           const convergeLeaves = [];
           const seedNodes = nodeList.filter((n) => !n.unreachable);
 
@@ -4973,15 +5512,26 @@
           });
         });
 
-        // Link real parent -> worker edges based on role hierarchy
+        // Link real parent -> worker edges directly by declared parent_id / Cantor ancestry
         const roleToNode = new Map();
+        const cantorToNode = new Map();
         Array.from(nodesById.values()).forEach((n) => {
           if (n.role) roleToNode.set(n.role.toLowerCase(), n);
+          if (n.cantorPath) cantorToNode.set(n.cantorPath, n);
         });
+
+        const resolveCantorAncestor = (path) => {
+          const segs = String(path || "").split(".").filter(Boolean);
+          while (segs.length > 1) {
+            segs.pop();
+            const cand = cantorToNode.get(segs.join("."));
+            if (cand) return cand;
+          }
+          return null;
+        };
 
         Array.from(nodesById.values()).forEach((n) => {
           if (n.id === "sabrina" || n.parentIds.length > 0) return;
-          const rLow = String(n.role || "").toLowerCase();
           let parentNode = null;
           if (n.recoveryFor) {
             parentNode = nodesById.get(n.recoveryFor) || rootNode;
@@ -4990,11 +5540,9 @@
             const rawParentLow = rawP.toLowerCase();
             parentNode = (rawParentLow === "sabrina" || rawParentLow === "coordinator" ? rootNode : null)
               || nodesById.get(rawP)
-              || nodesById.get(rawP.toLowerCase())
-              || roleToNode.get(rawP.toLowerCase())
-              || (rLow === "planner_architect" || rLow === "research_scout" || rLow === "rag_scout" ? rootNode : null)
-              || (rLow === "execution_specialist" ? (roleToNode.get("planner_architect") || rootNode) : null)
-              || (rLow === "critic_verifier" ? (roleToNode.get("execution_specialist") || roleToNode.get("planner_architect") || rootNode) : null)
+              || nodesById.get(rawParentLow)
+              || cantorToNode.get(rawP)
+              || (n.cantorPath ? resolveCantorAncestor(n.cantorPath) : null)
               || rootNode;
           }
           n.parentIds.push(parentNode.id);
@@ -5018,17 +5566,13 @@
           });
         });
 
-        // Add alias map to nodesById so lookups for "codex", "antigravity", "claude" or role names resolve to the live worker
-        const aliasMap = new Map();
+        const roleAliasMap = new Map();
         Array.from(nodesById.values()).forEach((n) => {
-          if (n.role) aliasMap.set(n.role.toLowerCase(), n);
-          if (n._rawParent && n._rawParent !== "sabrina") aliasMap.set(n._rawParent.toLowerCase(), n);
+          if (n.role) roleAliasMap.set(n.role.toLowerCase(), n);
+          if (n._rawParent && n._rawParent !== "sabrina") roleAliasMap.set(n._rawParent.toLowerCase(), n);
         });
-        if (roleToNode.has("planner_architect")) aliasMap.set("codex", roleToNode.get("planner_architect"));
-        if (roleToNode.has("execution_specialist")) aliasMap.set("antigravity", roleToNode.get("execution_specialist"));
-        if (roleToNode.has("critic_verifier")) aliasMap.set("claude", roleToNode.get("critic_verifier"));
         const baseGet = nodesById.get.bind(nodesById);
-        nodesById.get = (k) => baseGet(k) || aliasMap.get(String(k || "").toLowerCase()) || null;
+        nodesById.get = (k) => baseGet(k) || roleAliasMap.get(String(k || "").toLowerCase()) || null;
 
         // Compute real depth via BFS from sabrina
         const depthSeen = new Set(["sabrina"]);
@@ -5066,7 +5610,7 @@
             if (fc.worker_id) authorNode = nodesById.get(fc.worker_id);
             if (!authorNode && fc.role) authorNode = roleToNode.get(String(fc.role).toLowerCase()) || nodesById.get(String(fc.role).toLowerCase());
             const fileAuthored = Boolean(authorNode);
-            if (!authorNode) authorNode = roleToNode.get("execution_specialist") || nodesById.get("antigravity") || rootNode;
+            if (!authorNode) authorNode = roleToNode.get("execution_specialist") || rootNode;
             const fStatus = String(fc.status || "CREATED").toUpperCase();
             const la = Number(fc.lines_added || 0);
             const lr = Number(fc.lines_removed || 0);
@@ -5290,8 +5834,8 @@
           ? cachedSwarmA2aLinks.find((x) => x.id === existingId)
           : cachedSwarmA2aLinks.find((x) => x.from === fromId && x.to === toId);
         const isSelf = fromId === toId;
-        const isBack = (fromId === "claude" && (toId === "antigravity" || toId === "codex")) || toId === "sabrina";
-        const isCritic = toId === "claude" || /verif|critic/i.test(toId);
+        const isBack = (/verif|critic/i.test(fromId) && /exec|plan/i.test(toId)) || toId === "sabrina";
+        const isCritic = /verif|critic/i.test(toId);
         const isRootSpawn = fromId === "sabrina";
         const defComm = existing
           ? canonicalizeJoinCutComm(existing.comm_type)
@@ -5531,6 +6075,18 @@
       }
 
 
+      const uiThemeControl = el("ui-theme-select");
+      const btnCycleUiTheme = el("btn-cycle-ui-theme");
+      const UI_THEMES = ["obsidian", "hive", "royal_hive", "daylight_comb"];
+      const UI_THEME_ICONS = {
+        obsidian: "🌌",
+        hive: "🐝",
+        royal_hive: "👑",
+        daylight_comb: "☀️",
+      };
+      const DEFAULT_OBSIDIAN_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><circle cx='20' cy='20' r='18' fill='%230284c7'/><text x='20' y='25' font-size='16' text-anchor='middle' fill='%23ffffff' font-family='sans-serif' font-weight='bold'>S</text></svg>";
+      const DEFAULT_HIVE_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><polygon points='20,2 36,11 36,29 20,38 4,29 4,11' fill='%23d97706' stroke='%23fde68a' stroke-width='1.6'/><polygon points='20,7 31,13.5 31,26.5 20,33 9,26.5 9,13.5' fill='%231c1308' opacity='0.32'/><text x='20' y='25.5' font-size='16' text-anchor='middle' fill='%23fffbeb' font-family='sans-serif' font-weight='bold'>🐝</text></svg>";
+
       const swarmThemeControl = el("topo-sprite-theme");
       const swarmMotionControl = el("topo-motion");
       const swarmLinkStyleControl = el("topo-link-style");
@@ -5545,7 +6101,85 @@
       };
       const reducedSwarmMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
       let swarmDisplayEdited = false;
+      let uiThemeEdited = false;
       let swarmDisplaySave = Promise.resolve();
+
+      function syncBrandEmblemForTheme(uiTheme) {
+        const avatarImg = el("brand-avatar");
+        if (!avatarImg) return;
+        if (avatars && avatars.sabrina) return;
+        const isHiveFamily = uiTheme === "hive" || uiTheme === "royal_hive" || uiTheme === "daylight_comb";
+        avatarImg.src = isHiveFamily ? DEFAULT_HIVE_AVATAR : DEFAULT_OBSIDIAN_AVATAR;
+      }
+
+      function applyUiTheme(nextTheme, { persist = true, syncGraph = false } = {}) {
+        const valid = UI_THEMES.includes(nextTheme) ? nextTheme : "obsidian";
+        if (valid === "obsidian") {
+          delete document.documentElement.dataset.uiTheme;
+        } else {
+          document.documentElement.dataset.uiTheme = valid;
+        }
+        if (uiThemeControl && uiThemeControl.value !== valid) {
+          uiThemeControl.value = valid;
+        }
+        if (btnCycleUiTheme) {
+          btnCycleUiTheme.textContent = UI_THEME_ICONS[valid] || "🎨";
+        }
+        syncBrandEmblemForTheme(valid);
+        try {
+          localStorage.setItem("sabrina_ui_theme", valid);
+        } catch (_err) {}
+
+        if (syncGraph && swarmThemeControl && swarmBackdropControl) {
+          const isHiveUi = valid === "hive" || valid === "royal_hive" || valid === "daylight_comb";
+          if (isHiveUi && swarmThemeControl.value === "robots" && swarmBackdropControl.value === "standard") {
+            swarmThemeControl.value = "hive";
+            swarmBackdropControl.value = "honeycomb";
+            renderTopology(lastRenderedTopology.nodes, lastRenderedTopology.workers, lastRenderedTopology.activeHandoffs);
+          } else if (!isHiveUi && swarmThemeControl.value === "hive" && swarmBackdropControl.value === "honeycomb") {
+            swarmThemeControl.value = "robots";
+            swarmBackdropControl.value = "standard";
+            renderTopology(lastRenderedTopology.nodes, lastRenderedTopology.workers, lastRenderedTopology.activeHandoffs);
+          }
+        }
+
+        if (persist) {
+          uiThemeEdited = true;
+          const api = window.pywebview?.api;
+          if (typeof api?.save_ui_theme === "function") {
+            swarmDisplaySave = swarmDisplaySave.then(async () => {
+              await api.save_ui_theme(valid);
+            }).catch(error => debugLog("WARN", "UI theme", error));
+          }
+          if (syncGraph) saveSwarmDisplay();
+        }
+      }
+
+      function cycleUiTheme() {
+        const cur = uiThemeControl ? uiThemeControl.value : (document.documentElement.dataset.uiTheme || "obsidian");
+        const idx = UI_THEMES.indexOf(cur);
+        const nxt = UI_THEMES[(idx + 1) % UI_THEMES.length];
+        applyUiTheme(nxt, { persist: true, syncGraph: true });
+      }
+
+      if (uiThemeControl) {
+        const bootTheme = document.documentElement.dataset.uiTheme || "obsidian";
+        applyUiTheme(bootTheme, { persist: false, syncGraph: false });
+        uiThemeControl.addEventListener("change", () => {
+          applyUiTheme(uiThemeControl.value, { persist: true, syncGraph: true });
+        });
+      }
+      if (btnCycleUiTheme) {
+        btnCycleUiTheme.addEventListener("click", cycleUiTheme);
+      }
+      window.addEventListener("keydown", (ev) => {
+        if (ev.altKey && !ev.ctrlKey && !ev.metaKey && (ev.key === "t" || ev.key === "T")) {
+          const tag = (ev.target && ev.target.tagName) ? ev.target.tagName.toLowerCase() : "";
+          if (tag === "input" || tag === "textarea") return;
+          ev.preventDefault();
+          cycleUiTheme();
+        }
+      });
 
       function syncSwarmGraphMotion() {
         const svg = el("topo-svg");
@@ -5566,6 +6200,7 @@
           args.push(swarmLinkStyleControl.value, swarmLinkSpeedControl.value);
         }
         if (api.save_swarm_display.length >= 5) args.push(swarmBackdropControl.value);
+        if (api.save_swarm_display.length >= 6 && uiThemeControl) args.push(uiThemeControl.value);
         swarmDisplaySave = swarmDisplaySave.then(async () => {
           const result = await api.save_swarm_display(...args);
           if (!result?.ok) throw new Error(result?.error || "Could not save graph appearance");
@@ -5576,7 +6211,11 @@
         const api = window.pywebview?.api;
         if (typeof api?.get_swarm_display !== "function") return;
         let prefs = await api.get_swarm_display();
-        if (!prefs || swarmDisplayEdited) return;
+        if (!prefs) return;
+        if (prefs.ui_theme && !uiThemeEdited && UI_THEMES.includes(prefs.ui_theme)) {
+          applyUiTheme(prefs.ui_theme, { persist: false, syncGraph: false });
+        }
+        if (swarmDisplayEdited) return;
         if (prefs.theme === "workshop") {
           prefs = { ...prefs, theme: "christmas", backdrop: prefs.backdrop ?? "workshop" };
         }
@@ -5761,13 +6400,143 @@
             ....................
           `,
         },
+        queen_bee: {
+          palette: { o: "#261607", a: "#f59e0b", h: "#fde047", b: "#45270d", f: "#3b220c",
+                     e: "#fef08a", w: "#e0f2fe", c: "#fbbf24", p: "#f97316", m: "#c084fc" },
+          pixels: `
+            ....................
+            .......h..m..h......
+            .......hhhmhhh......
+            .......occccco......
+            ......ooooooooo.....
+            .....offfffffff.....
+            ....offEEfffEEfo....
+            ..wwowfeefffeefoww..
+            .wwwowfffffffffowww.
+            .wwwoohhhhhhhhhooww.
+            ..oo.obbbbbbbbbo.oo.
+            .....ohhhhhhhhho....
+            .....obbbbbbbbbo....
+            .....oaaaaaaaaao....
+            ......obbbbbbbo.....
+            ......oaaaaaaao.....
+            .......obbbbbo......
+            ........oopo........
+            .........oo.........
+            ....................
+          `,
+        },
+        architect_bee: {
+          palette: { o: "#241608", a: "#f59e0b", h: "#fcd34d", b: "#3f260f", f: "#2e1c0c",
+                     e: "#38bdf8", w: "#dbeafe", c: "#60a5fa", p: "#d97706" },
+          pixels: `
+            ....................
+            ......oo.....oo.....
+            .......o.....o......
+            ......ohhhhhhho.....
+            .....ohhaaaaahho....
+            ....ooooooooooooo...
+            ....occcEEfccEEco...
+            ..wwoccccefcceeco...
+            .wwwowfffffffffowww.
+            ..wwoohhhhhhhhhooww.
+            .....obbbbbbbbbo....
+            .....oaaaaaaaaao....
+            .....obbbbbbbbbo....
+            .....ohhhhhhhhho....
+            ......obbbbbbbo.....
+            .......oaaaaao......
+            .......oo...oo......
+            ....................
+            ....................
+            ....................
+          `,
+        },
+        scout_bee: {
+          palette: { o: "#231709", a: "#fbbf24", h: "#fef08a", b: "#3b250e", f: "#301d0b",
+                     e: "#34d399", w: "#ecfeff", c: "#5eead4", p: "#f59e0b" },
+          pixels: `
+            ....................
+            .....cc.......cc....
+            ......o.......o.....
+            ......ooooooooo.....
+            .....offfffffffo....
+            ....owwEEfofEEwwo...
+            ..wwowweefofeewwo...
+            .wwwowfffffffffowww.
+            .wwwoohhhhhhhhhooww.
+            ..oo.obbbbbbbbbo.oo.
+            .....oaaaaaaaaao....
+            .....obbbbbbbbbo....
+            .....oaaaaaaaaao....
+            ......obbbbbbbo.....
+            .......ohhhhho......
+            ........obpbo.......
+            .........ooo........
+            ....................
+            ....................
+            ....................
+          `,
+        },
+        worker_bee: {
+          palette: { o: "#261708", a: "#f59e0b", h: "#fde68a", b: "#42270d", f: "#351f0a",
+                     e: "#fbbf24", w: "#f0f9ff", c: "#d97706", p: "#ea580c" },
+          pixels: `
+            ....................
+            ......pp.....pp.....
+            .......o.....o......
+            .....ooooooooooo....
+            ....occhhhhhhhcco...
+            ....offfffffffcco...
+            ..wwoffEEfffEEffoww.
+            .wwwowfeefffeefowww.
+            .wwwoohhhhhhhhhooww.
+            .....obbbbbbbbbo....
+            .....oaaaaaaaaao....
+            .....obbbbbbbbbo....
+            .....oaaaaaaaaao....
+            .....obbbbbbbbbo....
+            ......oaaaaaaao.....
+            .......obbbbbo......
+            .......oo...oo......
+            ....................
+            ....................
+            ....................
+          `,
+        },
+        guard_bee: {
+          palette: { o: "#211509", a: "#d97706", h: "#fcd34d", b: "#38220d", f: "#2b1909",
+                     e: "#a78bfa", w: "#ede9fe", c: "#10b981", p: "#fbbf24" },
+          pixels: `
+            ....................
+            .......pp...pp......
+            .......oo...oo......
+            .....ooooooooooo....
+            ....occccccccccco...
+            ....offfffffffffo...
+            ..wwoffEEfffEEffoww.
+            .wwwowfeefffeefowww.
+            ..wwoohhhhhhhhhooww.
+            .....obbbbbbbbbo....
+            ....coaaaaaaaaaoc...
+            ....cobbbbbbbbboc...
+            .....oaaaaaaaaao....
+            ......obbbbbbbo.....
+            ......ohhhhhhho.....
+            .......obbbbbo......
+            ........oopoo.......
+            ....................
+            ....................
+            ....................
+          `,
+        },
       };
       const swarmSpriteCast = [
-        { costume: "santa", lights: "#a8a4ff" },
-        { costume: "elf", lights: "#69d5ff" },
-        { costume: "reindeer", lights: "#8ef1bd" },
-        { costume: "gingerbread", lights: "#ffca7e" },
-        { costume: "snowman", lights: "#f3a5d8" },
+        { costume: "santa", hiveCostume: "queen_bee", lights: "#a8a4ff" },
+        { costume: "elf", hiveCostume: "architect_bee", lights: "#69d5ff" },
+        { costume: "reindeer", hiveCostume: "scout_bee", lights: "#8ef1bd" },
+        { costume: "gingerbread", hiveCostume: "worker_bee", lights: "#ffca7e" },
+        { costume: "snowman", hiveCostume: "guard_bee", lights: "#f3a5d8" },
       ];
       const swarmSpriteRoles = new Map([
         ["coordinator", 0],
@@ -5780,10 +6549,11 @@
 
       function swarmSpriteSheet(theme, member) {
         const christmas = theme === "christmas";
-        const key = christmas ? member.costume : member.lights;
+        const hive = theme === "hive";
+        const key = christmas ? member.costume : (hive ? member.hiveCostume : member.lights);
         if (swarmSpriteSheets.has(key)) return swarmSpriteSheets.get(key);
-        const art = swarmSpriteArt[christmas ? member.costume : "robot"];
-        const palette = christmas ? art.palette : { ...art.palette, c: member.lights, e: member.lights };
+        const art = swarmSpriteArt[christmas ? member.costume : (hive ? member.hiveCostume : "robot")];
+        const palette = (christmas || hive) ? art.palette : { ...art.palette, c: member.lights, e: member.lights };
         const size = swarmSpriteSize;
         const canvas = document.createElement("canvas");
         canvas.width = size * 2;
@@ -5872,7 +6642,31 @@
           </g>`;
       }
 
-      function renderSwarmSprite(node, theme, state, x, y, workshop) {
+      const hiveHoneyCell = `
+        <g class="hive-honey-cell">
+          <polygon points="0,-6.2 5.4,-3.1 5.4,3.1 0,6.2 -5.4,3.1 -5.4,-3.1" fill="#f59e0b" stroke="#fde68a" stroke-width="1.15" />
+          <polygon points="0,-3.2 2.8,-1.6 2.8,1.6 0,3.2 -2.8,1.6 -2.8,-1.6" fill="#fef08a" opacity="0.72" />
+        </g>`;
+
+      function renderHiveCombBench(node, state) {
+        if (state !== "working" && state !== "checking") return "";
+        const stage = `${node.role} ${node.current_step || ""}`.toLowerCase();
+        let activity = "forage";
+        if (state === "checking" || /verif|validat|critic|audit|review/.test(stage)) activity = "seal";
+        else if (/scout|search|scan|research|\brag\b/.test(stage)) activity = "waggle";
+        else if (/plan|coordinat|architect/.test(stage)) activity = "comb";
+        return `
+          <g class="hive-comb-bench" data-hive-task="${activity}">
+            <polygon points="12,33 17,30 22,33 22,39 17,42 12,39" fill="#92400e" stroke="#fbbf24" stroke-width="1" />
+            <polygon points="22,33 27,30 32,33 32,39 27,42 22,39" fill="#b45309" stroke="#fde047" stroke-width="1" />
+            <g transform="translate(27 26)">
+              <g transform="scale(.78)">${hiveHoneyCell}</g>
+              <animateTransform attributeName="transform" type="translate" values="27 27;27 24;27 27" dur="1.15s" repeatCount="indefinite" />
+            </g>
+          </g>`;
+      }
+
+      function renderSwarmSprite(node, theme, state, x, y, workshop, honeycomb = false) {
         const { member, hash } = swarmSpriteIdentity(node);
         const size = swarmSpriteSize;
         const start = (hash % 7) / 10;
@@ -5893,21 +6687,24 @@
                 </g>
               </g>
             </g>
-            ${workshop ? renderWorkshopBench(node, state) : ""}
+            ${workshop ? renderWorkshopBench(node, state) : (honeycomb ? renderHiveCombBench(node, state) : "")}
           </g>`;
       }
 
-      const swarmThemeLinkPackets = { robots: "data", christmas: "snow_bridge", classic: "pulse" };
+      const swarmThemeLinkPackets = { robots: "data", hive: "nectar", christmas: "snow_bridge", classic: "pulse" };
       const swarmLinkDurationScales = { slow: 1.65, normal: 1, fast: 0.65 };
 
       function getSwarmLinkMotion() {
         const style = swarmLinkStyleControl.value;
-        const workshop = swarmBackdropControl.value === "workshop";
+        const backdropVal = swarmBackdropControl.value;
+        const workshop = backdropVal === "workshop";
+        const honeycomb = backdropVal === "honeycomb";
         const theme = swarmThemeControl.value;
         return {
-          packet: style === "theme" ? (workshop ? "snow_bridge" : swarmThemeLinkPackets[theme]) : style,
+          packet: style === "theme" ? (workshop ? "snow_bridge" : (honeycomb ? "nectar" : swarmThemeLinkPackets[theme])) : style,
           theme,
           workshop,
+          honeycomb,
           durationScale: swarmLinkDurationScales[swarmLinkSpeedControl.value],
         };
       }
@@ -5939,6 +6736,17 @@
               ? `<g transform="translate(10 -11) scale(.86)">${workshopParcel}</g>`
               : `<rect x="5" y="-13" width="10" height="7" rx="1" fill="${color}" stroke="#233b52"/><path d="M6 -12l4 3 4 -3" fill="none" stroke="#fff" stroke-width="1"/>`}
           </g>`;
+        } else if (motion.packet === "nectar") {
+          bridge = `<g class="nectar-trail" fill="none" stroke-linecap="round" aria-hidden="true" pointer-events="none">
+            <path d="${pathD}" stroke="rgba(245, 158, 11, 0.20)" stroke-width="7" />
+            <path d="${pathD}" stroke="#fbbf24" stroke-opacity="0.45" stroke-width="2" stroke-dasharray="2 8" />
+          </g>`;
+          art = delivery
+            ? `<g transform="scale(0.95)">${hiveHoneyCell}</g>`
+            : `<g class="nectar-droplet">
+                <polygon points="0,-5.4 4.7,-2.7 4.7,2.7 0,5.4 -4.7,2.7 -4.7,-2.7" fill="#fbbf24" stroke="#fef3c7" stroke-width="0.95" />
+                <circle r="1.7" fill="#78350f" />
+              </g>`;
         } else if (motion.packet === "data") {
           art = `
             <path d="M0 -5.2 5.2 0 0 5.2 -5.2 0Z" fill="${color}" stroke="#ddf4ff" stroke-width="0.75" />
@@ -5960,10 +6768,11 @@
         const showSprites = spriteTheme !== "classic";
         const linkMotion = isLiveOnly ? getSwarmLinkMotion() : { packet: "pulse", durationScale: 1 };
         const workshop = Boolean(linkMotion.workshop);
-        const wallTime = workshop ? Date.now() / 1000 : 0;
+        const honeycomb = Boolean(linkMotion.honeycomb);
+        const wallTime = (workshop || honeycomb) ? Date.now() / 1000 : 0;
         if (isLiveOnly) {
           svg.dataset.spriteTheme = spriteTheme;
-          svg.dataset.backdrop = workshop ? "workshop" : "standard";
+          svg.dataset.backdrop = workshop ? "workshop" : (honeycomb ? "honeycomb" : "standard");
           svg.dataset.linkStyle = linkMotion.packet;
           svg.style.setProperty("--swarm-link-time", linkMotion.durationScale);
           svg.style.setProperty("--swarm-link-phase", `${-(svg.getCurrentTime?.() ?? 0)}s`);
@@ -6188,8 +6997,8 @@
               const pRole = String(p.role).toLowerCase();
               const cId = String(c.id).toLowerCase();
               const cRole = String(c.role).toLowerCase();
-              const matchFrom = pId === hFrom || pRole === hFrom || (hFrom.includes("coord") && (pId === "sabrina" || pRole === "coordinator")) || (hFrom.includes("sabrina") && (pId === "sabrina" || pRole === "coordinator")) || (hFrom.includes("planner") && (pId.includes("planner") || pRole.includes("planner") || pId.includes("codex"))) || (hFrom.includes("scout") && (pId.includes("scout") || pRole.includes("scout") || pId.includes("rag"))) || (hFrom.includes("exec") && (pId.includes("exec") || pRole.includes("exec") || pId.includes("agy")));
-              const matchTo = cId === hTo || cRole === hTo || (h.worker_id && String(h.worker_id).toLowerCase() === cId) || (hTo.includes("planner") && (cId.includes("planner") || cRole.includes("planner") || cId.includes("codex"))) || (hTo.includes("scout") && (cId.includes("scout") || cRole.includes("scout") || cId.includes("rag"))) || (hTo.includes("exec") && (cId.includes("exec") || cRole.includes("exec") || cId.includes("agy"))) || (hTo.includes("verifier") && (cId.includes("verifier") || cRole.includes("verifier") || cId.includes("claude")));
+              const matchFrom = pId === hFrom || pRole === hFrom || (h.from_node && String(h.from_node).toLowerCase() === pId) || (hFrom.includes("coord") && (pId === "sabrina" || pRole === "coordinator")) || (hFrom.includes("sabrina") && (pId === "sabrina" || pRole === "coordinator")) || (hFrom.includes("planner") && (pId.includes("planner") || pRole.includes("planner"))) || (hFrom.includes("scout") && (pId.includes("scout") || pRole.includes("scout") || pId.includes("rag"))) || (hFrom.includes("exec") && (pId.includes("exec") || pRole.includes("exec")));
+              const matchTo = cId === hTo || cRole === hTo || (h.to_node && String(h.to_node).toLowerCase() === cId) || (h.worker_id && String(h.worker_id).toLowerCase() === cId) || (hTo.includes("planner") && (cId.includes("planner") || cRole.includes("planner"))) || (hTo.includes("scout") && (cId.includes("scout") || cRole.includes("scout") || cId.includes("rag"))) || (hTo.includes("exec") && (cId.includes("exec") || cRole.includes("exec"))) || (hTo.includes("verifier") && (cId.includes("verifier") || cRole.includes("verifier")));
               return matchFrom && matchTo;
             });
 
@@ -6233,7 +7042,7 @@
               badgeBorder = isModEdge ? "rgba(251,191,36,0.6)" : "rgba(52,211,153,0.6)";
               const fileAge = wallTime - c.fileWrittenAt;
               delivery = c.fileAuthored;
-              animatePacket = pRunning || (workshop && delivery && fileAge >= 0 && fileAge < 12);
+              animatePacket = pRunning || ((workshop || honeycomb) && delivery && fileAge >= 0 && fileAge < 12);
             } else if (isLiveOnly) {
               const cSt = String(c.status || "").toUpperCase();
               if (cSt === "FAILED" || cSt === "ERROR") {
@@ -6368,14 +7177,16 @@
               ? `<rect x="${fx0 - 4}" y="${fy0 - 4}" width="${nodeW + 8}" height="${nodeH + 8}" rx="11" fill="none" stroke="#38bdf8" stroke-width="2.2" />`
               : "";
             const parcelFile = workshop && n.fileAuthored;
+            const honeyFile = honeycomb && n.fileAuthored;
+            const specialFileBadge = parcelFile || honeyFile;
             return `
               <g class="${wrapClsF}" onclick="event.stopPropagation(); window.__inspectTopologyFile('${esc(n.filePath)}', '${esc(n.parent_id || "")}')">
                 <title>${esc(fTip)}</title>
                 ${fSelGlow}
                 <rect class="dag-card" x="${fx0}" y="${fy0}" width="${nodeW}" height="${nodeH}" rx="8" fill="#0b1320" stroke="${fStroke}" stroke-width="${isSelectedFile ? 2.3 : 1.7}" />
                 <circle cx="${n.x}" cy="${fy0}" r="3.2" fill="${fStroke}" />
-                ${parcelFile ? `<g transform="translate(${fx0 + 14} ${fy0 + 14}) scale(.82)" aria-hidden="true">${workshopParcel}</g>` : ""}
-                <text x="${fx0 + (parcelFile ? 25 : 9)}" y="${fy0 + 18}" fill="#e2e8f0" font-size="10.2" font-family="ui-monospace, monospace" font-weight="700">${parcelFile ? "" : "📄 "}${esc(shortLabel(n.name, 14))}</text>
+                ${parcelFile ? `<g transform="translate(${fx0 + 14} ${fy0 + 14}) scale(.82)" aria-hidden="true">${workshopParcel}</g>` : (honeyFile ? `<g transform="translate(${fx0 + 14} ${fy0 + 14}) scale(.9)" aria-hidden="true">${hiveHoneyCell}</g>` : "")}
+                <text x="${fx0 + (specialFileBadge ? 25 : 9)}" y="${fy0 + 18}" fill="#e2e8f0" font-size="10.2" font-family="ui-monospace, monospace" font-weight="700">${specialFileBadge ? "" : "📄 "}${esc(shortLabel(n.name, 14))}</text>
                 <rect x="${fx0 + nodeW - 60}" y="${fy0 + 6}" width="53" height="14" rx="4" fill="${fBadgeBg}" stroke="${fStroke}" stroke-width="0.9" />
                 <text x="${fx0 + nodeW - 33.5}" y="${fy0 + 15.5}" text-anchor="middle" fill="${fStroke}" font-size="7.5" font-family="ui-monospace, monospace" font-weight="700">${fBadgeTxt}</text>
                 <text x="${fx0 + 9}" y="${fy0 + 35}" fill="#94a3b8" font-size="8.6" font-family="ui-monospace, monospace">${esc(shortLabel(n.filePath, 26))}</text>
@@ -6515,7 +7326,7 @@
             : shortLabel(statePillText, 10);
           const pose = isFailed ? "failed" : isPass ? "done" : isValidating ? "checking" :
             isActive ? "working" : isSpawning ? "queued" : "idle";
-          const sprite = showSprites ? renderSwarmSprite(n, spriteTheme, pose, x0 + 8, y0 + 24, workshop) : "";
+          const sprite = showSprites ? renderSwarmSprite(n, spriteTheme, pose, x0 + 8, y0 + 24, workshop, honeycomb) : "";
           const textX = x0 + (showSprites ? 58 : 8);
           const badgeX = x0 + (showSprites ? nodeW - 35 : 114);
           const rightX = x0 + nodeW - 7;
@@ -6691,7 +7502,7 @@
         const geometryNodes = (dag?.nodes || []).filter((n) => n && n.cantorPath && n.boundingSphere);
         const missions = new Set(geometryNodes.map((n) => n.missionId || "").filter(Boolean));
         summary.textContent = geometryNodes.length
-          ? `${geometryNodes.length} measured sphere${geometryNodes.length === 1 ? "" : "s"} · ${missions.size || 1} mission${missions.size === 1 ? "" : "s"}`
+          ? `${geometryNodes.length} measured spheres · ${missions.size || 1} mission${missions.size === 1 ? "" : "s"} · drag to rotate`
           : "Waiting for live Join-Cut coordinates";
       }
 
@@ -6745,18 +7556,25 @@
           const y0 = Math.floor(groupIdx / columns) * cellHeight;
           const cx = x0 + cellWidth / 2;
           const cy = y0 + 158;
-          const projected = (s, z = Number(s.cz)) => ({
-            x: (Number(s.cx) - Number(s.cy)) * 0.70710678,
-            y: (Number(s.cx) + Number(s.cy)) * 0.40824829 - z * 0.81649658,
-          });
+          const camCos = Math.cos(joinCutCameraAzimuth);
+          const camSin = Math.sin(joinCutCameraAzimuth);
+          const elevSin = Math.sin(joinCutCameraElevation);
+          const elevCos = Math.cos(joinCutCameraElevation);
+          const projected = (s, z = Number(s.cz)) => {
+            const wx = Number(s.cx);
+            const wy = Number(s.cy);
+            const horizontal = wx * camCos - wy * camSin;
+            const depth = wx * camSin + wy * camCos;
+            return { x: horizontal, y: depth * elevSin - z * elevCos };
+          };
           const ext = group.nodes.reduce((acc, node) => {
             const p = projected(node.boundingSphere);
             const r = Math.max(0, Number(node.boundingSphere.r));
             acc.x = Math.max(acc.x, Math.abs(p.x) + r);
             acc.y = Math.max(acc.y, Math.abs(p.y) + r);
             return acc;
-          }, { x: 0.5, y: 0.5 });
-          const scale = Math.max(1, Math.min(92, (cellWidth * 0.5 - 52) / ext.x, (cellHeight * 0.5 - 54) / ext.y));
+          }, { x: 1e-4, y: 1e-4 });
+          const scale = Math.max(1, Math.min((cellWidth * 0.5 - 52) / ext.x, (cellHeight * 0.5 - 54) / ext.y));
           const point = (s) => {
             const p = projected(s);
             return { x: cx + p.x * scale, y: cy + p.y * scale };
@@ -6766,10 +7584,14 @@
           group.nodes.forEach((node) => {
             if (!byPath.has(node.cantorPath)) byPath.set(node.cantorPath, node);
           });
-          const parentPath = (path) => {
-            const segments = String(path || "").split(".");
-            if (segments.length <= 1) return segments[0] === "r" ? null : "";
-            return segments.slice(0, -1).join(".");
+          const resolveParentSphereNode = (path) => {
+            const segments = String(path || "").split(".").filter(Boolean);
+            while (segments.length > 1) {
+              segments.pop();
+              const cand = byPath.get(segments.join("."));
+              if (cand) return cand;
+            }
+            return null;
           };
           const axes = [
             { label: "X", dx: 1, dy: 0, dz: 0, color: "#f87171" },
@@ -6793,16 +7615,16 @@
 
           group.nodes.forEach((node) => {
             const path = String(node.cantorPath || "");
-            const pPath = parentPath(path);
-            const parent = pPath !== null ? byPath.get(pPath) : null;
+            const parent = resolveParentSphereNode(path);
             const target = point(node.boundingSphere);
             const source = parent ? point(parent.boundingSphere) : root;
             const sphere = node.boundingSphere;
             const xyBase = point({ cx: sphere.cx, cy: sphere.cy, cz: 0 });
             const state = String(node.status || node.state || "").toUpperCase();
             const color = /FAIL|ERROR/.test(state) ? "#f87171" : (/PASS|DONE|SPIN(?:DOWN|_DOWN)|COMPLETE/.test(state) ? "#34d399" : (/ACTIVE|WORKING|RUNNING|VERIFYING|SPAWNING/.test(state) ? "#38bdf8" : "#a5b4fc"));
-            const r = Math.max(3, Number(sphere.r) * scale);
-            const title = `${node.name || node.id} · ${path} · x=${Number(sphere.cx).toFixed(4)}, y=${Number(sphere.cy).toFixed(4)}, z=${Number(sphere.cz).toFixed(4)}, r=${Number(sphere.r).toFixed(4)} · ${state}`;
+            const r = Math.max(1.5, Number(sphere.r) * scale);
+            const fmtCoord = (v) => (Math.abs(v) > 0 && Math.abs(v) < 1e-3) ? v.toExponential(2) : v.toFixed(4);
+            const title = `${node.name || node.id} · ${path} · x=${fmtCoord(Number(sphere.cx))}, y=${fmtCoord(Number(sphere.cy))}, z=${fmtCoord(Number(sphere.cz))}, r=${fmtCoord(Number(sphere.r))} · ${state}`;
             parts.push(`<line x1="${source.x}" y1="${source.y}" x2="${target.x}" y2="${target.y}" stroke="${color}" stroke-opacity=".52" stroke-width="1.4" />
               ${Math.abs(Number(sphere.cz)) > 0.012 ? `<line x1="${xyBase.x}" y1="${xyBase.y}" x2="${target.x}" y2="${target.y}" stroke="#38bdf8" stroke-opacity=".5" stroke-dasharray="3 3" stroke-width="1" />` : ""}
               <g class="joincut-sphere" data-cantor-path="${esc(path)}"><title>${esc(title)}</title>
@@ -6836,6 +7658,48 @@
         if (use3d) renderJoinCutSpace(el("topo-joincut-svg"), lastLiveDag);
       }
 
+      let joinCutCameraAzimuth = Math.PI / 4;
+      let joinCutCameraElevation = Math.atan(1 / Math.sqrt(2));
+      let joinCutDragState = null;
+      let joinCutRenderQueued = false;
+      const joinCutSvg = el("topo-joincut-svg");
+      const queueJoinCutCameraRender = () => {
+        if (joinCutRenderQueued) return;
+        joinCutRenderQueued = true;
+        requestAnimationFrame(() => {
+          joinCutRenderQueued = false;
+          if (joinCutSvg && !el("topo-joincut-view")?.hidden) renderJoinCutSpace(joinCutSvg, lastLiveDag);
+        });
+      };
+      joinCutSvg?.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0 || el("topo-joincut-view")?.hidden) return;
+        joinCutDragState = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+        joinCutSvg.classList.add("is-dragging");
+        joinCutSvg.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+      });
+      joinCutSvg?.addEventListener("pointermove", (event) => {
+        if (!joinCutDragState || event.pointerId !== joinCutDragState.pointerId) return;
+        const dx = event.clientX - joinCutDragState.x;
+        const dy = event.clientY - joinCutDragState.y;
+        joinCutDragState.x = event.clientX;
+        joinCutDragState.y = event.clientY;
+        joinCutCameraAzimuth += dx * 0.009;
+        joinCutCameraElevation = Math.max(-1.25, Math.min(1.25, joinCutCameraElevation + dy * 0.009));
+        queueJoinCutCameraRender();
+      });
+      const endJoinCutCameraDrag = (event) => {
+        if (!joinCutDragState || (event && event.pointerId !== joinCutDragState.pointerId)) return;
+        joinCutDragState = null;
+        joinCutSvg?.classList.remove("is-dragging");
+      };
+      joinCutSvg?.addEventListener("pointerup", endJoinCutCameraDrag);
+      joinCutSvg?.addEventListener("pointercancel", endJoinCutCameraDrag);
+      el("btn-topology-joincut-reset")?.addEventListener("click", () => {
+        joinCutCameraAzimuth = Math.PI / 4;
+        joinCutCameraElevation = Math.atan(1 / Math.sqrt(2));
+        queueJoinCutCameraRender();
+      });
       el("btn-topology-hierarchy")?.addEventListener("click", () => setSwarmTopologyView("hierarchy"));
       el("btn-topology-joincut-3d")?.addEventListener("click", () => setSwarmTopologyView("joincut3d"));
 
@@ -7181,20 +8045,12 @@
         // Calculate and display live swarm token usage & estimated API cost
         const tokEl = el("lmb-tokens");
         const costEl = el("lmb-cost");
-        let totalMissionTokens = 0;
-        if (runningMission && runningMission.tokens_used) {
-          totalMissionTokens = Number(runningMission.tokens_used) || 0;
-        } else {
-          totalMissionTokens = workers.reduce((acc, w) => acc + (Number(w.tokens_used) || Number(w.tokens) || 0), 0);
-          if (totalMissionTokens === 0 && workers.length > 0) {
-            // Realistic conservative estimation when provider doesn't report exact counts: ~1,250 tokens per active worker turn
-            totalMissionTokens = workers.length * 1420 + Math.floor(elapsedSec * 18);
-          }
-        }
-        if (tokEl) tokEl.textContent = `🪙 ${totalMissionTokens.toLocaleString()} tok`;
-        // Blended rate estimation (~$0.0015 per 1k tokens for frontier mixture)
-        const estCostUsd = (totalMissionTokens / 1000) * 0.0015;
-        if (costEl) costEl.textContent = `💵 $${estCostUsd.toFixed(3)}`;
+        const reportedTokens = runningMission?.usage_source === "provider" ? runningMission.tokens_used : null;
+        const workerTokens = workers.filter(w => w.usage_source === "provider").map(w => w.tokens_used ?? w.tokens).filter(v => v != null && Number.isFinite(Number(v)));
+        const totalMissionTokens = reportedTokens != null && Number.isFinite(Number(reportedTokens)) ? Number(reportedTokens) :
+          (workerTokens.length ? workerTokens.reduce((acc, value) => acc + Number(value), 0) : null);
+        if (tokEl) tokEl.textContent = totalMissionTokens == null ? "🪙 Tokens unavailable" : `🪙 ${totalMissionTokens.toLocaleString()} tok`;
+        if (costEl) costEl.textContent = "💵 Cost unavailable";
 
         const missionWorkers = workers.filter(w => !w.mission_id || w.mission_id === mid);
 
@@ -7280,7 +8136,7 @@
         const chains = swarm.followup_chains || [];
         const active = swarm.active_missions || [];
         const audits = (swarm.pending_audit_decisions || []).filter(item => item.needs_more_work);
-        const hasAutomationStatus = Boolean(automations && Array.isArray(automations.loops));
+        const hasAutomationStatus = Boolean(automations && !automations.unavailable && Array.isArray(automations.loops));
         const loops = hasAutomationStatus ? automations.loops : [];
         const running = active.filter(item => !item.background_chain).map(item => ({
           goal: item.goal, detail: item.last_event || "Running", mission_id: item.mission_id,
@@ -7331,10 +8187,16 @@
           if (!recent.has(run.mission_id)) recent.set(run.mission_id, {...run, detail:run.state});
         }
         const synced = swarm.monitor_connection;
-        const freshness = synced === "connecting" ? "Connecting to services…" :
+        const freshness = swarm.status === "EGO OFFLINE" ? "Ego runtime unavailable" :
+          swarm.status === "EGO CONNECTING" ? "Connecting to Ego…" :
+          swarm.status === "EGO UPDATING" ? "Updating Ego status…" :
+          swarm.execution_host === "ego" ? "Ego coordinator" :
+          synced === "connecting" ? "Connecting to services…" :
           synced === "degraded" ? "Some services are unavailable. Local mission status is shown." : "Coordinator status";
         const workerCount = activeWorkerCount(swarm);
-        el("swarm-monitor-connection").textContent = `${freshness} · ${workerCount} active worker${workerCount === 1 ? "" : "s"}`;
+        const sampleAge = swarm.snapshot_age_seconds == null ? "" : ` · updated ${Math.round(swarm.snapshot_age_seconds)}s ago`;
+        el("swarm-monitor-connection").textContent = `${freshness} · ${workerCount} active worker${workerCount === 1 ? "" : "s"}${sampleAge}`;
+        el("btn-ego-review").textContent = swarm.ego_review?.latest_patch ? "Review Ego changes •" : "Review Ego changes";
         if (synced === "degraded") attention.unshift({goal:"Service connection limited", detail:"Check the service badges in the sidebar."});
         const recentRows = [...recent.values()].sort((a, b) => Number(b.completed_at || b.updated_at || 0) - Number(a.completed_at || a.updated_at || 0));
         el("monitor-running-count").textContent = `${running.length} active`;
@@ -7363,6 +8225,16 @@
 
       function renderSnapshot(snap) {
         if (!snap) return;
+        const authOverlay = el("console-auth-overlay");
+        const authBtn = el("btn-console-auth");
+        if (authBtn && snap.auth) {
+          authBtn.textContent = snap.auth.configured ? (snap.auth_locked ? "🔒 Locked" : "🔓 Security") : "🔒 Set Lock";
+        }
+        if (snap.auth_locked) {
+          if (authOverlay) authOverlay.style.display = "flex";
+          return;
+        }
+        if (authOverlay) authOverlay.style.display = "none";
         latestSnap = snap;
         const swarm = snap.swarm || {};
         renderMonitorOverview(swarm, snap.automations);
@@ -7397,9 +8269,12 @@
             if (mState === "FAILED" || mState === "ERROR") {
               topoExecBadge.className = "pill pill-err";
               topoExecBadge.textContent = "FAILED · LLM ERROR";
-            } else if ((mState === "PASS" || mState === "DONE" || mState === "COMPLETED") && liveCalls > 0) {
+            } else if (mState === "PASS" && latestMission.verdict?.passed !== false && liveCalls > 0) {
               topoExecBadge.className = "pill pill-ok";
               topoExecBadge.textContent = "LIVE LLM · PASS";
+            } else if ((mState === "DONE" || mState === "COMPLETED" || latestMission.verdict?.passed === false) && liveCalls > 0) {
+              topoExecBadge.className = "pill pill-warn";
+              topoExecBadge.textContent = "LIVE LLM · REVIEW";
             } else if (mState === "DRY_RUN" || mState === "PASS") {
               topoExecBadge.className = "pill pill-warn";
               topoExecBadge.textContent = mState || "DRY_RUN";
@@ -8446,17 +9321,17 @@
         const toStr = String(toAgent || "").toLowerCase();
         let fromKey = "sabrina";
         if (fromStr.includes("coord") || fromStr.includes("sabrina")) fromKey = "sabrina";
-        else if (fromStr.includes("planner") || fromStr.includes("codex") || fromStr.includes("arch")) fromKey = "planner";
+        else if (fromStr.includes("planner") || fromStr.includes("arch")) fromKey = "planner";
         else if (fromStr.includes("scout") || fromStr.includes("rag")) fromKey = "scout";
-        else if (fromStr.includes("exec") || fromStr.includes("agy") || fromStr.includes("specialist")) fromKey = "exec";
-        else if (fromStr.includes("verifier") || fromStr.includes("critic") || fromStr.includes("claude")) fromKey = "verifier";
+        else if (fromStr.includes("exec") || fromStr.includes("specialist")) fromKey = "exec";
+        else if (fromStr.includes("verifier") || fromStr.includes("critic")) fromKey = "verifier";
 
         let toKey = "planner";
         if (toStr.includes("coord") || toStr.includes("sabrina")) toKey = "sabrina";
-        else if (toStr.includes("planner") || toStr.includes("codex") || toStr.includes("arch")) toKey = "planner";
+        else if (toStr.includes("planner") || toStr.includes("arch")) toKey = "planner";
         else if (toStr.includes("scout") || toStr.includes("rag")) toKey = "scout";
-        else if (toStr.includes("exec") || toStr.includes("agy") || toStr.includes("specialist")) toKey = "exec";
-        else if (toStr.includes("verifier") || toStr.includes("critic") || toStr.includes("claude")) toKey = "verifier";
+        else if (toStr.includes("exec") || toStr.includes("specialist")) toKey = "exec";
+        else if (toStr.includes("verifier") || toStr.includes("critic")) toKey = "verifier";
 
         window.__highlightedEdge = { from: fromKey, to: toKey, stage: stage || "ACTIVE" };
         if (__highlightTimer) clearTimeout(__highlightTimer);
@@ -9658,6 +10533,40 @@
           // Render Installed Packages
           window.__installedPackagesCache = res.installed_packages || [];
           renderInstalledPackagesFilter();
+
+          // Check Cross-System Mesh Status
+          if (window.pywebview && window.pywebview.api && window.pywebview.api.get_cross_system_status && el("mesh-ego-badge")) {
+            window.pywebview.api.get_cross_system_status().then(mesh => {
+              if (mesh && mesh.ok) {
+                const ego = (mesh.nodes || []).find(n => n.node_id === "ego-lab");
+                if (ego && ego.status === "ONLINE") {
+                  el("mesh-ego-badge").textContent = `⚡ ego-lab (${ego.host}) ONLINE · ${ego.ssh_latency_ms || 0}ms`;
+                  el("mesh-ego-badge").className = "pill pill-ok mono";
+                } else {
+                  el("mesh-ego-badge").textContent = `ego-lab (${(ego && ego.host) || "127.0.0.1"}) OFFLINE`;
+                  el("mesh-ego-badge").className = "pill pill-idle mono";
+                }
+              }
+            }).catch(() => {});
+          }
+
+          // Check Self-Hosted Forgejo Status
+          if (window.pywebview && window.pywebview.api && window.pywebview.api.get_forgejo_status && el("forgejo-status-badge")) {
+            window.pywebview.api.get_forgejo_status().then(fg => {
+              if (!fg || !fg.ok) return;
+              if (el("forgejo-url-input") && !el("forgejo-url-input").value) el("forgejo-url-input").value = fg.base_url || "http://127.0.0.1:3003";
+              if (el("forgejo-owner-input") && !el("forgejo-owner-input").value) el("forgejo-owner-input").value = fg.owner || "ego";
+              if (el("forgejo-pypi-url-label") && fg.pypi_simple_url) el("forgejo-pypi-url-label").textContent = fg.pypi_simple_url;
+              if (el("forgejo-pkg-count-badge")) el("forgejo-pkg-count-badge").textContent = `${fg.packages_count || 0} hosted packages`;
+              if (fg.reachable) {
+                el("forgejo-status-badge").textContent = `⚡ Forgejo v${fg.version || "?"} ONLINE`;
+                el("forgejo-status-badge").className = "pill pill-ok mono";
+              } else {
+                el("forgejo-status-badge").textContent = fg.configured ? "Forgejo OFFLINE" : "Forgejo Not Configured";
+                el("forgejo-status-badge").className = "pill pill-idle mono";
+              }
+            }).catch(() => {});
+          }
         } catch (err) {
           if (feedback) feedback.textContent = "Unable to load dependencies: " + err;
         }
@@ -9739,6 +10648,143 @@
           el("btn-deps-cache").disabled = false;
         }
       });
+
+      // Cross-System Mesh Action Handlers
+      const meshFeedback = el("mesh-action-feedback");
+      if (el("btn-mesh-diff")) {
+        el("btn-mesh-diff").addEventListener("click", async () => {
+          if (!meshFeedback) return;
+          meshFeedback.textContent = "Querying remote worktree checksums on ego-lab…";
+          try {
+            const res = await window.pywebview.api.diff_cross_system_code();
+            if (res.ok) {
+              if (res.in_sync) {
+                meshFeedback.textContent = `✅ Code trees in sync! (Checked ${res.total_files} files; all checksums match).`;
+              } else {
+                meshFeedback.textContent = `⚠️ Diffs detected: ${res.modified_count} modified file(s), ${res.missing_remote_count} missing remote file(s).\n` +
+                  (res.modified_files || []).map(f => `  ~ ${f.rel_path}`).join('\n') + '\n' +
+                  (res.missing_files || []).map(f => `  + ${f.rel_path}`).join('\n');
+              }
+            } else {
+              meshFeedback.textContent = `❌ Diff error: ${res.error || "Failed"}`;
+            }
+          } catch (e) { meshFeedback.textContent = "Diff failed: " + e; }
+        });
+      }
+
+      if (el("btn-mesh-dry-sync")) {
+        el("btn-mesh-dry-sync").addEventListener("click", async () => {
+          if (!meshFeedback) return;
+          meshFeedback.textContent = "Calculating dry-run sync manifest…";
+          try {
+            const res = await window.pywebview.api.sync_code_to_ego(true);
+            if (res.ok) {
+              meshFeedback.textContent = `📋 ${res.message}\n` + (res.candidates || []).map(c => `  -> ${c}`).join('\n');
+            } else {
+              meshFeedback.textContent = `Sync preview error: ${res.error || "Failed"}`;
+            }
+          } catch (e) { meshFeedback.textContent = "Sync preview failed: " + e; }
+        });
+      }
+
+      if (el("btn-mesh-deploy")) {
+        el("btn-mesh-deploy").addEventListener("click", async () => {
+          if (!meshFeedback) return;
+          meshFeedback.textContent = "Deploying approved code to ego-lab (with remote backups and syntax verification)…";
+          try {
+            const res = await window.pywebview.api.sync_code_to_ego(false);
+            if (res.ok) {
+              meshFeedback.textContent = `🚀 Deployed ${res.synced_count} file(s) successfully to ego-lab! All remote py_compile checks passed.`;
+            } else {
+              meshFeedback.textContent = `Deployment error: ${res.error || (res.errors || []).join('; ') || "Failed"}`;
+            }
+          } catch (e) { meshFeedback.textContent = "Deployment failed: " + e; }
+        });
+      }
+
+      if (el("btn-mesh-sync-wheels")) {
+        el("btn-mesh-sync-wheels").addEventListener("click", async () => {
+          if (!meshFeedback) return;
+          meshFeedback.textContent = "Syncing universal wheels to ego-lab wheelhouse…";
+          try {
+            const res = await window.pywebview.api.sync_wheelhouse_to_ego();
+            if (res.ok) {
+              meshFeedback.textContent = `📦 Transferred ${res.transferred} / ${res.total_universal} universal wheels to ego-lab!`;
+            } else {
+              meshFeedback.textContent = `Wheel sync error: ${res.error || (res.errors || []).join('; ') || "Failed"}`;
+            }
+          } catch (e) { meshFeedback.textContent = "Wheel sync failed: " + e; }
+        });
+      }
+
+      // Self-Hosted Forgejo Registry Handlers
+      const forgejoFeedback = el("forgejo-action-feedback");
+      if (el("btn-forgejo-save")) {
+        el("btn-forgejo-save").addEventListener("click", async () => {
+          if (!forgejoFeedback) return;
+          const baseUrl = (el("forgejo-url-input")?.value || "").trim();
+          const owner = (el("forgejo-owner-input")?.value || "").trim();
+          const token = (el("forgejo-token-input")?.value || "").trim();
+          forgejoFeedback.textContent = "Saving Forgejo config and probing /api/v1/version…";
+          try {
+            const res = await window.pywebview.api.save_forgejo_config(baseUrl, owner, token);
+            if (res && res.ok) {
+              if (el("forgejo-token-input")) el("forgejo-token-input").value = "";
+              forgejoFeedback.textContent = res.reachable
+                ? `✅ Connected to Forgejo v${res.version} (${res.packages_count} packages). PyPI: ${res.pypi_simple_url}`
+                : `Saved config, but Forgejo unreachable: ${res.probe_error || "check container/Tailscale"}`;
+              await refreshDependenciesView();
+            } else {
+              forgejoFeedback.textContent = `❌ Save error: ${res?.error || "Failed"}`;
+            }
+          } catch (e) { forgejoFeedback.textContent = "Forgejo save failed: " + e; }
+        });
+      }
+
+      if (el("btn-forgejo-deploy")) {
+        el("btn-forgejo-deploy").addEventListener("click", async () => {
+          if (!forgejoFeedback) return;
+          forgejoFeedback.textContent = "Deploying Forgejo Docker container to ego (/mnt/14tb/forgejo)…";
+          try {
+            const res = await window.pywebview.api.deploy_forgejo_container(false);
+            forgejoFeedback.textContent = res?.ok
+              ? `🚀 Forgejo running at ${res.url}. Complete first-run wizard or generate an API token to push packages.`
+              : `❌ Deploy error: ${res?.error || "Failed"}`;
+          } catch (e) { forgejoFeedback.textContent = "Deploy failed: " + e; }
+        });
+      }
+
+      if (el("btn-forgejo-sync-wheels")) {
+        el("btn-forgejo-sync-wheels").addEventListener("click", async () => {
+          if (!forgejoFeedback) return;
+          forgejoFeedback.textContent = "Uploading local cached wheels to Forgejo PyPI registry…";
+          try {
+            const res = await window.pywebview.api.sync_wheelhouse_to_forgejo();
+            if (res?.ok) {
+              forgejoFeedback.textContent = `📦 PyPI Sync complete: ${res.uploaded} uploaded, ${res.skipped_existing} already present (total ${res.total_wheels}).`;
+              await refreshDependenciesView();
+            } else {
+              forgejoFeedback.textContent = `❌ PyPI sync error: ${res?.error || (res?.errors || []).slice(0, 3).join('; ') || "Failed"}`;
+            }
+          } catch (e) { forgejoFeedback.textContent = "PyPI sync failed: " + e; }
+        });
+      }
+
+      if (el("btn-forgejo-publish-rsi")) {
+        el("btn-forgejo-publish-rsi").addEventListener("click", async () => {
+          if (!forgejoFeedback) return;
+          forgejoFeedback.textContent = "Publishing recent Evo-Bench & mission RSI artifacts to Forgejo Generic registry…";
+          try {
+            const res = await window.pywebview.api.publish_rsi_artifacts_to_forgejo();
+            if (res?.ok) {
+              forgejoFeedback.textContent = `🛡️ Published ${res.published_count} RSI artifact(s) under version '${res.version}'.`;
+              await refreshDependenciesView();
+            } else {
+              forgejoFeedback.textContent = `❌ Publish error: ${res?.error || (res?.errors || []).slice(0, 3).join('; ') || "Failed"}`;
+            }
+          } catch (e) { forgejoFeedback.textContent = "Publish failed: " + e; }
+        });
+      }
       window.__openView = switchView;
 
       function switchSystemSubtab(subtab) {
@@ -9942,12 +10988,53 @@
             statusPill = `<span class="pill pill-lock" style="margin-left:6px;" role="button" tabindex="0" title="Click to add API key &amp; unlock" onclick="window.__unlockProvider('${esc(m.provider)}')">LOCKED</span>`;
           }
           const customChip = m.custom ? '<span class="pill pill-warn" style="margin-left:6px;">CUSTOM</span>' : "";
+          const met = (m.metrics && typeof m.metrics === "object") ? m.metrics : null;
+          let speedPill = "";
+          if (met && typeof met.mean_seconds === "number") {
+            const sec = met.mean_seconds;
+            const sCls = sec <= 3.0 ? "pill-ok" : (sec <= 8.0 ? "pill-warn" : "pill-err");
+            speedPill = `<span class="pill ${sCls} mono" style="margin-left:6px;" title="Observed mean latency from evaluations">⚡ ${sec.toFixed(1)}s avg</span>`;
+          }
+          let passPill = "";
+          if (met && typeof met.pass_rate === "number") {
+            const pct = Math.round(met.pass_rate * 100);
+            const pCls = pct >= 80 ? "pill-ok" : (pct >= 50 ? "pill-warn" : "pill-err");
+            passPill = `<span class="pill ${pCls} mono" style="margin-left:6px;" title="Eval pass rate across ${met.eval_samples || 0} samples">✓ ${pct}% (${met.eval_samples || 0})</span>`;
+          }
+          let qualPill = "";
+          if (met && (Array.isArray(met.qualified_roles) || Array.isArray(met.below_threshold_roles))) {
+            const qRoles = met.qualified_roles || [];
+            const bRoles = met.below_threshold_roles || [];
+            const totRoles = qRoles.length + bRoles.length;
+            if (totRoles > 0) {
+              const qCls = bRoles.length === 0 ? "pill-ok" : (qRoles.length > 0 ? "pill-warn" : "pill-err");
+              const qTitle = [
+                qRoles.length ? `Qualified: ${qRoles.join(", ")}` : "",
+                bRoles.length ? `Below threshold: ${bRoles.join(", ")}` : "",
+                met.critical_violations ? `Critical violations: ${met.critical_violations}` : "",
+              ].filter(Boolean).join(" | ");
+              const qText = bRoles.length === 0
+                ? `★ QUALIFIED (${qRoles.length}/${totRoles})`
+                : (qRoles.length > 0 ? `★ ${qRoles.length}/${totRoles} QUALIFIED` : `⚠ BELOW THRESHOLD`);
+              qualPill = `<span class="pill ${qCls} mono" style="margin-left:6px;" title="${esc(qTitle)}">${esc(qText)}</span>`;
+            }
+          }
           const capsHtml = (m.capabilities || []).map((c) => `<span class="cap-chip">${esc(c)}</span>`).join("");
           const metaParts = [m.name, `provider: ${m.provider}`];
           if (m.role) metaParts.push(`role: ${m.role}`);
           if (m.size_gb) metaParts.push(`size: ${m.size_gb}`);
           const ctxStr = formatCtx(m.context_window);
           if (ctxStr) metaParts.push(ctxStr);
+          if (met && typeof met.calls === "number") {
+            const okPct = Math.round((met.ok_rate || 0) * 100);
+            metaParts.push(`${met.calls} calls (${okPct}% ok)`);
+          }
+          if (met && typeof met.tokens === "number" && met.tokens > 0) {
+            metaParts.push(`${met.tokens.toLocaleString()} tok`);
+          }
+          if (met && typeof met.cost_usd === "number" && met.cost_usd > 0) {
+            metaParts.push(`$${met.cost_usd.toFixed(4)}`);
+          }
           if (m.endpoint) metaParts.push(`endpoint: ${m.endpoint}`);
           const removeBtn = m.custom
             ? `<button class="btn-err" type="button" onclick="window.__removeFleetModel('${esc(m.id)}')">Remove</button>`
@@ -9955,7 +11042,7 @@
           return `
             <div class="reg-item">
               <div>
-                <div><b class="mono">${esc(m.id)}</b>${tierChip}${statusPill}${customChip}${capsHtml}</div>
+                <div><b class="mono">${esc(m.id)}</b>${tierChip}${statusPill}${customChip}${speedPill}${passPill}${qualPill}${capsHtml}</div>
                 <div class="muted" style="margin-top:3px;">${metaParts.map(esc).join(" · ")}</div>
               </div>
               <div class="row">${removeBtn}</div>
@@ -13161,6 +14248,10 @@
         el("swarm-monitor-detail").open = true;
         el("quick-mission-goal").focus();
       });
+      el("btn-ego-review").addEventListener("click", async () => {
+        const result = await callBridge("Swarm", "open_ego_review_folder");
+        if (!result.ok) debugLog("ERROR", "Swarm", result.error || "Could not open the Ego review folder.");
+      });
       el("swarm-monitor-detail").addEventListener("toggle", function () {
         if (this.open) renderTopology(lastRenderedTopology.nodes, lastRenderedTopology.workers, lastRenderedTopology.activeHandoffs);
       });
@@ -14523,6 +15614,55 @@
           }
         });
       }
+      el("kraken-analyst-round")?.addEventListener("change", () => el("btn-kraken-named-analysts")?.click());
+      el("btn-kraken-named-analysts")?.addEventListener("click", async () => {
+        const feedback = el("kraken-qa-feedback"), receipt = el("kraken-qa-receipt");
+        feedback.textContent = "Reading the attributed decision journal…";
+        receipt.style.display = "none";
+        const chooser = el("kraken-analyst-round");
+        const selected = chooser?.value || "";
+        const result = selected ? await callBridge("Kraken","get_kraken_analyst_round",selected) :
+                                  await callBridge("Kraken","get_kraken_replacement_status");
+        const view = result?.analysts;
+        if (!view?.run) {
+          feedback.textContent = result?.error || "Waiting for the first attributed analyst round.";
+          return;
+        }
+        if (chooser?.replaceChildren) {
+          chooser.replaceChildren(new Option("Latest analyst round",""), ...(view.history || []).map(r =>
+            new Option(new Date(r.at * 1000).toLocaleString(),r.id)));
+          chooser.value = selected;
+          chooser.hidden = false;
+        }
+        const lines = [];
+        for (const analyst of view.analysts) {
+          lines.push(`${analyst.model || analyst.provider} · ${analyst.route || ""} · ${analyst.status}`);
+          const j = analyst.journal;
+          if (!j) { lines.push(analyst.reason || "Awaiting a recorded decision.",""); continue; }
+          lines.push(`${j.timestamp_utc} · ${j.regime} · ${j.bias} · confidence ${j.confidence}`, j.rationale);
+          for (const [h,g] of Object.entries(analyst.grades || {})) {
+            lines.push(`${h} min · ${g.declared_correct ?? 0}/${g.declared_graded ?? 0} correct at declared horizon · ${g.high_declared_correct ?? 0}/${g.high_declared_graded ?? 0} with confidence ≥0.70 · ${g.abstentions} abstentions · ${g.abstention_net_positive}/${g.abstention_priced} abstained pairs covered costs`);
+          }
+          for (const item of j.entries) {
+            const iv=item.invalidation;
+            lines.push(`${item.symbol} · ${item.regime} · ${item.bias} (${item.confidence}) · ${item.recommended_action} · ${item.horizon_minutes} min`,
+                       item.thesis, [iv ? `Invalidation ${iv.field} ${iv.crosses} ${iv.value}` : "", (item.risk_flags || []).join(", "), item.paper_status, ...(item.reasons || [])].filter(Boolean).join(" · "));
+            for (const [h,markets] of Object.entries(analyst.outcomes || {})) {
+              const mark = markets[item.symbol];
+              if (mark) lines.push(`${h} min · ${mark.move_pct == null ? "unpriced" : mark.move_pct.toFixed(2)+"% midpoint"}${mark.net_usd == null ? "" : " · $"+mark.net_usd.toFixed(2)+" hypothetical net"}`);
+            }
+          }
+          lines.push("");
+        }
+        lines.push(`Existing Kraken decisions · ${view.native_source?.jev_checkpoint || "JEV"} and v0.4 ensemble`);
+        for (const m of view.markets) {
+          const j=m.native?.jev, v=m.native?.v04;
+          lines.push(`#${m.rank} ${m.symbol} · JEV ${j?.reason || "not scored"} · v0.4 ${v?.passes_ultra_gate == null ? "not scored" : v.passes_ultra_gate ? "entry gate passed" : "entry gate closed"}`);
+        }
+        feedback.textContent=`Analyst evidence from ${new Date(view.evidence_at * 1000).toLocaleString()} · paper journal`;
+        receipt.textContent=lines.join("\n");
+        receipt.style.display="block";
+      });
       el("btn-kraken-top25-picks")?.addEventListener("click", async () => {
         const feedback = el("kraken-qa-feedback");
         const receipt = el("kraken-qa-receipt");
@@ -16230,6 +17370,110 @@
       loadSampleSwarmSchema("autonomous_seed", false);
       seedAutonomousCouncilPreset(false);
       renderTopology({}, [], []);
+    })();
+  </script>
+  <div id="console-auth-overlay" style="display:none; position:fixed; inset:0; z-index:9999; background:rgba(8,12,22,0.96); backdrop-filter:blur(8px); align-items:center; justify-content:center;">
+    <div style="width:380px; max-width:92vw; background:#111827; border:1px solid #334155; border-radius:12px; padding:24px; box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+      <h2 style="margin:0 0 8px 0; font-size:18px; color:#f8fafc;">🔒 Sabrina Console Locked</h2>
+      <p class="muted" style="margin:0 0 14px 0; font-size:12.5px;">Enter your Console passphrase or PIN to unlock vault keys, swarm controls, and live telemetry.</p>
+      <input id="console-unlock-input" type="password" placeholder="Passphrase or PIN" style="width:100%; box-sizing:border-box; padding:9px 11px; border-radius:8px; border:1px solid #475569; background:#0f172a; color:#f8fafc; margin-bottom:10px;" />
+      <div id="console-unlock-error" style="min-height:18px; color:#f87171; font-size:12px; margin-bottom:10px;"></div>
+      <button id="btn-console-unlock" class="btn-primary" type="button" style="width:100%; padding:9px;">Unlock Console</button>
+    </div>
+  </div>
+  <div id="console-security-modal" style="display:none; position:fixed; inset:0; z-index:9998; background:rgba(8,12,22,0.8); align-items:center; justify-content:center;">
+    <div style="width:440px; max-width:94vw; background:#111827; border:1px solid #334155; border-radius:12px; padding:20px; box-shadow:0 20px 50px rgba(0,0,0,0.6);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0; font-size:16px; color:#f8fafc;">🔐 Console &amp; API Security</h3>
+        <button id="btn-sec-close" class="btn-ghost" type="button">Close</button>
+      </div>
+      <div style="margin-bottom:14px; padding:10px; background:#0f172a; border:1px solid #1e293b; border-radius:8px;">
+        <div style="font-size:12px; font-weight:600; color:#cbd5e1; margin-bottom:6px;">Local API Bearer Token (:8095 / :8096)</div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input id="sec-api-token" type="password" readonly style="flex:1; padding:6px 8px; border-radius:6px; border:1px solid #334155; background:#020617; color:#94a3b8; font-family:monospace; font-size:11.5px;" />
+          <button id="btn-sec-toggle-token" class="btn-ghost" type="button">Show</button>
+          <button id="btn-sec-copy-token" class="btn-ghost" type="button">Copy</button>
+        </div>
+      </div>
+      <div style="margin-bottom:10px; font-size:12px; font-weight:600; color:#cbd5e1;">Console Passphrase / PIN (min 4 chars)</div>
+      <input id="sec-current-pass" type="password" placeholder="Current passphrase (if already set)" style="width:100%; box-sizing:border-box; padding:7px 10px; border-radius:6px; border:1px solid #334155; background:#0f172a; color:#f8fafc; margin-bottom:8px;" />
+      <input id="sec-new-pass" type="password" placeholder="New passphrase or PIN" style="width:100%; box-sizing:border-box; padding:7px 10px; border-radius:6px; border:1px solid #334155; background:#0f172a; color:#f8fafc; margin-bottom:10px;" />
+      <div id="sec-feedback" style="min-height:18px; font-size:12px; color:#93c5fd; margin-bottom:10px;"></div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="btn-sec-save" class="btn-primary" type="button">Save Passphrase</button>
+        <button id="btn-sec-lock" class="btn-ghost" type="button">Lock Now</button>
+        <button id="btn-sec-disable" class="btn-ghost" type="button">Remove Lock</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    (() => {
+      const byId = (id) => document.getElementById(id);
+      async function doUnlock() {
+        const inp = byId("console-unlock-input");
+        const err = byId("console-unlock-error");
+        if (!window.pywebview?.api?.unlock_console) return;
+        const res = await window.pywebview.api.unlock_console(inp ? inp.value : "");
+        if (res && res.ok) {
+          if (inp) inp.value = "";
+          if (err) err.textContent = "";
+          if (byId("console-auth-overlay")) byId("console-auth-overlay").style.display = "none";
+          if (byId("btn-refresh")) byId("btn-refresh").click();
+        } else if (err) {
+          err.textContent = (res && res.error) || "Unlock failed.";
+        }
+      }
+      byId("btn-console-unlock")?.addEventListener("click", doUnlock);
+      byId("console-unlock-input")?.addEventListener("keydown", (e) => { if (e.key === "Enter") doUnlock(); });
+      byId("btn-console-auth")?.addEventListener("click", async () => {
+        const modal = byId("console-security-modal");
+        if (!modal) return;
+        modal.style.display = "flex";
+        if (window.pywebview?.api?.get_api_token) {
+          const tokRes = await window.pywebview.api.get_api_token();
+          if (tokRes && tokRes.ok && byId("sec-api-token")) byId("sec-api-token").value = tokRes.token || "";
+        }
+      });
+      byId("btn-sec-close")?.addEventListener("click", () => { if (byId("console-security-modal")) byId("console-security-modal").style.display = "none"; });
+      byId("btn-sec-toggle-token")?.addEventListener("click", () => {
+        const t = byId("sec-api-token");
+        const b = byId("btn-sec-toggle-token");
+        if (!t) return;
+        t.type = t.type === "password" ? "text" : "password";
+        if (b) b.textContent = t.type === "password" ? "Show" : "Hide";
+      });
+      byId("btn-sec-copy-token")?.addEventListener("click", async () => {
+        const t = byId("sec-api-token");
+        if (t && t.value && navigator.clipboard) {
+          await navigator.clipboard.writeText(t.value);
+          if (byId("sec-feedback")) byId("sec-feedback").textContent = "API Bearer token copied.";
+        }
+      });
+      byId("btn-sec-save")?.addEventListener("click", async () => {
+        const cur = byId("sec-current-pass")?.value || "";
+        const nxt = byId("sec-new-pass")?.value || "";
+        const st = await window.pywebview.api.get_auth_status();
+        const res = (st && st.configured)
+          ? await window.pywebview.api.change_console_auth(cur, nxt)
+          : await window.pywebview.api.setup_console_auth(nxt);
+        if (byId("sec-feedback")) byId("sec-feedback").textContent = res?.ok ? "Passphrase saved." : (res?.error || "Failed.");
+        if (res?.ok && byId("btn-refresh")) byId("btn-refresh").click();
+      });
+      byId("btn-sec-lock")?.addEventListener("click", async () => {
+        const res = await window.pywebview.api.lock_console();
+        if (res?.ok) {
+          if (byId("console-security-modal")) byId("console-security-modal").style.display = "none";
+          if (byId("console-auth-overlay")) byId("console-auth-overlay").style.display = "flex";
+        } else if (byId("sec-feedback")) {
+          byId("sec-feedback").textContent = res?.error || "Set a passphrase first.";
+        }
+      });
+      byId("btn-sec-disable")?.addEventListener("click", async () => {
+        const cur = byId("sec-current-pass")?.value || "";
+        const res = await window.pywebview.api.disable_console_auth(cur);
+        if (byId("sec-feedback")) byId("sec-feedback").textContent = res?.ok ? "Console lock removed." : (res?.error || "Failed.");
+        if (res?.ok && byId("btn-refresh")) byId("btn-refresh").click();
+      });
     })();
   </script>
 </body>

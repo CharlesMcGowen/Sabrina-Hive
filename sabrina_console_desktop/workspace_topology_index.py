@@ -889,7 +889,7 @@ def get_machine_and_catalog_snapshot(
                 "id": key,
                 "name": item.get("name", key),
                 "category": item.get("category", "project"),
-                "host": item.get("host", "ego.local"),
+                "host": item.get("host", os.environ.get("SABRINA_LAB_HOST", "localhost")),
                 "root_path": item.get("root_path", ""),
                 "description": item.get("description", ""),
                 "containers": [c.get("name") for c in (item.get("containers") or []) if isinstance(c, dict) and c.get("name")],
@@ -898,17 +898,18 @@ def get_machine_and_catalog_snapshot(
     except Exception:
         pass
 
-    ego_roots = sorted({p["root_path"] for p in lab_projects if p.get("root_path")} | {
-        "/home/ego/bot/Sabrina-windows-sync",
-        "/home/ego/bot/sabrina_win_arena",
-    })
+    try:
+        from sabrina_config import LAB_HOST as _CFG_LAB_HOST
+    except ImportError:
+        from sabrina_console_desktop.sabrina_config import LAB_HOST as _CFG_LAB_HOST  # type: ignore[no-redef]
+    lab_roots = sorted({p["root_path"] for p in lab_projects if p.get("root_path")})
     machines.append({
-        "node_id": "ego-lab",
-        "host": "ego.local",
+        "node_id": "lab-node",
+        "host": _CFG_LAB_HOST,
         "platform": "Linux-x86_64 (Lab Mesh)",
         "role": "Lab Compute Host · Docker Stack & Synced Worktrees",
         "status": "INDEXED",
-        "roots": ego_roots,
+        "roots": lab_roots,
         "projects": lab_projects,
     })
 

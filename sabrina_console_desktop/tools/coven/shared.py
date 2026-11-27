@@ -32,9 +32,13 @@ class C:
 
 
 # ── Environment / model config ────────────────────────────────────────────────
-OLLAMA_URL          = os.environ.get("AGENT_OLLAMA_URL",    "http://192.168.2.69:11434/api/chat")
-OLLAMA_WORKER_MODEL = os.environ.get("WORKER_MODEL_NAME",  "granite-code:8b")
-OLLAMA_PLANNER_MODEL= os.environ.get("PLANNER_MODEL_NAME", "command-r:35b")
+try:
+    from sabrina_config import OLLAMA_BASE_URL as _CFG_OLLAMA_BASE
+except ImportError:
+    _CFG_OLLAMA_BASE = "http://127.0.0.1:11434"
+OLLAMA_URL          = os.environ.get("AGENT_OLLAMA_URL",    f"{_CFG_OLLAMA_BASE}/api/chat")
+OLLAMA_WORKER_MODEL = os.environ.get("WORKER_MODEL_NAME",  "local-worker")
+OLLAMA_PLANNER_MODEL= os.environ.get("PLANNER_MODEL_NAME", "local-planner")
 GEMINI_KEY          = os.environ.get("GEMINI_API_KEY",      "")
 GEMINI_MODEL        = os.environ.get("AGENT_GEMINI_MODEL",  "gemini-2.0-flash")
 

@@ -3,7 +3,7 @@
   "swarm_name": "Crypto Market Strategy Research Swarm (Quant Turnover Pipeline)",
   "execution_authorized": false,
   "topology": {
-    "max_spawn_depth": 6,
+    "max_spawn_depth": null,
     "max_concurrency": 8,
     "max_total_agents": 16,
     "confidence_gate_threshold": -0.25,
@@ -16,7 +16,7 @@
       "parent_role": "coordinator",
       "child_role": "hypothesis_generator",
       "min_logprob": -0.22,
-      "trigger": "market_research_start && depth < 6",
+      "trigger": "market_research_start",
       "transition": "SPAWNING -> ACTIVE -> VALIDATING"
     },
     {
@@ -124,7 +124,7 @@
     {
       "id": "gate-lease-guard",
       "role": "fast_worker",
-      "model": "ollama/qwen2.5-coder:14b",
+      "model": "ollama/local-coder",
       "provider": "ollama",
       "status": "VALIDATING",
       "max_children": 1,

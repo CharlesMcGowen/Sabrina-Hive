@@ -1059,8 +1059,12 @@ class ModelSkillRegistry:
                 if sabrina_ollama:
                     ollama_candidates.append(f"{sabrina_ollama}/api/tags")
                 ollama_candidates.append(DEFAULT_OLLAMA_URL)
-                if "ego.local" not in (sabrina_ollama or ""):
-                    ollama_candidates.append("http://ego.local:11434/api/tags")
+                try:
+                    from sabrina_console_desktop.sabrina_config import OLLAMA_BASE_URL as _cfg_ollama
+                    if _cfg_ollama and f"{_cfg_ollama}/api/tags" not in ollama_candidates:
+                        ollama_candidates.append(f"{_cfg_ollama}/api/tags")
+                except ImportError:
+                    pass
 
             if ollama_candidates:
                 ollama_ok = False

@@ -41,7 +41,11 @@ def configured(base=None):
         return None
     if base:
         url = urlsplit(base)
-        if url.hostname not in cfg.get('managed_hosts', ['ego.local', '127.0.0.1', 'localhost', '192.168.1.133']):
+        try:
+            from sabrina_config import LAB_HOST as _CFG_LAB_HOST, LAB_IP as _CFG_LAB_IP
+        except ImportError:
+            _CFG_LAB_HOST, _CFG_LAB_IP = "localhost", "127.0.0.1"
+        if url.hostname not in cfg.get('managed_hosts', [_CFG_LAB_HOST, _CFG_LAB_IP, '127.0.0.1', 'localhost']):
             return None
         if url.port not in (None, 11434):
             return None

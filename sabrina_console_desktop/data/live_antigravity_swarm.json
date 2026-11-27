@@ -141,18 +141,18 @@
       "size_gb": "200k ctx · Extended Thinking"
     },
     {
-      "name": "deepseek-r1:8b",
+      "name": "local-reasoning-model",
       "provider": "Ollama / Local Fleet",
       "role": "Local Mathematical Reasoning Fallback",
-      "residency": "available (local)",
-      "size_gb": "4.9 GB"
+      "residency": "configured locally",
+      "size_gb": "local"
     },
     {
-      "name": "qwen2.5-coder:7b",
+      "name": "local-coder-model",
       "provider": "Ollama / Local Fleet",
-      "role": "Local C99/Rust Syntactic Verifier",
-      "residency": "available (local)",
-      "size_gb": "4.7 GB"
+      "role": "Local Code & Syntactic Verifier",
+      "residency": "configured locally",
+      "size_gb": "local"
     }
   ],
   "workers": [

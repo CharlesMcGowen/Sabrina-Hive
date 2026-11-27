@@ -1,9 +1,9 @@
 {
   "mcpServers": {
     "sabrina-swarm": {
-      "command": "C:/Users/charl/OneDrive/Documents/Sabrina/freqtrade_pivot/.venv/Scripts/python.exe",
+      "command": "<REPO_ROOT>/freqtrade_pivot/.venv/Scripts/python.exe",
       "args": [
-        "C:/Users/charl/.gemini/config/plugins/sabrina-swarm/server/sabrina_mcp_server.py"
+        "<HOME>/.gemini/config/plugins/sabrina-swarm/server/sabrina_mcp_server.py"
       ],
       "env": {
         "SABRINA_SWARM_API_BASE": "http://127.0.0.1:8095",

@@ -75,6 +75,11 @@ test_snntorch.py
 ssm_decision/
 tests/test_h1_v2*
 
+# Local user config & backup files
+sabrina_config.json
+sabrina_console_desktop/sabrina_config.json
+*.bak*
+
 # IDE & OS files
 .DS_Store
 Thumbs.db

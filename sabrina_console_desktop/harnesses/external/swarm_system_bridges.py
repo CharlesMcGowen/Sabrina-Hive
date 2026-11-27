@@ -76,7 +76,11 @@ def select_competent_model_for_capability(blackboard, capability: str, fallback_
         return ranked[0]['model_id']
     if fallback_candidates:
         return fallback_candidates[0]
-    return 'qwen2.5-coder:14b'
+    try:
+        from sabrina_config import DEFAULT_CODER_MODEL
+    except ImportError:
+        from sabrina_console_desktop.sabrina_config import DEFAULT_CODER_MODEL  # type: ignore[no-redef]
+    return DEFAULT_CODER_MODEL
 
 
 def sync_peer_resolution_to_blackboard(

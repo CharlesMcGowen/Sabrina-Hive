@@ -311,8 +311,12 @@ def _handle_remote_read_file(action: Dict[str, Any], loop: Any = None) -> str:
 
     offset = int(action.get("offset", 0) or 0)
     max_chars = int(action.get("max_chars", 12000) or 12000)
-    host = os.environ.get("SABRINA_DOCKER_HOST", "ego.local")
-    user = os.environ.get("SABRINA_DOCKER_USER", "ego")
+    try:
+        from sabrina_config import LAB_SSH_HOST as _CFG_SSH_HOST
+    except ImportError:
+        _CFG_SSH_HOST = "localhost"
+    host = os.environ.get("SABRINA_DOCKER_HOST", _CFG_SSH_HOST)
+    user = os.environ.get("SABRINA_DOCKER_USER", "sabrina")
 
     # Bounded read using head/tail over SSH
     remote_cmd = f"test -f {path} && dd if={path} bs=1 skip={offset} count={max_chars} 2>/dev/null || echo '__NOT_FOUND__'"
@@ -340,8 +344,12 @@ def _handle_remote_run_shell(action: Dict[str, Any], loop: Any = None) -> str:
     command = action.get("command", "")
     if not command:
         return "Error: remote_run_shell requires 'command'."
-    host = os.environ.get("SABRINA_DOCKER_HOST", "ego.local")
-    user = os.environ.get("SABRINA_DOCKER_USER", "ego")
+    try:
+        from sabrina_config import LAB_SSH_HOST as _CFG_SSH_HOST
+    except ImportError:
+        _CFG_SSH_HOST = "localhost"
+    host = os.environ.get("SABRINA_DOCKER_HOST", _CFG_SSH_HOST)
+    user = os.environ.get("SABRINA_DOCKER_USER", "sabrina")
     cmd = ["ssh", "-4", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", f"{user}@{host}", command]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, errors="replace")

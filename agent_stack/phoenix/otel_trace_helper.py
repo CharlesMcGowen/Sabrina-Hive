@@ -2,7 +2,7 @@
 """Minimal stdlib-only OpenTelemetry OTLP/HTTP trace helper for Arize Phoenix.
 
 Allows Living Archive / Sabrina agents to emit spans to self-hosted Arize Phoenix
-at http://192.168.1.133:6006/v1/traces without requiring heavy OpenTelemetry SDKs.
+at the configured OTLP/HTTP traces endpoint without requiring heavy OpenTelemetry SDKs.
 
 Includes both:
 - OTLP/HTTP JSON payload builder (`build_otlp_payload`) for debugging or JSON collectors.
@@ -23,7 +23,7 @@ import time
 import urllib.request
 from typing import Any, Dict, Iterator, List, Optional
 
-DEFAULT_TRACES_ENDPOINT = "http://192.168.1.133:6006/v1/traces"
+DEFAULT_TRACES_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://127.0.0.1:6006/v1/traces")
 DEFAULT_SERVICE_NAME = "livingarchive-agent"
 DEFAULT_PROJECT_NAME = "living-archive"
 

@@ -1,0 +1,18 @@
+{
+  "ollama_base_url": "http://127.0.0.1:11434",
+  "social_research_ollama_url": "http://127.0.0.1:11434",
+  "lab_host": "localhost",
+  "lab_ssh_host": "localhost",
+  "lab_ip": "127.0.0.1",
+  "forgejo_url": "http://127.0.0.1:3003",
+  "phoenix_url": "http://127.0.0.1:6006",
+  "phoenix_traces_url": "http://127.0.0.1:6006/v1/traces",
+  "hitl_gate_url": "http://127.0.0.1:8890",
+  "redis_url": "redis://127.0.0.1:6379/0",
+  "default_local_model": "ollama/local-model",
+  "default_coder_model": "local-coder",
+  "default_general_model": "local-general",
+  "external_portal_ids": [],
+  "research_project_root": "",
+  "wheelhouse_dir": ""
+}

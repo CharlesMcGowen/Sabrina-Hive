@@ -39,7 +39,11 @@ SEED_URLS = [
 
 class AIBotHunter:
     def __init__(self, redis_url: str = None):
-        self.redis_url = redis_url or os.environ.get("SABRINA_REDIS_URL", "redis://192.168.2.69:6379/0")
+        try:
+            from sabrina_config import REDIS_URL as _CFG_REDIS_URL
+        except ImportError:
+            _CFG_REDIS_URL = os.environ.get("SABRINA_REDIS_URL", "redis://127.0.0.1:6379/0")
+        self.redis_url = redis_url or os.environ.get("SABRINA_REDIS_URL", _CFG_REDIS_URL)
         self.client = None
         self._connect_redis()
         

@@ -16,6 +16,14 @@ from typing import Any
 
 from swarm_console.vault import ProviderKeyVault, dpapi_decrypt, dpapi_encrypt
 
+try:
+    from sabrina_console_desktop.sabrina_config import FORGEJO_URL as _FORGEJO_DEFAULT_URL
+except ImportError:
+    try:
+        from sabrina_config import FORGEJO_URL as _FORGEJO_DEFAULT_URL  # type: ignore[no-redef]
+    except ImportError:
+        _FORGEJO_DEFAULT_URL = "http://127.0.0.1:3003"
+
 DEFAULT_CONNECTOR_VAULT_PATH = Path(__file__).resolve().parent / "data" / "connectors.dpapi.json"
 
 
@@ -239,6 +247,25 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         ),
         actions=(
             ConnectorAction("feed.poll", "Poll Feed Entries", "Fetch latest items from the RSS/Atom feed.", kind="read", approval_required=False, default_params=(("limit", 10),)),
+        ),
+    ),
+    ConnectorSpec(
+        id="forgejo",
+        name="Forgejo (Git, PyPI & Artifact Registry)",
+        category="opensource",
+        description="Self-hosted Forgejo instance for Git sync, PyPI wheels, OCI images, and RSI artifacts.",
+        fields=(
+            ConnectorField("base_url", "Forgejo URL", secret=False, required=True, default=_FORGEJO_DEFAULT_URL, placeholder="http://127.0.0.1:3003"),
+            ConnectorField("owner", "Owner / Org", secret=False, required=True, default="sabrina", placeholder="owner"),
+            ConnectorField("api_token", "API Access Token", secret=True, required=True, placeholder="Forgejo Personal Access Token"),
+            ConnectorField("repo_name", "Default Repository", secret=False, required=False, default="sabrina", placeholder="sabrina"),
+        ),
+        actions=(
+            ConnectorAction("version.get", "Check Forgejo Version", "Probe Forgejo /api/v1/version endpoint.", kind="read", approval_required=False),
+            ConnectorAction("packages.list", "List Packages", "List hosted PyPI and Generic packages.", kind="read", approval_required=False),
+            ConnectorAction("repos.list", "List Repositories", "List repositories for the configured user.", kind="read", approval_required=False),
+            ConnectorAction("pypi.sync_wheelhouse", "Sync Local Wheelhouse", "Push local *.whl artifacts to Forgejo PyPI registry.", kind="write", approval_required=True),
+            ConnectorAction("generic.publish_rsi", "Publish RSI Artifacts", "Publish Evo-Bench scorecards and mission reports.", kind="write", approval_required=True),
         ),
     ),
 )
@@ -578,6 +605,8 @@ class ConnectorRegistry:
             return self.execute_action("home_assistant", "states.get", {})
         if connector_id == "rss":
             return self.execute_action("rss", "feed.poll", {"limit": 3})
+        if connector_id == "forgejo":
+            return self.execute_action("forgejo", "version.get", {})
         return {"ok": False, "error": f"No probe implemented for {connector_id}"}
 
     def execute_action(
@@ -746,5 +775,28 @@ class ConnectorRegistry:
                 return {"ok": True, "data": {"items": entries, "count": len(entries)}}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
+
+        elif connector_id == "forgejo":
+            try:
+                from sabrina_console_desktop.forgejo_client import ForgejoClient
+            except ImportError:
+                from forgejo_client import ForgejoClient  # type: ignore[no-redef]
+            client = ForgejoClient(
+                base_url=cfg.get("base_url", _FORGEJO_DEFAULT_URL),
+                owner=cfg.get("owner", "sabrina"),
+                token=cfg.get("api_token", ""),
+            )
+            if action_name == "version.get":
+                return client.get_version()
+            if action_name == "packages.list":
+                return client.list_packages(package_type=params.get("package_type"), limit=int(params.get("limit", 50)))
+            if action_name == "repos.list":
+                return client.list_repos(limit=int(params.get("limit", 50)))
+            if action_name == "pypi.sync_wheelhouse":
+                wh = params.get("wheelhouse_dir") or str(Path(__file__).resolve().parent.parent / "artifacts" / "wheels")
+                return client.sync_wheelhouse(wh)
+            if action_name == "generic.publish_rsi":
+                art = params.get("artifacts_dir") or str(Path(__file__).resolve().parent / "artifacts")
+                return client.publish_rsi_artifacts(art, version=params.get("version"))
 
         return {"ok": False, "error": f"Unsupported action {connector_id}.{action_name}"}

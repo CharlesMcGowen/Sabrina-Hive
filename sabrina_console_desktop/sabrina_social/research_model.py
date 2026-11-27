@@ -2,12 +2,16 @@
 import os
 
 from tools.lab_http import LabHTTP
+try:
+    from sabrina_config import DEFAULT_CODER_MODEL, SOCIAL_RESEARCH_OLLAMA_URL
+except ImportError:
+    from sabrina_console_desktop.sabrina_config import DEFAULT_CODER_MODEL, SOCIAL_RESEARCH_OLLAMA_URL  # type: ignore[no-redef]
 
 
 class LabResearchModel:
     def __init__(self, base=None, default_model=None):
-        self.http = LabHTTP(base or os.environ.get("SABRINA_SOCIAL_RESEARCH_OLLAMA", "http://ego.local:11434"))
-        self.default = default_model or os.environ.get("SABRINA_SOCIAL_RESEARCH_MODEL", "qwen2.5:7b")
+        self.http = LabHTTP(base or os.environ.get("SABRINA_SOCIAL_RESEARCH_OLLAMA", SOCIAL_RESEARCH_OLLAMA_URL))
+        self.default = default_model or os.environ.get("SABRINA_SOCIAL_RESEARCH_MODEL", DEFAULT_CODER_MODEL)
 
     def name_for(self, role):
         return os.environ.get("SABRINA_SOCIAL_MODEL_" + role.upper(), self.default)
