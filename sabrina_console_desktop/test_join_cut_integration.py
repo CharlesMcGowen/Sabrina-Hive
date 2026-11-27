@@ -1067,3 +1067,33 @@ def test_readonly_analysis_refinement_and_scaled_recovery_policy(tmp_path: Path)
         assert "CRITIC_REFINEMENT_LOOP" in stages
     finally:
         runner.shutdown()
+
+
+def test_default_runner_uses_join_cut_registry_and_preserves_deep_geometry(tmp_path: Path) -> None:
+    runner = LiveSwarmRunner(workspace_root=tmp_path, artifacts_dir=tmp_path / "artifacts")
+    try:
+        reg = runner._join_cut_registry("m-deep")
+        assert isinstance(reg, JoinCutRegistry)
+        assert reg.params.max_depth > 6
+        assert runner._resolve_join_cut_parent("sabrina", {}) == ROOT_PATH
+        assert runner._resolve_join_cut_parent("coordinator", {}) == ROOT_PATH
+
+        # Claim down to depth 12 and confirm sphere radius is not truncated to 0.0
+        parent_path: str | None = None
+        last_wid = ""
+        for depth in range(1, 13):
+            wid = f"w-d{depth}"
+            ok, reason = runner._join_cut_claim(
+                "m-deep",
+                {"role": "execution_specialist", "title": f"Deep Task {depth}"},
+                wid,
+                parent_node_id=parent_path,
+            )
+            assert ok, f"failed at depth {depth}: {reason}"
+            parent_path = runner._join_cut_nodes[wid]
+            last_wid = wid
+        sphere = runner._join_cut_spheres[last_wid]
+        assert sphere["r"] > 0.0
+        assert sphere["r"] < 1e-5
+    finally:
+        runner.shutdown()

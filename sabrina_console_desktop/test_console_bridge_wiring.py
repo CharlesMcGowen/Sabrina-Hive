@@ -1498,6 +1498,8 @@ class TestConsoleBridgeWiring(unittest.TestCase):
             "nav-debug",
             "top-tunnel-badge",
             "ui-live-badge",
+            "ui-theme-select",
+            "btn-cycle-ui-theme",
             "btn-debug-pill",
             "blackboard-chat-panel",
             "blackboard-chat-stream",
@@ -1531,6 +1533,8 @@ class TestConsoleBridgeWiring(unittest.TestCase):
             "blackboard-motion-pkt",
             "READING BLACKBOARD",
             "execution_authorized: false",
+            "queen_bee",
+            "applyUiTheme",
         ):
             self.assertIn(marker, desktop_html)
 
@@ -1548,6 +1552,39 @@ class TestConsoleBridgeWiring(unittest.TestCase):
             "▶ Simulate Swarm Spawn",
         ):
             self.assertNotIn(forbidden_sim, swarm_view_html)
+
+    def test_hive_ui_theme_and_swarm_display_persistence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bridge = SabrinaDesktopBridge(
+                role_bindings_path=root / "role_bindings.json",
+                vault_path=root / "provider_vault.json",
+                custom_models_path=root / "custom_models.json",
+                swarm_artifacts_dir=root / "artifacts",
+                coordinator_only=True,
+            )
+            try:
+                initial = bridge.get_ui_theme()
+                self.assertTrue(initial["ok"])
+                self.assertEqual(initial["ui_theme"], "obsidian")
+                self.assertIn("hive", initial["themes"])
+
+                res_ui = bridge.save_ui_theme("hive")
+                self.assertTrue(res_ui["ok"])
+                self.assertEqual(bridge.get_ui_theme()["ui_theme"], "hive")
+
+                res_graph = bridge.save_swarm_display("hive", "on", "nectar", "fast", "honeycomb", "hive")
+                self.assertTrue(res_graph["ok"])
+                prefs = bridge.get_swarm_display()
+                self.assertEqual(prefs["theme"], "hive")
+                self.assertEqual(prefs["backdrop"], "honeycomb")
+                self.assertEqual(prefs["link_style"], "nectar")
+                self.assertEqual(prefs["ui_theme"], "hive")
+
+                bad_ui = bridge.save_ui_theme("neon_pink")
+                self.assertFalse(bad_ui["ok"])
+            finally:
+                bridge.swarm_runner.shutdown()
 
     def test_operator_chat_log_persists_and_clears_across_restarts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

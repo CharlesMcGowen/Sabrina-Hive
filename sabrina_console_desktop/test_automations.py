@@ -99,6 +99,29 @@ class TestAutomationsAndConnectors(unittest.TestCase):
         self.assertEqual(len(step0_calls), 1)
         self.assertEqual(write_calls, [{"amount": 50, "msg": "edited_by_user"}])
 
+    def test_agent_workspace_write_flag_requires_approval_for_both_workflow_types(self) -> None:
+        for loop_type in ("manual_trigger", "autonomous_a2a"):
+            with self.subTest(loop_type=loop_type):
+                observed: list[bool] = []
+                engine = AutomationEngine(
+                    db_path=self.tmp_dir / f"approval-{loop_type}.sqlite3",
+                    connector_registry=self.connectors,
+                    agent_caller=lambda *_args: {"ok": True, "text": "completed"},
+                    workspace_tool_executor=lambda _text, allow: (observed.append(allow) or (False, "", [])),
+                )
+                saved = engine.save_loop({
+                    "name": "Workspace approval check", "goal": "Check a proposed edit", "loop_type": loop_type,
+                    "approval_policy": "always_for_writes",
+                    "steps": [{"id": "agent", "name": "Edit", "step_type": "agent", "kind": "read",
+                               "params": {"allow_workspace_writes": True}}],
+                })
+                paused = engine.run_loop_now(saved["loop"]["id"])
+                self.assertEqual(paused["status"], "waiting_approval")
+                self.assertEqual(observed, [])
+                completed = engine.decide_approval(paused["run_id"], approve=True)
+                self.assertEqual(completed["status"], "completed")
+                self.assertEqual(observed, [True])
+
     def test_threshold_policy_and_rejection_feedback(self) -> None:
         self.connectors.execute_action = lambda cid, act, p=None: {"ok": True, "params": p}  # type: ignore[method-assign]
         engine = AutomationEngine(

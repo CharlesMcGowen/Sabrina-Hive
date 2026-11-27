@@ -51,6 +51,11 @@ PROBE = """
     element("swarm-monitor-detail").open = true;
     await refresh();
     check(element("sync-time").textContent.includes("test time"), "Snapshot did not finish rendering");
+    snapshot = {...good, swarm: {...good.swarm,
+      mission_outputs: [{mission_id: "review-mission", state: "DONE", live_llm_calls: 2, verdict: {passed: false}}]}};
+    await refresh();
+    check(element("topo-exec-badge").textContent.includes("REVIEW"), "An unverified mission was displayed as a pass");
+    snapshot = good;
     check(element("monitor-running-card").open, "Running should be visible by default");
     check(!element("monitor-attention-card").open && !element("monitor-recent-card").open,
           "Inactive monitor sections should start compact");
@@ -159,6 +164,34 @@ PROBE = """
     select(backdrop, "standard");
     check(graph.dataset.backdrop === "standard" && !getComputedStyle(graph).backgroundImage.includes("data:image/jpeg;base64,"),
           "Standard did not restore the usual background");
+    select(theme, "robots");
+    const uiTheme = element("ui-theme-select");
+    const cycleBtn = element("btn-cycle-ui-theme");
+    let savedUiTheme = null;
+    api.save_ui_theme = async val => { savedUiTheme = val; return {ok: true, ui_theme: val}; };
+    select(uiTheme, "hive");
+    await nextTurn();
+    check(document.documentElement.dataset.uiTheme === "hive", "Hive console UI theme did not apply to root html");
+    check(savedUiTheme === "hive", "Hive UI theme was not persisted through bridge");
+    check(theme.value === "hive" && backdrop.value === "honeycomb" && graph.dataset.spriteTheme === "hive" && graph.dataset.backdrop === "honeycomb",
+          "Selecting Hive console UI theme did not sync Hive Bees and Honeycomb graph backdrop");
+    packing.status = "WORKING";
+    latestFile.ts = Date.now() / 1000;
+    await refresh();
+    check(graph.querySelector('[onclick*="packing"] .hive-comb-bench'),
+          "Working bee agent did not render honeycomb bench");
+    check(graph.querySelector('[onclick*="gift.txt"] .hive-honey-cell'),
+          "Hive deliverable file did not render honey cell badge");
+    check(graph.querySelector('.edge-file-created + .nectar-trail + [data-packet-style="nectar"]'),
+          "Hive link did not animate nectar trail packet");
+    cycleBtn.click();
+    await nextTurn();
+    check(document.documentElement.dataset.uiTheme === "royal_hive" && uiTheme.value === "royal_hive",
+          "Theme cycle button did not advance to Royal Hive");
+    select(uiTheme, "obsidian");
+    await nextTurn();
+    check(!document.documentElement.dataset.uiTheme && theme.value === "robots" && backdrop.value === "standard",
+          "Returning to Obsidian did not restore default theme and graph");
     select(theme, "classic");
     check(!graph.querySelector(".topo-agent-sprite") && graph.querySelector(".dag-card"), "Classic did not restore plain cards");
     select(motion, "on");

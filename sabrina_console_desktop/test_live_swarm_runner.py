@@ -411,7 +411,7 @@ os._exit(71)
                 self.assertFalse(bad_null["ok"])
                 self.assertEqual(runner.get_state()["active_worker_count"], 0)
 
-                # Mode swap assigns planner->antigravity, executor->codex; physical_input=True keeps execution_authorized=False
+                # Mode swap still assigns planner/executor under sabrina coordinator; physical_input=True keeps execution_authorized=False
                 res = runner.launch_mission(
                     goal="Audit alpha_module with swapped roles",
                     mode="antigravity_thought_codex_implement",
@@ -422,8 +422,8 @@ os._exit(71)
                 st = runner.get_state()
                 by_role = {w["role"]: w for w in st["workers"]}
                 self.assertEqual(by_role["planner_architect"]["model"], "openai/gpt-5")
-                self.assertEqual(by_role["planner_architect"]["parent_node"], "antigravity")
-                self.assertEqual(by_role["execution_specialist"]["parent_node"], "codex")
+                self.assertEqual(by_role["planner_architect"]["parent_node"], "sabrina")
+                self.assertEqual(by_role["execution_specialist"]["parent_node"], "sabrina")
                 self.assertFalse(st["execution_authorized"])
 
                 out = runner.wait_for_mission(res["mission_id"], timeout=6.0)
