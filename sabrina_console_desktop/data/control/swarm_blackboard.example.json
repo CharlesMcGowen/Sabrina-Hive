@@ -1,0 +1,10 @@
+{
+  "session_id": "default",
+  "state_version": 1,
+  "active_owner": "swarm_command",
+  "goal_tree": {
+    "root_goal": "",
+    "tasks": []
+  },
+  "artifacts": {}
+}

@@ -20,6 +20,9 @@ freqtrade_pivot/.venv/
 # Secrets and Vaults (CRITICAL: Never commit credentials)
 *.env
 .env
+*.zim
+sabrina_console_desktop/bin/kiwix/
+sabrina_console_desktop/data/zim/
 sabrina_console_desktop/data/control/provider_vault.json
 sabrina_console_desktop/data/control/recovery_workers/
 sabrina_console_desktop/data/control/*.key
@@ -98,8 +101,13 @@ tests/
 # Tools directory (kept local for separate upload)
 sabrina_console_desktop/tools/
 sabrina_console_desktop/local_ui/
-sabrina_console_desktop/data/control/paper_portfolios.json
-sabrina_console_desktop/data/control/crypto_market_research_schema.json
+# Local data, caches, and runtime state (only boilerplate *.example.json and README.md are tracked)
+sabrina_console_desktop/data/*
+!sabrina_console_desktop/data/README.md
+!sabrina_console_desktop/data/*.example.json
+!sabrina_console_desktop/data/control/
+sabrina_console_desktop/data/control/*
+!sabrina_console_desktop/data/control/*.example.json
 *.before-*
 
 # IDE & OS files

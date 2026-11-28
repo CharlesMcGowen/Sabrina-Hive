@@ -4,7 +4,6 @@
   "policy_profile": "sandboxed_edit",
   "allow_local_venv_fallback": true,
   "recent_workspaces": [
-    ".",
-    "./sabrina_console_desktop"
+    "."
   ]
 }
