@@ -195,6 +195,24 @@ def _read_desktop_html(path: Path) -> str:
     if legacy_art in html and asset.is_file():
         image = base64.b64encode(asset.read_bytes()).decode("ascii")
         html = html.replace(legacy_art, f'url("data:image/jpeg;base64,{image}")')
+    local_ui_dir = ROOT / "local_ui"
+    if local_ui_dir.is_dir():
+        nav_file = local_ui_dir / "nav.html"
+        if nav_file.is_file():
+            nav_html = nav_file.read_text(encoding="utf-8")
+            anchor = '<button class="nav-btn" data-view="ops">'
+            if anchor in html:
+                html = html.replace(anchor, nav_html + "\n        " + anchor, 1)
+        views_file = local_ui_dir / "views.html"
+        if views_file.is_file():
+            views_html = views_file.read_text(encoding="utf-8")
+            plugin_anchor = '<div id="plugin-views"></div>'
+            if plugin_anchor in html:
+                html = html.replace(plugin_anchor, views_html + "\n\n        " + plugin_anchor, 1)
+        js_file = local_ui_dir / "scripts.js"
+        if js_file.is_file():
+            js_code = js_file.read_text(encoding="utf-8")
+            html = html.replace("</body>", f"<script>\n{js_code}\n</script>\n</body>", 1)
     return html
 try:
     from sabrina_console_desktop.sabrina_config import OLLAMA_BASE_URL as _CFG_OLLAMA_BASE_URL
@@ -741,6 +759,8 @@ class SabrinaDesktopBridge:
             "ollama_models": [],
         }
         self._chat_history_seeded = False
+        self._local_ext: Any = None
+        self._load_local_extensions()
         self._window: Any = None
         self._ui_html_path: Path = Path(ui_html_path) if ui_html_path is not None else (ROOT / "sabrina_desktop_ui.html")
         self._ui_loaded_mtime: float = self._read_ui_asset_mtime()
@@ -1942,7 +1962,7 @@ class SabrinaDesktopBridge:
         if best_rec.get("goal"):
             swarm["recommended_next_goal"] = best_rec["goal"]
 
-        return {
+        snap = {
             "auth_locked": False,
             "auth": self.console_auth.status() if getattr(self, "console_auth", None) is not None else {"configured": False, "locked": False},
             "api_ok": api_ok,
@@ -1987,6 +2007,28 @@ class SabrinaDesktopBridge:
                 f"API :8087 unreachable (remote service on ego:8087 not running — local fallback active): {health.get('error')}"
             ] if (not api_ok and isinstance(health, dict) and health.get("error")) else [],
         }
+        if self._local_ext is not None and hasattr(self._local_ext, "enrich_snapshot"):
+            try:
+                self._local_ext.enrich_snapshot(self, snap, api_ok=api_ok)
+            except Exception:
+                pass
+        return snap
+
+    def _load_local_extensions(self) -> None:
+        ext_path = ROOT / "local_ui" / "bridge_ext.py"
+        if not ext_path.is_file():
+            return
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("sabrina_local_bridge_ext", str(ext_path))
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                if hasattr(mod, "register_bridge_methods"):
+                    mod.register_bridge_methods(self)
+                self._local_ext = mod
+        except Exception:
+            self._local_ext = None
 
     def get_deployment_health(self) -> dict[str, Any]:
         """Return live status of wired backend modules for the Deployment Health badge."""
