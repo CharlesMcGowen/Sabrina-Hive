@@ -185,9 +185,6 @@ class Console(tk.Tk):
         harness_frame=ttk.Frame(book); book.add(harness_frame,text="Harness Updates")
         from tools.sabrina_console_dev_supervisor import DevSupervisorView
         self._devsup_view=DevSupervisorView(self, harness_frame)
-        from tools.sabrina_console_kraken import KrakenView
-        self._kraken_view=KrakenView(book, request); book.add(self._kraken_view,text="Kraken")
-        book.insert(2, self._kraken_view)
         from tools.sabrina_console_swarm import SwarmCommandView
         self._swarm_view=SwarmCommandView(book, console=self, on_select_run=self._jump_to_trace_run)
         book.add(self._swarm_view,text="Swarm Control")
@@ -199,7 +196,6 @@ class Console(tk.Tk):
         book.select(self._swarm_view)
     def _poll(self):
         self.refresh()
-        self._kraken_view.refresh()
         if getattr(self, "_swarm_view", None):
             self._swarm_view.refresh()
         if getattr(self, "_calendar_view", None):
@@ -478,9 +474,6 @@ class Console(tk.Tk):
         except Exception as exc: messagebox.showerror("Operation failed",str(exc))
     def schedule(self):
         try:
-            if self.capability.get() in {'kraken.inspect','kraken.objective'}:
-                self._main_book.select(self._kraken_view)
-                return
             capability=self.capability.get(); delay=max(0,int(self.delay.get() or 0)); low=int(self.interval_min.get())*60 if self.interval_min.get().strip() else None; high=int(self.interval_max.get())*60 if self.interval_max.get().strip() else low; payload=({} if capability=="system.health_report" else {"max_threads":5} if capability=="linkedin.replies" else {"max_posts":3}); request("/api/schedule","POST",{"capability":capability,"payload":payload,"next_run":time.time()+delay*60,"interval_min":low,"interval_max":high,"max_attempts":3}); self.refresh()
         except Exception as exc: messagebox.showerror("Schedule failed",str(exc))
     def _show_skills(self,skills_dict):

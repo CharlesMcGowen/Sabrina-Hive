@@ -26,7 +26,7 @@ _MENTION_RE = re.compile(r"@([A-Za-z0-9][A-Za-z0-9_-]{0,63})")
 _TAG_BRACKET_RE = re.compile(r"\[(PASS|BLOCK|done)\]")
 
 # Fail-closed path-isolation patterns covering all 5 excluded path classes:
-# 1. outputs/kraken-holdout, holdout
+# 1. outputs/holdout, holdout
 # 2. Nov 24-30 (2026-11-24..30 / 20261124..30)
 # 3. 2d8acaed
 # 4. 14-day / 14day / active 14-day study
@@ -34,7 +34,7 @@ _TAG_BRACKET_RE = re.compile(r"\[(PASS|BLOCK|done)\]")
 _EXCLUDED_PATH_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "holdout",
-        re.compile(r"(?:outputs[\\/]kraken-holdout|holdout)", re.IGNORECASE),
+        re.compile(r"(?:outputs[\\/]holdout|holdout)", re.IGNORECASE),
     ),
     (
         "nov_24_30",

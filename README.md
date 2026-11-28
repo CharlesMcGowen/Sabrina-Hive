@@ -18,17 +18,6 @@ Rogue Colony is a desktop-first, extensible multi-agent orchestration framework.
   - `SwarmSearchHydrator`: Grounding engine that searches local workspace docs, production blueprints (PostgreSQL connection pools, JWT/Argon2id auth, Docker compose), and search engines to hydrate unfamiliar tasks.
   - Glowing `🔍 SEARCH` pill indicators in the live telemetry feed.
 
-- **📈 Kraken Institutional & Quant Trading Suite**:
-  - **Quant Tree Turnover Engine**: Log-odds gradient tree ensemble $\ln(p_{\text{Up}}/p_{\text{Down}})$ paired with capital turnover velocity scoring $\text{Score}_s = (\$1 \cdot p_s - C_s)/(C_s \cdot \tau_s)$ and half-Kelly sizing.
-  - **Avellaneda-Stoikov Market Maker**: Reservation price skew $r(s, q, \tau)$ capturing parity spread and maker rebates while avoiding adverse selection.
-  - **High-Frequency Tick Gates & 2s Book Recorder**: Microprice, order flow imbalance (OFI), and causal price windows.
-
-- **🔮 QuantOrb Solana Holder Scanner & CPMM Dump Simulator**:
-  - Separates liquidity pool reserves from insider/dev wallets.
-  - Constant Product ($x \cdot y = k$) price collapse simulations for top-1 and coordinated top-5 syndicate dumps.
-  - Authority and mutability audit tripwires (`mint_authority`, `freeze_authority`, mutable metadata).
-  - Concentric SVG Orb visualizer and execution safety vetoes integrated into the Desktop Console.
-
 - **💻 Dual PowerShell & Linux (WSL2) CLI Execution**:
   - Seamless execution across Windows PowerShell 5.1/7 and Linux Ubuntu 24.04 (WSL2 / SSH).
   - Granular execution authorization policies protecting core source trees.

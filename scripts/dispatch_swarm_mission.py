@@ -13,7 +13,7 @@ runner = LiveSwarmRunner(
     artifacts_dir=ROOT / "artifacts",
 )
 
-mission_goal = "Evaluate Kraken cheap trading execution: analyze 24h TREAD/USD spread hurdles, enforce post-only maker fills, and synthesize dynamic take-profit and dip re-entry skills"
+mission_goal = "Inspect the active workspace architecture, verify core module imports, and summarize any missing dependencies."
 print(f"Launching mission on LiveSwarmRunner: '{mission_goal}'...")
 res = runner.launch_mission(mission_goal, coordinator_count=1, workers_per_coordinator=3)
 print("Launch response:", res)

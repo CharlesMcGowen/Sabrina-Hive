@@ -1232,7 +1232,6 @@
         <button class="nav-btn" data-view="plugin-settings">App Connections</button>
         <button class="nav-btn" data-view="ops">Scheduled Jobs <span id="nav-jobs" class="nav-pill">0</span></button>
         <button class="nav-btn" data-view="automations">Automations <span id="nav-automations" class="nav-pill">0</span></button>
-        <button class="nav-btn" data-view="kraken">Kraken Safety <span class="nav-pill">SAFE</span></button>
         <button class="nav-btn" data-view="debug">Diagnostics <span id="nav-debug" class="nav-pill">0</span></button>
         <button class="nav-btn" data-view="dependencies">Dependencies &amp; Artifacts <span id="nav-deps-count" class="nav-pill">UV</span></button>
       </nav>
@@ -1337,8 +1336,6 @@
                   <label id="browser-manual-start-label" hidden style="font-size:11.5px; white-space:nowrap;"><input id="browser-manual-start" type="checkbox" /> Let me act first</label>
                   <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap; cursor:pointer;" title="Allow Execution Specialist to write ```write_file:...``` deliverables into the active workspace"><input id="quick-allow-writes" type="checkbox" checked /><span>Allow Writes</span></label>
                   <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap;" title="Allow the coordinator to grant public market data requests for this mission. Automatic follow-up missions do not inherit these permissions."><input id="quick-market-plugins" type="checkbox" /><span>Allow market plugins</span></label>
-                  <label class="row" style="gap:5px; font-size:11.5px;" title="The worker model provider can receive Kraken account details. Balances and orders require a dedicated read-only key. Permission applies to this mission only."><input id="quick-kraken-account" type="checkbox" /><span>Allow Kraken account reads (shared with worker model)</span></label>
-                  <label class="row" style="gap:5px; font-size:11.5px;"><input id="quick-kraken-entry" type="checkbox" /><span>Allow the coordinator to approve Kraken spot buys on Ego (requires an enabled order relay)</span></label>
                   <input id="quick-plugin-capabilities" type="text" aria-label="Additional plugin capabilities" placeholder="Additional plugin.operation, …" title="Comma-separated capabilities from the coordinator plugin policy. Automatic follow-up missions do not inherit these permissions." />
                   <select id="quick-auto-loop-count" aria-label="Background follow-ups" style="font-size:11.5px; padding:5px 7px;" title="A background coordinator runs approved follow-ups after a passed verification. Follow-ups have read-only workspace access.">
                     <option value="0" selected>Draft next step only</option>
@@ -1867,8 +1864,6 @@
                 <input id="mission-branching-order" class="builder-num" type="number" min="2" max="6" value="3" style="width:36px; padding:2px 4px; font-size:11px;" title="m-Eulerian branching order (2..6)" />
               </div>
               <label class="row" style="gap:5px; font-size:11.5px; white-space:nowrap;" title="Allow the coordinator to grant public market data requests for this mission"><input id="mission-market-plugins" type="checkbox" /><span>Allow market plugins</span></label>
-              <label class="row" style="gap:5px; font-size:11.5px;" title="The worker model provider can receive Kraken account details. Balances and orders require a dedicated read-only key. Permission applies to this mission only."><input id="mission-kraken-account" type="checkbox" /><span>Allow Kraken account reads (shared with worker model)</span></label>
-              <label class="row" style="gap:5px; font-size:11.5px;"><input id="mission-kraken-entry" type="checkbox" /><span>Allow the coordinator to approve Kraken spot buys on Ego (requires an enabled order relay)</span></label>
               <input id="mission-plugin-capabilities" type="text" aria-label="Additional plugin capabilities" placeholder="Additional plugin.operation, …" title="Comma-separated capabilities from the coordinator plugin policy" />
               <button id="btn-launch" class="btn-ok" type="button">Launch Mission</button>
               <button id="btn-release-review" class="btn-ghost" type="button">Review GitHub release kit</button>
@@ -2029,8 +2024,6 @@
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/experiment polymarket">/experiment polymarket</button>
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/research help">Research help</button>
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/plugin list">List plugins</button>
-<button type="button" class="btn-ghost chat-cmd" data-cmd='/plugin run kraken_console {"operation":"status"}'>Kraken status</button>
-<button type="button" class="btn-ghost chat-cmd" data-cmd='/plugin run kraken_monitor {"operation":"dashboard"}'>Kraken monitor</button>
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/plugin help">Plugin help</button>
 
 <button type="button" class="btn-ghost chat-cmd" data-cmd="/mission ">/mission</button>
@@ -2045,113 +2038,6 @@
               <button id="btn-cancel-chat" class="btn-err" type="button" style="display:none;" title="Cancel in-flight collective/chat turn">Cancel</button>
             </div>
             <div id="chat-feedback" class="feedback"></div>
-          </div>
-        </section>
-
-        <!-- VIEW 3: KRAKEN & TRACK B -->
-        <section id="view-kraken" class="view">
-          <!-- QUANTORB SOLANA & MEMECOIN HOLDER VISUALIZER -->
-          <div class="panel" style="margin-bottom:14px; border:1px solid rgba(56, 189, 248, 0.35); background:radial-gradient(ellipse at top left, rgba(56, 189, 248, 0.08), transparent 70%);">
-            <div class="panel-head">
-              <div class="row" style="gap:10px; align-items:center;">
-                <h2 class="panel-title">🔮 QuantOrb — Solana Holder Distribution &amp; CPMM Dump Simulator</h2>
-                <span id="quantorb-risk-badge" class="badge" style="background:rgba(52, 211, 153, 0.2); color:var(--green); border:1px solid var(--green);">RISK: READY</span>
-              </div>
-              <div class="row" style="gap:8px;">
-                <input id="quantorb-token-input" type="text" class="mono" placeholder="Solana Mint Address (or SOL/BONK/WIF)..." style="width:280px; font-size:11px; padding:4px 8px;" value="DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" />
-                <button id="btn-quantorb-scan" class="btn-primary" type="button" style="padding:4px 10px; font-size:11px;">🔮 Scan Token Orb</button>
-              </div>
-            </div>
-            
-            <div class="grid-2" style="gap:16px; align-items:center; margin-top:8px;">
-              <!-- Left: The Interactive Dynamic Orb Visualizer -->
-              <div style="text-align:center; position:relative; background:#070d18; border-radius:12px; padding:12px; border:1px solid var(--border);">
-                <div class="muted mono" style="font-size:10.5px; margin-bottom:6px;">QUANTORB TOKEN DISTRIBUTION CONCENTRIC MAP</div>
-                <svg id="quantorb-svg" viewBox="0 0 320 320" style="width:260px; height:260px; margin:0 auto; display:block;">
-                  <defs>
-                    <radialGradient id="orbGlow" cx="50%" cy="50%" r="50%">
-                      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8"/>
-                      <stop offset="60%" stop-color="#0284c7" stop-opacity="0.3"/>
-                      <stop offset="100%" stop-color="#0369a1" stop-opacity="0"/>
-                    </radialGradient>
-                    <filter id="glowEffect" x="-20%" y="-20%" width="140%" height="140%">
-                      <feGaussianBlur stdDeviation="4" result="blur" />
-                      <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                    </filter>
-                  </defs>
-                  <!-- Outer Raydium / AMM Liquidity Ring -->
-                  <circle cx="160" cy="160" r="130" fill="none" stroke="rgba(56, 189, 248, 0.25)" stroke-width="6" stroke-dasharray="4 4" />
-                  <circle id="quantorb-lp-arc" cx="160" cy="160" r="130" fill="none" stroke="#38bdf8" stroke-width="8" stroke-dasharray="204 612" stroke-dashoffset="0" />
-                  <!-- Community / Public Float Ring -->
-                  <circle cx="160" cy="160" r="100" fill="none" stroke="rgba(52, 211, 153, 0.2)" stroke-width="12" />
-                  <circle id="quantorb-float-arc" cx="160" cy="160" r="100" fill="none" stroke="#34d399" stroke-width="12" stroke-dasharray="314 314" />
-                  <!-- Insider / Top 5 Concentrated Threat Ring -->
-                  <circle cx="160" cy="160" r="65" fill="none" stroke="rgba(244, 63, 94, 0.2)" stroke-width="16" />
-                  <circle id="quantorb-insider-arc" cx="160" cy="160" r="65" fill="none" stroke="#f43f5e" stroke-width="16" stroke-dasharray="132 276" filter="url(#glowEffect)" />
-                  <!-- Central Danger Core / Top 1 Dev Wallet -->
-                  <circle id="quantorb-core" cx="160" cy="160" r="30" fill="url(#orbGlow)" stroke="#f43f5e" stroke-width="2" />
-                  <text id="quantorb-core-label" x="160" y="164" text-anchor="middle" fill="#fff" font-size="10.5" font-weight="700" font-family="monospace">12%</text>
-                  <text x="160" y="275" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="monospace">LP Pool: 25% | Insiders: 32.5%</text>
-                </svg>
-              </div>
-
-              <!-- Right: Authority Audits & Dump Impact Sliders -->
-              <div style="background:#09111f; border-radius:12px; padding:14px; border:1px solid var(--border);">
-                <div class="row" style="justify-content:space-between; margin-bottom:8px;">
-                  <span class="muted" style="font-size:11px;">ON-CHAIN AUTHORITIES &amp; MUTABILITY</span>
-                  <span id="quantorb-auth-status" class="pill pill-ok" style="font-size:10px;">AUTHORITIES REVOKED</span>
-                </div>
-                <div style="font-size:11.5px; line-height:1.7; margin-bottom:12px;">
-                  <div>🔑 <b>Mint Authority:</b> <span id="q-mint-val" class="mono" style="color:var(--green);">Revoked (Fixed Supply)</span></div>
-                  <div>❄️ <b>Freeze Authority:</b> <span id="q-freeze-val" class="mono" style="color:var(--green);">Revoked (No Blacklists)</span></div>
-                  <div>📝 <b>Metadata Mutable:</b> <span id="q-meta-val" class="mono" style="color:var(--green);">Immutable (Verified)</span></div>
-                </div>
-
-                <div class="muted mono" style="font-size:10.5px; margin-bottom:4px;">CPMM (x · y = k) DUMP PROJECTIONS</div>
-                <div style="background:#0d1829; border-radius:8px; padding:10px; border:1px solid var(--border); font-size:11.5px;">
-                  <div class="row" style="justify-content:space-between;">
-                    <span>💥 <b>Top 1 Whale Dump:</b></span>
-                    <span id="q-top1-drop" class="mono" style="color:#f43f5e; font-weight:700;">-54.35% drop</span>
-                  </div>
-                  <div class="muted" style="font-size:10.5px; margin-bottom:8px;">Extracts: <span id="q-top1-usd" class="mono">$87,567 USD</span> (486.5 SOL)</div>
-
-                  <div class="row" style="justify-content:space-between;">
-                    <span>⚠️ <b>Top 5 Coordinated Dump:</b></span>
-                    <span id="q-top5-drop" class="mono" style="color:#f43f5e; font-weight:700;">-81.10% drop</span>
-                  </div>
-                  <div class="muted" style="font-size:10.5px;">Extracts: <span id="q-top5-usd" class="mono">$152,608 USD</span> (847.8 SOL)</div>
-                </div>
-
-                <div class="row" style="margin-top:10px; justify-content:space-between; align-items:center;">
-                  <span class="muted" style="font-size:11px;">Kraken Market-Making Gate:</span>
-                  <span id="q-gate-status" class="pill pill-err" style="font-size:10.5px; font-weight:700;">VETOED (High Dump Risk)</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <div class="row" style="gap:10px; align-items:center;">
-                <h2 class="panel-title">Kraken &amp; Track B (H1-v2.1-PDLR)</h2>
-                <span class="badge safety">execution_authorized: false</span>
-              </div>
-              <div class="row" style="gap:8px;">
-                <button id="btn-open-kraken-monitor-plugin" class="btn-primary" type="button" title="Open the live Kraken Monitor + WebSocket + 24h Top Gainers plugin tab">📈 Open Live Monitor &amp; 24h Gainers Plugin</button>
-                <button id="btn-launch-kraken-gui" class="btn-ok" type="button" title="Open the standalone Sabrina Kraken Live & $1,000 Paper Desktop Monitor">🖥 Launch Kraken Desktop Monitor</button>
-                <button id="btn-run-kraken-qa" class="btn-ghost" type="button" title="Run deterministic Product QA (imports, headless Tcl/Tk GUI smoke, UI parity, unit tests)">🧪 Run Product QA Smoke Check</button>
-                <button id="btn-kraken-paper-review" class="btn-ghost" type="button" title="Send the simulated portfolio totals to Claude and GPT, then have Gemini review their findings">Review paper results with Claude, GPT &amp; Gemini</button>
-                <button id="btn-kraken-replacement-status" class="btn-ghost" type="button">View Top 25 paper trial</button>
-                <button id="btn-kraken-named-analysts" class="btn-ghost" type="button">View analyst decisions</button>
-                <select id="kraken-analyst-round" aria-label="Choose an analyst journal round" hidden></select>
-                <button id="btn-kraken-top25-picks" class="btn-ghost" type="button">View momentum baseline</button>
-                <button id="btn-swarm-kraken-qa" class="btn-ghost" type="button" title="Dispatch the 4-agent Swarm in Product QA mode to audit the Kraken GUI product">⚡ Swarm QA Mission on Kraken</button>
-                <button id="btn-swarm-manage-kraken" class="btn-primary" type="button" title="Deploy the Swarm to autonomously monitor order-books, turnover velocity, and QuantOrb safety">🤖 Deploy Swarm Kraken Manager</button>
-              </div>
-            </div>
-            <div id="kraken-qa-feedback" class="feedback" style="margin-bottom:8px;"></div>
-            <pre id="kraken-qa-receipt" class="mono" style="display:none; margin:0 0 12px 0; padding:10px 12px; background:#09111f; border:1px solid var(--border); border-radius:8px; white-space:pre-wrap; max-height:280px; overflow:auto;"></pre>
-            <pre id="kraken-json" class="mono muted" style="margin:0; white-space:pre-wrap; max-height:480px; overflow:auto;">Loading Kraken telemetry…</pre>
           </div>
         </section>
 
@@ -3245,6 +3131,7 @@
                 <h2 class="panel-title">📦 Dependency Manager &amp; Local Artifact Repository</h2>
                 <span id="deps-uv-badge" class="pill pill-ok mono" style="font-size:11px;">⚡ uv Active</span>
                 <span id="deps-wheelhouse-badge" class="pill pill-idle mono" style="font-size:11px;">📂 Wheelhouse: loading…</span>
+                <span id="deps-forgejo-source-badge" class="pill pill-idle mono" style="font-size:11px;">🧱 Source: checking…</span>
                 <span id="deps-revision-badge" class="pill pill-ok mono" style="font-size:11px;">🛡️ Harness: native-df5a05725403</span>
               </div>
               <div class="row">
@@ -3254,9 +3141,13 @@
 
             <!-- Management action toolbar -->
             <div class="row" style="gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center;">
-              <input id="deps-package-input" type="text" placeholder="Package name (e.g. pandas, requests>=2.28, scikit-learn)" style="flex:1; min-width:240px; padding:6px 10px;" />
-              <label class="row" style="gap:5px; font-size:12px; cursor:pointer;" title="Install only from local wheels without connecting to PyPI">
-                <input id="deps-wheelhouse-only" type="checkbox" /><span>Offline / Local Only</span>
+              <input id="deps-package-input" type="text" placeholder="Package name (e.g. pandas, requests>=2.28, scikit-learn)" style="flex:1; min-width:220px; padding:6px 10px;" />
+              <select id="deps-source-mode" style="font-size:12px; padding:6px 8px;" title="Choose whether installs pull from Forgejo LAN PyPI + local wheelhouse or local wheelhouse only">
+                <option value="auto" selected>Forgejo LAN PyPI + Wheelhouse</option>
+                <option value="wheelhouse_only">Offline / Local Wheelhouse Only</option>
+              </select>
+              <label class="row" style="gap:5px; font-size:12px; cursor:pointer;" title="Automatically push newly cached wheels to Forgejo PyPI after downloading">
+                <input id="deps-push-cached-forgejo" type="checkbox" checked /><span>Auto-push cached to Forgejo</span>
               </label>
               <button id="btn-deps-install" class="btn-ok" type="button">Install to Environment</button>
               <button id="btn-deps-cache" class="btn-ghost" type="button">Cache to Wheelhouse</button>
@@ -3313,30 +3204,70 @@
             <div id="mesh-action-feedback" class="feedback mono" style="margin-top:6px; font-size:11.5px; white-space:pre-wrap;"></div>
           </div>
 
-          <!-- Self-Hosted Forgejo (Git, PyPI & RSI Artifact Registry on /mnt/14tb) -->
+          <!-- Self-Hosted Forgejo (Git, PyPI & Actions CI/CD Registry on ego NVMe) -->
           <div class="panel" style="margin-top:12px;">
             <div class="panel-head">
               <div class="row" style="gap:8px; align-items:center; flex-wrap:wrap;">
-                <h3 class="panel-title">🧱 Self-Hosted Forgejo Registry (<code>/mnt/webapps-nvme/agent_stack/forgejo</code>)</h3>
+                <h3 class="panel-title">🧱 Self-Hosted Forgejo Registry, Git &amp; Actions CI</h3>
                 <span id="forgejo-status-badge" class="pill pill-idle mono" style="font-size:11px;">Forgejo: checking…</span>
                 <span id="forgejo-pkg-count-badge" class="pill pill-idle mono" style="font-size:11px;">0 hosted packages</span>
+                <span id="forgejo-arch-badge" class="pill pill-idle mono" style="font-size:11px;">any: — · win: — · linux: —</span>
+                <span id="forgejo-repo-badge" class="pill pill-idle mono" style="font-size:11px;">repo: ego/sabrina</span>
+                <span id="forgejo-ci-badge" class="pill pill-idle mono" style="font-size:11px;">CI: checking…</span>
               </div>
               <div class="row" style="gap:6px; flex-wrap:wrap;">
-                <button id="btn-forgejo-deploy" class="btn-ghost" type="button">Deploy Container to ego</button>
                 <button id="btn-forgejo-sync-wheels" class="btn-ok" type="button">Push Wheels to PyPI</button>
-                <button id="btn-forgejo-publish-rsi" class="btn-ghost" type="button">Publish RSI Scorecards</button>
+                <button id="btn-forgejo-seed-linux" class="btn-ghost" type="button">Seed Linux Wheels (ego)</button>
+                <button id="btn-forgejo-push-branch" class="btn-primary" type="button">Push Current Branch</button>
+                <button id="btn-forgejo-deploy" class="btn-ghost" type="button">Deploy Container to ego</button>
               </div>
             </div>
             <p class="muted" style="font-size:12px; margin-bottom:8px;">
-              Single-container Git + PyPI + OCI + Generic artifact registry on <code>ego</code>. PyPI Index: <code id="forgejo-pypi-url-label">http://127.0.0.1:3003/api/packages/ego/pypi/simple</code>
+              Single-container Git + PyPI + Actions CI on <code>ego</code> (<code>/home/ego/agent_stack/forgejo</code> &amp; <code>/mnt/webapps-nvme/agent_stack/forgejo</code>).
+              PyPI Index: <code id="forgejo-pypi-url-label">http://192.168.1.133:3003/api/packages/ego/pypi/simple</code> ·
+              Repo: <code id="forgejo-repo-url-label">http://192.168.1.133:3003/ego/sabrina</code>
             </p>
             <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center;">
-              <input id="forgejo-url-input" type="text" placeholder="http://127.0.0.1:3003" style="flex:1.4; min-width:200px; padding:5px 8px; font-size:12px;" />
+              <input id="forgejo-url-input" type="text" placeholder="http://192.168.1.133:3003" style="flex:1.4; min-width:200px; padding:5px 8px; font-size:12px;" />
               <input id="forgejo-owner-input" type="text" placeholder="Owner (ego)" style="width:110px; padding:5px 8px; font-size:12px;" />
               <input id="forgejo-token-input" type="password" placeholder="API Token (saved encrypted)" style="flex:1; min-width:180px; padding:5px 8px; font-size:12px;" autocomplete="off" />
               <button id="btn-forgejo-save" class="btn-primary" type="button">Save &amp; Probe</button>
             </div>
             <div id="forgejo-action-feedback" class="feedback mono" style="margin-top:6px; font-size:11.5px; white-space:pre-wrap;"></div>
+
+            <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:12px; margin-top:12px;">
+              <!-- Hosted Forgejo PyPI Packages -->
+              <div class="panel" style="background:var(--surface-2); padding:10px 12px;">
+                <div class="panel-head" style="margin-bottom:8px;">
+                  <h4 class="panel-title" style="font-size:13px;">Hosted Forgejo PyPI Packages (<span id="forgejo-filtered-count">0</span>)</h4>
+                  <div class="row" style="gap:6px;">
+                    <select id="forgejo-plat-filter" style="font-size:11px; padding:3px 6px;">
+                      <option value="all" selected>All Platforms</option>
+                      <option value="any">Universal (any)</option>
+                      <option value="win_amd64">Windows (win_amd64)</option>
+                      <option value="linux_x86_64">Linux (linux_x86_64)</option>
+                    </select>
+                    <input id="forgejo-pkg-filter" type="text" placeholder="Filter Forgejo packages…" style="font-size:11.5px; padding:3px 8px; width:150px;" />
+                  </div>
+                </div>
+                <div id="forgejo-pkg-list" class="reg-list" style="max-height:260px; overflow-y:auto;">
+                  <div class="muted" style="padding:8px;">Probing Forgejo PyPI registry…</div>
+                </div>
+              </div>
+
+              <!-- Git Sync & Forgejo Actions CI Runs -->
+              <div class="panel" style="background:var(--surface-2); padding:10px 12px;">
+                <div class="panel-head" style="margin-bottom:6px;">
+                  <h4 class="panel-title" style="font-size:13px;">Git Sync &amp; Forgejo Actions CI</h4>
+                </div>
+                <div id="forgejo-git-summary" class="muted mono" style="font-size:11.5px; margin-bottom:8px; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">
+                  Checking local git branch &amp; forgejo remote…
+                </div>
+                <div id="forgejo-ci-runs-list" class="reg-list" style="max-height:210px; overflow-y:auto;">
+                  <div class="muted" style="padding:8px;">Loading recent CI workflow runs…</div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
       </div>
@@ -3511,7 +3442,6 @@
       const TITLES = {
         swarm: "Swarm Monitor",
         chat: "Launch & Operator Chat",
-        kraken: "Kraken Safety (Read-Only)",
         ops: "Scheduled Jobs",
         automations: "Agent Automations & Connectors",
         system: "Models, API Keys & Skills",
@@ -3946,11 +3876,15 @@
         const section = el("view-" + pluginTabId(name));
         if (!section) return;
         if (argsObj && typeof argsObj === "object") {
-          pluginFilterState.set(name, {
+          const filter = {
             asset_class: argsObj.asset_class || "crypto",
             limit: Number(argsObj.limit) || 10,
             chart_mode: argsObj.chart_mode || "trajectory",
-          });
+          };
+          // Gainer table filters; the plugin applies $25k / 100 bp when they are absent.
+          if (Number.isInteger(argsObj.min_volume_usd)) filter.min_volume_usd = argsObj.min_volume_usd;
+          if (Number.isInteger(argsObj.max_spread_bps)) filter.max_spread_bps = argsObj.max_spread_bps;
+          pluginFilterState.set(name, filter);
         }
         const fb = section.querySelector(".plugin-tab-feedback");
         if (fb) fb.textContent = "Updating " + operation + "…";
@@ -4133,6 +4067,40 @@
               addKrakenReportButton(row.cells[1], sym, g.is_stock);
               row.cells[5].textContent = "—";
             }
+            let drawer = oldDrawers.get(sym);
+            if (!drawer) {
+              drawer = document.createElement("tr");
+              drawer.setAttribute("data-km-drawer-row", sym);
+              drawer.style.display = "none";
+              drawer.insertCell().colSpan = 15;
+              oldDrawers.set(sym, drawer);
+            }
+            let flowBody = drawer.querySelector("[data-km-flow-body]");
+            if (!flowBody) {
+              const table = document.createElement("table");
+              table.className = "km-subtable km-mono";
+              table.createCaption().textContent = "Five-minute taker volume";
+              const head = table.createTHead().insertRow();
+              for (const label of ["Start UTC", "Buy USD", "Sell USD"]) {
+                const th = document.createElement("th");
+                th.textContent = label;
+                head.appendChild(th);
+              }
+              flowBody = table.createTBody();
+              flowBody.setAttribute("data-km-flow-body", "");
+              drawer.cells[0].appendChild(table);
+            }
+            if (flowBody) {
+              flowBody.replaceChildren();
+              const bins = g.trade_flow?.bins || [];
+              for (const [at, buy, sell] of bins) {
+                const tr = flowBody.insertRow();
+                tr.insertCell().textContent = new Date(at * 1000).toISOString().slice(11, 16);
+                tr.insertCell().textContent = formatUsdCompactJs(buy);
+                tr.insertCell().textContent = formatUsdCompactJs(sell);
+              }
+              if (!bins.length) flowBody.insertRow().insertCell().textContent = "Awaiting trade history";
+            }
             const cells = row.cells;
             const dot = document.createElement("span");
             dot.className = "km-swatch";
@@ -4144,12 +4112,19 @@
             cells[2].className = "km-mono " + (change >= 0 ? "km-pos" : "km-neg");
             cells[2].textContent = (change >= 0 ? "+" : "") + change.toFixed(2) + "%";
 
-            const chg1h = Number(g.chg_1h) || 0;
+            const has1h = g.chg_1h !== null && g.chg_1h !== undefined && Number.isFinite(Number(g.chg_1h));
+            const chg1h = has1h ? Number(g.chg_1h) : 0;
             cells[3].className = "km-mono " + (chg1h > 0 ? "km-pos" : (chg1h < 0 ? "km-neg" : "km-muted"));
-            cells[3].textContent = chg1h !== 0 ? (chg1h > 0 ? "+" : "") + chg1h.toFixed(2) + "%" : "—";
+            cells[3].textContent = has1h ? (chg1h > 0 ? "+" : "") + chg1h.toFixed(2) + "%" : "—";
+            cells[3].title = has1h
+              ? "Change since the Kraken hourly close " + g.chg_1h_ref_min + " min ago"
+              : "No completed hourly candle available yet";
 
             const price = Number(g.last) || 0;
             cells[4].className = "km-mono";
+            if (g.chg_1h_source === "kraken_taker_trades") {
+              cells[3].title = has1h ? "One-hour return from timestamped Kraken trades" : "Stale or missing one-hour trade reference";
+            }
             cells[4].textContent = price >= 10 ? "$" + price.toFixed(2) : "$" + price.toPrecision(5);
 
             cells[6].className = "km-mono";
@@ -8764,7 +8739,6 @@
         }
 
         el("lab-json").textContent = JSON.stringify(snap.lab || { status: "OFFLINE" }, null, 2);
-        el("kraken-json").textContent = JSON.stringify(snap.kraken || { execution_authorized: false, api_connected: false, status: "OFFLINE (API :8087 unreachable)" }, null, 2);
 
         // Chat roster & history (strictly operator turns; board stays in Swarm Command)
         const roster = snap.chat_roster || [];
@@ -9842,10 +9816,8 @@
           }
           const backend = el("quick-browser-backend")?.value || "";
           const marketPlugins = Boolean(el("quick-market-plugins")?.checked);
-          const krakenAccount = Boolean(el("quick-kraken-account")?.checked);
           const additionalPlugins = (el("quick-plugin-capabilities")?.value || "").split(",").map(x => x.trim()).filter(Boolean);
           const pluginCapabilities = [...new Set([...(marketPlugins ? ["kraken_console.quote", "polymarket_us.markets", "polymarket_us.bbo", "polymarket_us.book"] : []), ...(krakenAccount ? ["kraken_console.status", "kraken_console.balances", "kraken_console.open_orders", "kraken_console.query_order"] : []), ...additionalPlugins])];
-          if (el("quick-kraken-entry")?.checked && !pluginCapabilities.includes("kraken_console.queue_entry")) pluginCapabilities.push("kraken_console.queue_entry");
           if (backend && pluginCapabilities.length) {
             el("quick-swarm-feedback").textContent = "Market plugins are available in standard missions. Clear the interactive tool or uncheck market plugins.";
             return;
@@ -9968,8 +9940,6 @@
           const backendEl = el("quick-browser-backend");
           const urlEl = el("quick-browser-url");
           const marketEl = el("quick-market-plugins");
-          const kAcctEl = el("quick-kraken-account");
-          const kEntryEl = el("quick-kraken-entry");
           const loopEl = el("quick-auto-loop-count");
 
           if (writesEl && !manualOverrides.has("writes")) writesEl.checked = intent.allowWrites;
@@ -10032,8 +10002,6 @@
             manualOverrides.add(key);
             if (key === "writes" && el("quick-allow-writes")) el("quick-allow-writes").checked = false;
             if (key === "market" && el("quick-market-plugins")) el("quick-market-plugins").checked = false;
-            if (key === "kraken_account" && el("quick-kraken-account")) el("quick-kraken-account").checked = false;
-            if (key === "kraken_entry" && el("quick-kraken-entry")) el("quick-kraken-entry").checked = false;
             if (key === "loops" && el("quick-auto-loop-count")) el("quick-auto-loop-count").value = "0";
             if (key === "browser" && el("quick-browser-backend")) {
               el("quick-browser-backend").value = "";
@@ -10047,8 +10015,6 @@
           ["quick-allow-writes", "writes"],
           ["quick-browser-backend", "browser"],
           ["quick-market-plugins", "market"],
-          ["quick-kraken-account", "kraken_account"],
-          ["quick-kraken-entry", "kraken_entry"],
           ["quick-auto-loop-count", "loops"],
         ];
         manualBindings.forEach(([id, key]) => {
@@ -10175,10 +10141,8 @@
         if (el("quick-mission-goal")) el("quick-mission-goal").value = goal;
         el("swarm-feedback").textContent = `Launching live swarm mission (ratio ${coordCount}:${workersPerCoord}) & spawning workers…`;
         const additionalPlugins = (el("mission-plugin-capabilities")?.value || "").split(",").map(x => x.trim()).filter(Boolean);
-        const krakenAccount = Boolean(el("mission-kraken-account")?.checked);
         const pluginCapabilities = [...new Set([...(el("mission-market-plugins")?.checked
           ? ["kraken_console.quote", "kraken_monitor.top_gainers_24h", "polymarket_us.markets", "polymarket_us.bbo", "polymarket_us.book"] : []), ...(krakenAccount ? ["kraken_console.status", "kraken_console.balances", "kraken_console.open_orders", "kraken_console.query_order"] : []), ...additionalPlugins])];
-        if (el("mission-kraken-entry")?.checked && !pluginCapabilities.includes("kraken_console.queue_entry")) pluginCapabilities.push("kraken_console.queue_entry");
         await syncSwarmTopologyControl();
         const res = await callBridge("Swarm", "launch_mission", goal, mode, phys, coordCount, workersPerCoord, null, null, false, "", pluginCapabilities);
         if (res && res.mission_id) {
@@ -10483,6 +10447,24 @@
 
       // ---- Dependencies & Artifacts View Logic ----
       window.__installedPackagesCache = [];
+      window.__forgejoPackagesCache = [];
+      window.__depsForgejoConfigured = false;
+
+      function updateDepsSourceBadge() {
+        const badge = el("deps-forgejo-source-badge");
+        if (!badge) return;
+        const mode = el("deps-source-mode") ? el("deps-source-mode").value : "auto";
+        if (mode === "wheelhouse_only") {
+          badge.textContent = "📂 Source: Local Wheelhouse Only";
+          badge.className = "pill pill-idle mono";
+        } else if (window.__depsForgejoConfigured) {
+          badge.textContent = "🧱 Source: Forgejo LAN PyPI + Wheelhouse";
+          badge.className = "pill pill-ok mono";
+        } else {
+          badge.textContent = "📂 Source: Local Wheelhouse (Forgejo unconfigured)";
+          badge.className = "pill pill-warn mono";
+        }
+      }
 
       async function refreshDependenciesView() {
         const feedback = el("deps-action-feedback");
@@ -10506,6 +10488,8 @@
             el("deps-wheelhouse-badge").textContent = "📂 Wheelhouse: " + res.cached_wheels_count + " wheels";
             el("deps-wheelhouse-badge").className = "pill " + (res.cached_wheels_count > 0 ? "pill-ok" : "pill-idle") + " mono";
           }
+          window.__depsForgejoConfigured = Boolean(res.forgejo_configured);
+          updateDepsSourceBadge();
           if (el("deps-revision-badge")) {
             el("deps-revision-badge").textContent = "🛡️ Harness: " + (res.active_revision || "native-df5a05725403");
           }
@@ -10543,21 +10527,48 @@
                   el("mesh-ego-badge").textContent = `⚡ ego-lab (${ego.host}) ONLINE · ${ego.ssh_latency_ms || 0}ms`;
                   el("mesh-ego-badge").className = "pill pill-ok mono";
                 } else {
-                  el("mesh-ego-badge").textContent = `ego-lab (${(ego && ego.host) || "127.0.0.1"}) OFFLINE`;
+                  el("mesh-ego-badge").textContent = `ego-lab (${(ego && ego.host) || "192.168.1.133"}) OFFLINE`;
                   el("mesh-ego-badge").className = "pill pill-idle mono";
                 }
               }
             }).catch(() => {});
           }
 
-          // Check Self-Hosted Forgejo Status
+          // Check Self-Hosted Forgejo Status (packages, repo, CI, local git)
           if (window.pywebview && window.pywebview.api && window.pywebview.api.get_forgejo_status && el("forgejo-status-badge")) {
-            window.pywebview.api.get_forgejo_status().then(fg => {
+            window.pywebview.api.get_forgejo_status(true).then(fg => {
               if (!fg || !fg.ok) return;
-              if (el("forgejo-url-input") && !el("forgejo-url-input").value) el("forgejo-url-input").value = fg.base_url || "http://127.0.0.1:3003";
+              const fallbackBase = fg.default_base_url || res.forgejo_host_default || "http://192.168.1.133:3003";
+              if (el("forgejo-url-input") && !el("forgejo-url-input").value) el("forgejo-url-input").value = fg.base_url || fallbackBase;
               if (el("forgejo-owner-input") && !el("forgejo-owner-input").value) el("forgejo-owner-input").value = fg.owner || "ego";
               if (el("forgejo-pypi-url-label") && fg.pypi_simple_url) el("forgejo-pypi-url-label").textContent = fg.pypi_simple_url;
+              if (el("forgejo-repo-url-label")) {
+                el("forgejo-repo-url-label").textContent = (fg.repo && fg.repo.html_url) || `${fg.base_url || fallbackBase}/${fg.owner || "ego"}/${fg.repo_name || "sabrina"}`;
+              }
               if (el("forgejo-pkg-count-badge")) el("forgejo-pkg-count-badge").textContent = `${fg.packages_count || 0} hosted packages`;
+              if (el("forgejo-arch-badge") && fg.platform_counts) {
+                const pc = fg.platform_counts;
+                el("forgejo-arch-badge").textContent = `any: ${pc.any || 0} · win: ${pc.win_amd64 || 0} · linux: ${pc.linux_x86_64 || 0}`;
+                el("forgejo-arch-badge").className = "pill " + ((pc.linux_x86_64 || 0) > 0 ? "pill-ok" : "pill-warn") + " mono";
+              }
+              if (el("forgejo-repo-badge")) {
+                const branchLabel = (fg.repo && fg.repo.default_branch) || (fg.git && fg.git.branch) || "main";
+                el("forgejo-repo-badge").textContent = `repo: ${(fg.owner || "ego")}/${fg.repo_name || "sabrina"} (${branchLabel})`;
+                el("forgejo-repo-badge").className = "pill " + (fg.repo && fg.repo.ok ? "pill-ok" : "pill-idle") + " mono";
+              }
+              const ciRuns = fg.recent_ci_runs || [];
+              if (el("forgejo-ci-badge")) {
+                if (ciRuns.length > 0) {
+                  const latest = ciRuns[0];
+                  const st = String(latest.status || "unknown");
+                  const cls = st === "success" ? "pill-ok" : (st === "failure" ? "pill-err" : "pill-warn");
+                  el("forgejo-ci-badge").textContent = `CI #${latest.run_number || latest.id || "?"}: ${st}`;
+                  el("forgejo-ci-badge").className = `pill ${cls} mono`;
+                } else {
+                  el("forgejo-ci-badge").textContent = fg.reachable ? "CI: no runs" : "CI: offline";
+                  el("forgejo-ci-badge").className = "pill pill-idle mono";
+                }
+              }
               if (fg.reachable) {
                 el("forgejo-status-badge").textContent = `⚡ Forgejo v${fg.version || "?"} ONLINE`;
                 el("forgejo-status-badge").className = "pill pill-ok mono";
@@ -10565,11 +10576,86 @@
                 el("forgejo-status-badge").textContent = fg.configured ? "Forgejo OFFLINE" : "Forgejo Not Configured";
                 el("forgejo-status-badge").className = "pill pill-idle mono";
               }
+              window.__forgejoPackagesCache = fg.packages || [];
+              renderForgejoPackagesFilter();
+              renderForgejoGitAndCi(fg.git || {}, ciRuns);
             }).catch(() => {});
           }
         } catch (err) {
           if (feedback) feedback.textContent = "Unable to load dependencies: " + err;
         }
+      }
+
+      function renderForgejoPackagesFilter() {
+        const list = el("forgejo-pkg-list");
+        if (!list) return;
+        const query = (el("forgejo-pkg-filter")?.value || "").trim().toLowerCase();
+        const platFilter = el("forgejo-plat-filter")?.value || "all";
+        const pkgs = window.__forgejoPackagesCache || [];
+        const filtered = pkgs.filter(p => {
+          const matchesText = !query || String(p.name || "").toLowerCase().includes(query) || String(p.version || "").toLowerCase().includes(query);
+          const plats = p.platforms || [];
+          const matchesPlat = platFilter === "all" || plats.includes(platFilter);
+          return matchesText && matchesPlat;
+        });
+        if (el("forgejo-filtered-count")) el("forgejo-filtered-count").textContent = String(filtered.length);
+        if (filtered.length === 0) {
+          list.innerHTML = `<div class="muted" style="padding:8px;">${pkgs.length === 0 ? "No hosted packages returned by Forgejo." : "No matching hosted packages."}</div>`;
+          return;
+        }
+        list.innerHTML = filtered.map(p => {
+          const plats = (p.platforms && p.platforms.length) ? p.platforms : [p.type || "pypi"];
+          const platPills = plats.map(pl => {
+            const cls = pl === "linux_x86_64" ? "pill-ok" : (pl === "any" ? "pill-run" : "pill-idle");
+            return `<span class="pill ${cls} mono" style="font-size:10px; padding:1px 5px;">${esc(pl)}</span>`;
+          }).join(" ");
+          const spec = `${p.name}==${p.version}`;
+          return `
+            <div class="row" style="justify-content:space-between; align-items:center; padding:5px 8px; border-bottom:1px solid var(--border); font-size:12px; gap:6px;">
+              <div style="min-width:0; flex:1;">
+                <span style="font-weight:600;">${esc(p.name)}</span>
+                <span class="mono muted" style="font-size:11px; margin-left:4px;">v${esc(p.version)}</span>
+              </div>
+              <div class="row" style="gap:4px; align-items:center; flex-shrink:0;">
+                ${platPills}
+                <button class="btn-ghost" type="button" data-fj-install="${esc(spec)}" style="font-size:10.5px; padding:2px 7px;">Install</button>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+
+      function renderForgejoGitAndCi(gitInfo, ciRuns) {
+        const gitEl = el("forgejo-git-summary");
+        if (gitEl) {
+          if (!gitInfo || !gitInfo.is_git_repo) {
+            gitEl.textContent = "Workspace is not a Git repository.";
+          } else {
+            const remoteStr = gitInfo.remote_configured ? `forgejo (${gitInfo.compare_ref || "configured"})` : "no 'forgejo' remote";
+            const deltaStr = gitInfo.compare_ref ? `ahead ${gitInfo.ahead || 0} / behind ${gitInfo.behind || 0}` : "uncompared";
+            const dirtyStr = gitInfo.dirty_count > 0 ? ` · ${gitInfo.dirty_count} dirty file(s) skipped on push` : " · clean tree";
+            gitEl.textContent = `Branch: ${gitInfo.branch || "?"} · Remote: ${remoteStr} · ${deltaStr}${dirtyStr}`;
+          }
+        }
+        const ciList = el("forgejo-ci-runs-list");
+        if (!ciList) return;
+        if (!ciRuns || ciRuns.length === 0) {
+          ciList.innerHTML = '<div class="muted" style="padding:8px;">No Forgejo Actions workflow runs recorded yet.</div>';
+          return;
+        }
+        ciList.innerHTML = ciRuns.map(r => {
+          const st = String(r.status || "unknown");
+          const cls = st === "success" ? "pill-ok" : (st === "failure" ? "pill-err" : "pill-warn");
+          return `
+            <div class="row" style="justify-content:space-between; align-items:center; padding:6px 8px; border-bottom:1px solid var(--border); font-size:11.5px; gap:8px;">
+              <div style="min-width:0; flex:1;">
+                <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">#${esc(String(r.run_number || r.id || "?"))} ${esc(r.name || "ci")} · ${esc(r.head_branch || "")}</div>
+                <div class="muted mono" style="font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(r.short_sha || "")} ${esc(r.display_title || "")}</div>
+              </div>
+              <span class="pill ${cls} mono" style="font-size:10px; flex-shrink:0;">${esc(st)}</span>
+            </div>
+          `;
+        }).join("");
       }
 
       function renderInstalledPackagesFilter() {
@@ -10596,19 +10682,54 @@
         el("deps-search-filter").addEventListener("input", renderInstalledPackagesFilter);
       }
 
+      if (el("deps-source-mode")) {
+        el("deps-source-mode").addEventListener("change", updateDepsSourceBadge);
+      }
+      if (el("forgejo-pkg-filter")) {
+        el("forgejo-pkg-filter").addEventListener("input", renderForgejoPackagesFilter);
+      }
+      if (el("forgejo-plat-filter")) {
+        el("forgejo-plat-filter").addEventListener("change", renderForgejoPackagesFilter);
+      }
+      if (el("forgejo-pkg-list")) {
+        el("forgejo-pkg-list").addEventListener("click", async (ev) => {
+          const btn = ev.target.closest("[data-fj-install]");
+          if (!btn) return;
+          const spec = btn.dataset.fjInstall || "";
+          if (!spec) return;
+          const feedback = el("deps-action-feedback");
+          if (feedback) feedback.textContent = `Installing ${spec} from Forgejo LAN PyPI…`;
+          btn.disabled = true;
+          try {
+            const res = await window.pywebview.api.install_dependency_package([spec], false, "forgejo");
+            if (res && res.ok) {
+              if (feedback) feedback.textContent = `✅ Installed ${spec}.`;
+              await refreshDependenciesView();
+            } else {
+              if (feedback) feedback.textContent = `Install error: ${(res && (res.error || res.stderr)) || "Failed"}`;
+            }
+          } catch (err) {
+            if (feedback) feedback.textContent = "Install failed: " + err;
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      }
+
       el("btn-deps-install").addEventListener("click", async () => {
         const input = el("deps-package-input");
         const feedback = el("deps-action-feedback");
-        const wheelhouseOnly = el("deps-wheelhouse-only") ? el("deps-wheelhouse-only").checked : false;
+        const sourceMode = el("deps-source-mode") ? el("deps-source-mode").value : "auto";
+        const wheelhouseOnly = sourceMode === "wheelhouse_only";
         const pkgName = (input.value || "").trim();
         if (!pkgName) {
           if (feedback) feedback.textContent = "Please enter a package specification.";
           return;
         }
-        if (feedback) feedback.textContent = "Installing " + pkgName + "…";
+        if (feedback) feedback.textContent = "Installing " + pkgName + (wheelhouseOnly ? " (local wheelhouse)…" : " (Forgejo PyPI + wheelhouse)…");
         el("btn-deps-install").disabled = true;
         try {
-          const res = await window.pywebview.api.install_dependency_package([pkgName], wheelhouseOnly);
+          const res = await window.pywebview.api.install_dependency_package([pkgName], wheelhouseOnly, sourceMode);
           if (res.ok) {
             if (feedback) feedback.textContent = "Successfully installed " + pkgName + ".";
             input.value = "";
@@ -10626,17 +10747,22 @@
       el("btn-deps-cache").addEventListener("click", async () => {
         const input = el("deps-package-input");
         const feedback = el("deps-action-feedback");
+        const pushForgejo = el("deps-push-cached-forgejo") ? el("deps-push-cached-forgejo").checked : false;
         const pkgName = (input.value || "").trim();
         if (!pkgName) {
           if (feedback) feedback.textContent = "Please enter a package specification to cache.";
           return;
         }
-        if (feedback) feedback.textContent = "Downloading " + pkgName + " to wheelhouse…";
+        if (feedback) feedback.textContent = "Downloading " + pkgName + " to wheelhouse" + (pushForgejo ? " and pushing to Forgejo…" : "…");
         el("btn-deps-cache").disabled = true;
         try {
-          const res = await window.pywebview.api.cache_dependency_wheels([pkgName]);
+          const res = await window.pywebview.api.cache_dependency_wheels([pkgName], pushForgejo);
           if (res.ok) {
-            if (feedback) feedback.textContent = "Successfully cached " + pkgName + " to wheelhouse.";
+            let msg = "Successfully cached " + pkgName + " to wheelhouse.";
+            if (res.forgejo_sync && res.forgejo_sync.ok) {
+              msg += ` Forgejo PyPI: ${res.forgejo_sync.uploaded || 0} uploaded, ${res.forgejo_sync.skipped_existing || 0} existing.`;
+            }
+            if (feedback) feedback.textContent = msg;
             input.value = "";
             await refreshDependenciesView();
           } else {
@@ -10744,12 +10870,13 @@
       if (el("btn-forgejo-deploy")) {
         el("btn-forgejo-deploy").addEventListener("click", async () => {
           if (!forgejoFeedback) return;
-          forgejoFeedback.textContent = "Deploying Forgejo Docker container to ego (/mnt/14tb/forgejo)…";
+          forgejoFeedback.textContent = "Deploying Forgejo Docker container to ego (/home/ego/agent_stack/forgejo + NVMe)…";
           try {
             const res = await window.pywebview.api.deploy_forgejo_container(false);
             forgejoFeedback.textContent = res?.ok
-              ? `🚀 Forgejo running at ${res.url}. Complete first-run wizard or generate an API token to push packages.`
+              ? `🚀 Forgejo running at ${res.url}.`
               : `❌ Deploy error: ${res?.error || "Failed"}`;
+            await refreshDependenciesView();
           } catch (e) { forgejoFeedback.textContent = "Deploy failed: " + e; }
         });
       }
@@ -10770,19 +10897,36 @@
         });
       }
 
-      if (el("btn-forgejo-publish-rsi")) {
-        el("btn-forgejo-publish-rsi").addEventListener("click", async () => {
+      if (el("btn-forgejo-seed-linux")) {
+        el("btn-forgejo-seed-linux").addEventListener("click", async () => {
           if (!forgejoFeedback) return;
-          forgejoFeedback.textContent = "Publishing recent Evo-Bench & mission RSI artifacts to Forgejo Generic registry…";
+          forgejoFeedback.textContent = "Downloading linux_x86_64 wheels on ego and pushing to Forgejo PyPI…";
           try {
-            const res = await window.pywebview.api.publish_rsi_artifacts_to_forgejo();
+            const res = await window.pywebview.api.seed_linux_wheels_to_forgejo("3.12");
             if (res?.ok) {
-              forgejoFeedback.textContent = `🛡️ Published ${res.published_count} RSI artifact(s) under version '${res.version}'.`;
+              forgejoFeedback.textContent = `🐧 Linux PyPI Seed complete: ${res.uploaded} uploaded, ${res.skipped_existing} already present (${res.downloaded}/${res.requested} packages).`;
               await refreshDependenciesView();
             } else {
-              forgejoFeedback.textContent = `❌ Publish error: ${res?.error || (res?.errors || []).slice(0, 3).join('; ') || "Failed"}`;
+              forgejoFeedback.textContent = `❌ Linux seed error: ${res?.error || (res?.errors || []).slice(0, 3).join('; ') || "Failed"}`;
             }
-          } catch (e) { forgejoFeedback.textContent = "Publish failed: " + e; }
+          } catch (e) { forgejoFeedback.textContent = "Linux seed failed: " + e; }
+        });
+      }
+
+      if (el("btn-forgejo-push-branch")) {
+        el("btn-forgejo-push-branch").addEventListener("click", async () => {
+          if (!forgejoFeedback) return;
+          forgejoFeedback.textContent = "Pushing committed HEAD on current branch to Forgejo…";
+          try {
+            const res = await window.pywebview.api.push_branch_to_forgejo("", "forgejo");
+            if (res?.ok) {
+              const skipped = res.dirty_files_skipped > 0 ? ` (${res.dirty_files_skipped} uncommitted file(s) left local)` : "";
+              forgejoFeedback.textContent = `🚀 Pushed ${res.branch} to ${res.remote}${skipped}: ${res.output}`;
+              await refreshDependenciesView();
+            } else {
+              forgejoFeedback.textContent = `❌ Git push error: ${res?.error || "Failed"}`;
+            }
+          } catch (e) { forgejoFeedback.textContent = "Git push failed: " + e; }
         });
       }
       window.__openView = switchView;
@@ -15578,215 +15722,6 @@
           if (el("manual-feedback")) el("manual-feedback").textContent = "Seeded Product QA Workflow (Scout ➔ Executor ➔ Product QA Gate ⇄ Critic).";
         });
       }
-      if (el("btn-open-kraken-monitor-plugin")) {
-        el("btn-open-kraken-monitor-plugin").addEventListener("click", async () => {
-          const pluginView = pluginTabId("kraken_monitor");
-          const navBtn = document.querySelector(`.nav-btn[data-view="${pluginView}"]`);
-          if (navBtn) {
-            navBtn.click();
-          } else if (el("kraken-qa-feedback")) {
-            el("kraken-qa-feedback").textContent = "Kraken Monitor plugin tab initializes automatically inside the desktop WebView.";
-          }
-        });
-      }
-      if (el("btn-launch-kraken-gui")) {
-        el("btn-launch-kraken-gui").addEventListener("click", async () => {
-          const fb = el("kraken-qa-feedback");
-          if (fb) fb.textContent = "Launching Sabrina Kraken Desktop Monitor…";
-          const res = await callBridge("Kraken", "launch_kraken_monitor_gui");
-          if (fb) fb.textContent = (res && (res.message || res.error)) || "Launch requested.";
-        });
-      }
-      if (el("btn-run-kraken-qa")) {
-        el("btn-run-kraken-qa").addEventListener("click", async () => {
-          const fb = el("kraken-qa-feedback");
-          const box = el("kraken-qa-receipt");
-          if (fb) fb.textContent = "Running deterministic Product QA & headless Tcl/Tk GUI smoke checks…";
-          const res = await callBridge("KrakenQA", "run_product_qa", "kraken", true);
-          if (res && res.ok) {
-            if (fb) fb.textContent = `Product QA ${res.status}: score=${res.score} · ${Array.isArray(res.defects) ? res.defects.length : 0} defect(s).`;
-            if (box) {
-              box.style.display = "block";
-              box.textContent = res.markdown || JSON.stringify(res, null, 2);
-            }
-          } else if (fb) {
-            fb.textContent = (res && res.error) || "Product QA check failed.";
-          }
-        });
-      }
-      el("kraken-analyst-round")?.addEventListener("change", () => el("btn-kraken-named-analysts")?.click());
-      el("btn-kraken-named-analysts")?.addEventListener("click", async () => {
-        const feedback = el("kraken-qa-feedback"), receipt = el("kraken-qa-receipt");
-        feedback.textContent = "Reading the attributed decision journal…";
-        receipt.style.display = "none";
-        const chooser = el("kraken-analyst-round");
-        const selected = chooser?.value || "";
-        const result = selected ? await callBridge("Kraken","get_kraken_analyst_round",selected) :
-                                  await callBridge("Kraken","get_kraken_replacement_status");
-        const view = result?.analysts;
-        if (!view?.run) {
-          feedback.textContent = result?.error || "Waiting for the first attributed analyst round.";
-          return;
-        }
-        if (chooser?.replaceChildren) {
-          chooser.replaceChildren(new Option("Latest analyst round",""), ...(view.history || []).map(r =>
-            new Option(new Date(r.at * 1000).toLocaleString(),r.id)));
-          chooser.value = selected;
-          chooser.hidden = false;
-        }
-        const lines = [];
-        for (const analyst of view.analysts) {
-          lines.push(`${analyst.model || analyst.provider} · ${analyst.route || ""} · ${analyst.status}`);
-          const j = analyst.journal;
-          if (!j) { lines.push(analyst.reason || "Awaiting a recorded decision.",""); continue; }
-          lines.push(`${j.timestamp_utc} · ${j.regime} · ${j.bias} · confidence ${j.confidence}`, j.rationale);
-          for (const [h,g] of Object.entries(analyst.grades || {})) {
-            lines.push(`${h} min · ${g.declared_correct ?? 0}/${g.declared_graded ?? 0} correct at declared horizon · ${g.high_declared_correct ?? 0}/${g.high_declared_graded ?? 0} with confidence ≥0.70 · ${g.abstentions} abstentions · ${g.abstention_net_positive}/${g.abstention_priced} abstained pairs covered costs`);
-          }
-          for (const item of j.entries) {
-            const iv=item.invalidation;
-            lines.push(`${item.symbol} · ${item.regime} · ${item.bias} (${item.confidence}) · ${item.recommended_action} · ${item.horizon_minutes} min`,
-                       item.thesis, [iv ? `Invalidation ${iv.field} ${iv.crosses} ${iv.value}` : "", (item.risk_flags || []).join(", "), item.paper_status, ...(item.reasons || [])].filter(Boolean).join(" · "));
-            for (const [h,markets] of Object.entries(analyst.outcomes || {})) {
-              const mark = markets[item.symbol];
-              if (mark) lines.push(`${h} min · ${mark.move_pct == null ? "unpriced" : mark.move_pct.toFixed(2)+"% midpoint"}${mark.net_usd == null ? "" : " · $"+mark.net_usd.toFixed(2)+" hypothetical net"}`);
-            }
-          }
-          lines.push("");
-        }
-        lines.push(`Existing Kraken decisions · ${view.native_source?.jev_checkpoint || "JEV"} and v0.4 ensemble`);
-        for (const m of view.markets) {
-          const j=m.native?.jev, v=m.native?.v04;
-          lines.push(`#${m.rank} ${m.symbol} · JEV ${j?.reason || "not scored"} · v0.4 ${v?.passes_ultra_gate == null ? "not scored" : v.passes_ultra_gate ? "entry gate passed" : "entry gate closed"}`);
-        }
-        feedback.textContent=`Analyst evidence from ${new Date(view.evidence_at * 1000).toLocaleString()} · paper journal`;
-        receipt.textContent=lines.join("\n");
-        receipt.style.display="block";
-      });
-      el("btn-kraken-top25-picks")?.addEventListener("click", async () => {
-        const feedback = el("kraken-qa-feedback");
-        const receipt = el("kraken-qa-receipt");
-        feedback.textContent = "Reading the latest Top 25 picks…";
-        receipt.style.display = "none";
-        const result = await callBridge("Kraken", "get_kraken_replacement_status");
-        const view = result?.direction;
-        if (!view?.latest) {
-          feedback.textContent = result?.error || "Waiting for the first recorded Top 25 forecast.";
-          return;
-        }
-        const timeOf = value => new Date(value * 1000).toLocaleTimeString();
-        const money = value => new Intl.NumberFormat(undefined, {style:"currency", currency:"USD"}).format(value);
-        const totals = view.totals || {};
-        const latest = view.latest;
-        const ended = Date.now() / 1000 >= latest.due;
-        const lines = [];
-        if (view.graded_rounds) {
-          lines.push(`${view.graded_rounds} completed rounds · ${totals.correct}/${totals.graded} calls correct · rise ${totals.rise_hits}/${totals.rise_calls} · flat/down ${totals.flat_hits}/${totals.flat_calls}`);
-          lines.push(`On the same pairs, always flat/down scored ${totals.flat_down}, always rise ${totals.rise}, and the feed ranking ${totals.feed_rank}.`);
-          if (totals.challenger_graded) {
-            lines.push(`Five-minute market breadth test · ${totals.challenger_correct}/${totals.challenger_graded} correct · primary ${totals.matched_primary_correct}/${totals.challenger_graded} on the same calls`);
-          }
-          lines.push(`Strongest rise calls · ${totals.top_positive}/${totals.top_priced} priced $25 paper positions covered costs · combined net ${money(totals.top_net_usd)}`);
-          lines.push(view.direction_evidence ? "The direction calls crossed the evidence threshold against all three baselines." : "A repeatable directional advantage has yet to be established.");
-        }
-        const show = (round, title) => {
-          lines.push("", `${title} · ${timeOf(round.issued)} to ${timeOf(round.due)}`);
-          const rows = [...round.markets].sort((a,b) => (b.score ?? -1) - (a.score ?? -1) || a.rank - b.rank);
-          for (const m of rows) {
-            const move = m.up == null ? (round.summary ? m.status || "unscored" : "pending") : `${m.move_pct >= 0 ? "+" : ""}${m.move_pct.toFixed(2)}%`;
-            const net = m.net_usd == null ? (round.summary ? m.fill_status || "" : "") : `${money(m.net_usd)} paper net`;
-            lines.push([`#${m.rank} ${m.symbol}`, m.call, move, net].filter(Boolean).join(" · "));
-          }
-        };
-        show(latest, ended ? "Most recent forecast" : "Open forecast");
-        if (view.last_graded && view.last_graded.id !== latest.id) show(view.last_graded, "Last completed forecast");
-        feedback.textContent = `15-minute Top 25 paper forecasts · updated ${new Date(view.as_of * 1000).toLocaleString()}`;
-        receipt.textContent = lines.join("\n");
-        receipt.style.display = "block";
-      });
-      el("btn-kraken-replacement-status")?.addEventListener("click", async () => {
-        const feedback = el("kraken-qa-feedback");
-        const receipt = el("kraken-qa-receipt");
-        feedback.textContent = "Reading the paper portfolios and replacement trial…";
-        receipt.style.display = "none";
-        const result = await callBridge("Kraken", "get_kraken_replacement_status");
-        if (!result?.ok) {
-          feedback.textContent = result?.error || "Could not read the paper service.";
-          return;
-        }
-        const asMoney = number => new Intl.NumberFormat(undefined, {style:"currency", currency:"USD"}).format(number);
-        const trial = result.trial;
-        const names = {cash:"Cash", incumbent:"Existing Strategy Lab rule", A:"Claude rule", B:"GPT rule", C:"Gemini rule"};
-        const lines = (result.portfolios || []).map(p =>
-          `${p.name} · generation ${p.generation} · ${p.status} · ${p.open_lots} open · ${asMoney(p.net_usd)}`);
-        if (trial?.books) {
-          lines.push("", `Top 25 trial through ${new Date(trial.ends_at * 1000).toLocaleString()} · ${trial.observations} ranked observations · Primary: ${names[trial.primary] || trial.primary}`);
-          Object.entries(trial.books).forEach(([name, book]) =>
-            lines.push(`${names[name] || name}${book.retirement ? " · " + book.retirement.status : ""} · equity ${book.equity_usd == null ? "awaiting an executable quote" : asMoney(book.equity_usd)} · realized ${asMoney(book.realized_pnl_usd)} · ${book.closed} closed`));
-          if (result.windows) Object.entries(result.windows).forEach(([seconds, sample]) => {
-            if (sample.observed_pair_windows > 0) lines.push(`${Number(seconds)/60} min · ${sample.covered_costs} of ${sample.observed_pair_windows} complete pair windows covered trading costs`);
-          });
-          const speeds = {within_5m:"within 5 min", "5m_to_1h":"after 5 min to 1 h", over_1h:"after 1 h"};
-          Object.entries(trial.opportunities || {}).forEach(([seconds, bands]) => {
-            Object.entries(bands).forEach(([speed, count]) => {
-              lines.push(`${Number(seconds)/60} min window · covered costs ${speeds[speed] || speed} · ${count.captured_entries} captured · ${count.missed_windows} missed`);
-            });
-          });
-          if (result.ranked_pairs?.length) lines.push("", `Top 25 at ${new Date(result.rank_at*1000).toLocaleTimeString()}`, result.ranked_pairs.join(", "));
-        }
-        if (trial?.finding || trial?.error || trial?.last_data_error) lines.push(trial.finding || trial.error || trial.last_data_error);
-        const comparisonNames = {original:"Original rule", nominated:"Swarm revision", first_positive:"First positive exit", cash:"Cash"};
-        for (const test of result.miss_review?.experiments || []) {
-          lines.push("", `${test.label} · forward paper test · ${test.status} · ${test.observations} ranked observations`);
-          for (const [arm, book] of Object.entries(test.books)) {
-            const name = comparisonNames[arm] || names[arm] || arm;
-            const equity = book.equity_usd == null ? "awaiting an executable quote" : asMoney(book.equity_usd);
-            lines.push(`${name} · equity ${equity} · realized ${asMoney(book.realized_pnl_usd)} · ${book.open} open · ${book.closed} closed${book.retirement ? " · " + book.retirement.status : ""}`);
-          }
-        }
-        feedback.textContent = `Paper service updated ${result.age_seconds}s ago · Replacement trial ${trial?.status || "awaiting registration"}`;
-        receipt.textContent = lines.join("\n");
-        receipt.style.display = "block";
-      });
-      const krakenReviewButton = el("btn-kraken-paper-review");
-      if (krakenReviewButton) {
-        krakenReviewButton.addEventListener("click", async () => {
-          const feedback = el("kraken-qa-feedback");
-          const receipt = el("kraken-qa-receipt");
-          krakenReviewButton.disabled = true;
-          feedback.textContent = "Claude and GPT are reviewing the paper results. Gemini will compare their findings.";
-          receipt.style.display = "none";
-          try {
-            const result = await callBridge("Kraken", "run_kraken_model_review");
-            if (!Array.isArray(result?.reviewers)) {
-              feedback.textContent = result?.error || "Could not load the paper review.";
-              return;
-            }
-            const count = result.reviewers.filter(row => row.ok).length;
-            feedback.textContent = `${count} of 3 models replied · Paper snapshot ${new Date(result.evidence.published_at).toLocaleString()}`;
-            receipt.textContent = result.reviewers.map(row =>
-              `${row.name} (${row.reported_model || row.model} via ${row.route})\n${row.ok ? row.text : row.error}`
-            ).join("\n\n");
-            receipt.style.display = "block";
-          } finally {
-            krakenReviewButton.disabled = false;
-          }
-        });
-      }
-      if (el("btn-swarm-kraken-qa")) {
-        el("btn-swarm-kraken-qa").addEventListener("click", async () => {
-          const fb = el("kraken-qa-feedback");
-          if (fb) fb.textContent = "Dispatching 4-agent Swarm Product QA mission on Kraken GUI…";
-          const res = await callBridge("KrakenQA", "launch_kraken_qa_mission", "");
-          if (res && res.mission_id) {
-            selectedMissionOutputId = String(res.mission_id);
-            if (fb) fb.textContent = `${res.message || "Swarm QA mission launched."} Switch to Swarm Monitor to watch live QA telemetry.`;
-            await triggerFastPoll(12000);
-          } else if (fb) {
-            fb.textContent = (res && res.error) || "Failed to launch Swarm QA mission.";
-          }
-        });
-      }
       if (el("btn-auto-seed-council")) el("btn-auto-seed-council").addEventListener("click", () => seedAutonomousCouncilPreset(true));
       if (el("btn-auto-chain-links")) el("btn-auto-chain-links").addEventListener("click", autoChainSequentialPassOffs);
       if (el("btn-auto-clear-links")) {
@@ -17330,42 +17265,6 @@
 
       // Register the bridge listener before drawing so an initial render error is recoverable.
       refreshBuilderModelOptions();
-      // QuantOrb Token Scan Event Handler
-      const btnQuantorbScan = el("btn-quantorb-scan");
-      if (btnQuantorbScan) {
-        btnQuantorbScan.addEventListener("click", () => {
-          const input = el("quantorb-token-input");
-          const val = (input && input.value.trim()) || "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263";
-          const badge = el("quantorb-risk-badge");
-          if (badge) {
-            badge.textContent = "SCANNING...";
-            badge.style.color = "var(--cyan)";
-            badge.style.borderColor = "var(--cyan)";
-          }
-          setTimeout(() => {
-            if (badge) {
-              badge.textContent = "RISK: MEDIUM (HAZARD)";
-              badge.style.color = "#f43f5e";
-              badge.style.borderColor = "#f43f5e";
-              badge.style.background = "rgba(244, 63, 94, 0.15)";
-            }
-          }, 400);
-        });
-      }
-
-      // Deploy Swarm Kraken Manager Click Handler
-      const btnManageKraken = el("btn-swarm-manage-kraken");
-      if (btnManageKraken) {
-        btnManageKraken.addEventListener("click", () => {
-          navToView("swarm");
-          const input = el("quick-mission-goal");
-          if (input) {
-            input.value = "Autonomously manage Kraken systems: monitor WebSocket 2s book imbalance, rank pairs by turnover velocity (edge_per_dollar_minute), audit Solana tokens with QuantOrb dump simulations, and enforce zero lookahead causal windows.";
-          }
-          const launchBtn = el("btn-quick-launch");
-          if (launchBtn) launchBtn.click();
-        });
-      }
 
       loadSampleSwarmSchema("autonomous_seed", false);
       seedAutonomousCouncilPreset(false);

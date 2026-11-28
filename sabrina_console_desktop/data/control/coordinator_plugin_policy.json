@@ -1,105 +1,6 @@
 {
   "version": 1,
   "plugins": {
-    "kraken_console": {
-      "sha256": "c878e9f8c3a8581adeeb9d93d02e44456863cb715855081ef8f976c39ccce726",
-      "operations": {
-        "quote": {
-          "classification": "public",
-          "required": [
-            "operation",
-            "pair"
-          ],
-          "fields": {
-            "pair": {
-              "type": "string",
-              "pattern": "[A-Za-z0-9]{3,20}"
-            }
-          }
-        },
-        "status": {
-          "classification": "private",
-          "required": [
-            "operation"
-          ],
-          "fields": {}
-        },
-        "balances": {
-          "classification": "private",
-          "required": [
-            "operation"
-          ],
-          "fields": {}
-        },
-        "open_orders": {
-          "classification": "private",
-          "required": [
-            "operation"
-          ],
-          "fields": {}
-        },
-        "query_order": {
-          "classification": "private",
-          "required": [
-            "operation",
-            "order_id"
-          ],
-          "fields": {
-            "order_id": {
-              "type": "string",
-              "pattern": "[A-Za-z0-9-]{1,64}"
-            }
-          }
-        },
-        "queue_entry": {
-          "classification": "financial",
-          "required": [
-            "operation",
-            "account",
-            "pair",
-            "side",
-            "purpose",
-            "volume",
-            "ordertype",
-            "oflags"
-          ],
-          "fields": {
-            "account": {
-              "type": "string",
-              "pattern": "execution-v1(?:-acct2)?"
-            },
-            "pair": {
-              "type": "string",
-              "pattern": "[A-Z0-9]{3,24}"
-            },
-            "side": {
-              "type": "string",
-              "pattern": "buy"
-            },
-            "purpose": {
-              "type": "string",
-              "pattern": "entry"
-            },
-            "volume": {
-              "type": "string",
-              "pattern": "[0-9]{1,12}(?:[.][0-9]{1,12})?"
-            },
-            "ordertype": {
-              "type": "string",
-              "pattern": "market|limit"
-            },
-            "oflags": {
-              "type": "string",
-              "pattern": "fciq|post,fciq"
-            },
-            "price": {
-              "type": "string",
-              "pattern": "[0-9]{1,12}(?:[.][0-9]{1,12})?"
-            }
-          }
-        }
-      }
-    },
     "polymarket_us": {
       "sha256": "2436442e734446b187a5e7f19df2cb90553fc0149c994c8df055b810d2fb0e66",
       "operations": {
@@ -148,33 +49,6 @@
             "slug": {
               "type": "string",
               "pattern": "[A-Za-z0-9][A-Za-z0-9-]{0,199}"
-            }
-          }
-        }
-      }
-    },
-    "kraken_monitor": {
-      "sha256": "57af5c646b426f99d0d5b0823ce1e60ffbc09b8ce58697c0eb306c006ac49d99",
-      "operations": {
-        "top_gainers_24h": {
-          "classification": "public",
-          "required": [
-            "operation"
-          ],
-          "fields": {
-            "asset_class": {
-              "type": "string",
-              "pattern": "(crypto|stocks|all)"
-            },
-            "limit": {
-              "type": "integer",
-              "min": 1,
-              "max": 25
-            },
-            "min_volume_usd": {
-              "type": "integer",
-              "min": 0,
-              "max": 100000000
             }
           }
         }

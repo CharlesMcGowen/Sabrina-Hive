@@ -80,17 +80,6 @@ class ConnectorSpec:
 
 CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
     ConnectorSpec(
-        id="kraken_readonly",
-        name="Kraken Plugin Read-Only Key",
-        category="finance",
-        description="Dedicated Kraken read-only API key for the console plugin. Use a different key from managed trading services.",
-        fields=(
-            ConnectorField("api_key", "API Key", secret=True, required=True),
-            ConnectorField("api_secret", "API Secret", secret=True, required=True),
-        ),
-        actions=(),
-    ),
-    ConnectorSpec(
         id="gemini",
         name="Google Gemini",
         category="ai",
@@ -208,6 +197,7 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         ),
         actions=(
             ConnectorAction("web.search", "Search Web", "Run a JSON search query against SearXNG.", kind="read", approval_required=False),
+            ConnectorAction("docs.search", "Search Docs & Science", "Run a query targeting documentation, arXiv, and scientific literature.", kind="read", approval_required=False),
         ),
     ),
     ConnectorSpec(
@@ -255,8 +245,8 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
         category="opensource",
         description="Self-hosted Forgejo instance for Git sync, PyPI wheels, OCI images, and RSI artifacts.",
         fields=(
-            ConnectorField("base_url", "Forgejo URL", secret=False, required=True, default=_FORGEJO_DEFAULT_URL, placeholder="http://127.0.0.1:3003"),
-            ConnectorField("owner", "Owner / Org", secret=False, required=True, default="sabrina", placeholder="owner"),
+            ConnectorField("base_url", "Forgejo URL", secret=False, required=True, default=_FORGEJO_DEFAULT_URL, placeholder="http://192.168.1.133:3003"),
+            ConnectorField("owner", "Owner / Org", secret=False, required=True, default="ego", placeholder="ego"),
             ConnectorField("api_token", "API Access Token", secret=True, required=True, placeholder="Forgejo Personal Access Token"),
             ConnectorField("repo_name", "Default Repository", secret=False, required=False, default="sabrina", placeholder="sabrina"),
         ),
@@ -264,6 +254,15 @@ CONNECTOR_SPECS: tuple[ConnectorSpec, ...] = (
             ConnectorAction("version.get", "Check Forgejo Version", "Probe Forgejo /api/v1/version endpoint.", kind="read", approval_required=False),
             ConnectorAction("packages.list", "List Packages", "List hosted PyPI and Generic packages.", kind="read", approval_required=False),
             ConnectorAction("repos.list", "List Repositories", "List repositories for the configured user.", kind="read", approval_required=False),
+            ConnectorAction("branches.list", "List Branches", "List branches in the Forgejo repository.", kind="read", approval_required=False),
+            ConnectorAction("pulls.list", "List Pull Requests", "List pull requests in the Forgejo repository.", kind="read", approval_required=False),
+            ConnectorAction("pulls.diff", "Get Pull Request Diff", "Fetch unified diff for a pull request.", kind="read", approval_required=False),
+            ConnectorAction("comments.list", "List Comments", "List comments on a Forgejo PR or issue.", kind="read", approval_required=False),
+            ConnectorAction("branches.create", "Create Branch", "Create an isolated patch branch in Forgejo.", kind="write", approval_required=True),
+            ConnectorAction("files.patch", "Commit File Patch", "Commit code changes to a feature branch in Forgejo.", kind="write", approval_required=True),
+            ConnectorAction("pulls.create", "Create Pull Request", "Open a pull request from a patch branch.", kind="write", approval_required=True),
+            ConnectorAction("comments.create", "Post Code Comment", "Post a comment on a Forgejo PR or issue.", kind="write", approval_required=True),
+            ConnectorAction("reviews.create", "Submit PR Code Review", "Submit line-level PR review comments in Forgejo.", kind="write", approval_required=True),
             ConnectorAction("pypi.sync_wheelhouse", "Sync Local Wheelhouse", "Push local *.whl artifacts to Forgejo PyPI registry.", kind="write", approval_required=True),
             ConnectorAction("generic.publish_rsi", "Publish RSI Artifacts", "Publish Evo-Bench scorecards and mission reports.", kind="write", approval_required=True),
         ),
@@ -574,11 +573,6 @@ class ConnectorRegistry:
     def test_connector(self, connector_id: str) -> dict[str, Any]:
         if not self.is_configured(connector_id):
             return {"ok": False, "connector_id": connector_id, "error": "Connector is not configured."}
-        if connector_id == "kraken_readonly":
-            from tools.custom.kraken_console_plugin import execute
-            result = execute({"operation": "check_credentials"})
-            return {"ok": bool(result.get("ok")), "connector_id": connector_id,
-                    "error": result.get("error"), "permissions": result.get("permissions")}
         cfg = self.get_config(connector_id)
         if connector_id == "gemini":
             res = self.provider_vault.probe_provider("gemini")
@@ -730,7 +724,11 @@ class ConnectorRegistry:
         elif connector_id == "searxng":
             base = cfg.get("base_url", "http://127.0.0.1:8888").rstrip("/")
             q = urllib.parse.quote(str(params.get("query", "")))
-            return _http_request_json(f"{base}/search?q={q}&format=json")
+            categories = params.get("categories")
+            if not categories and action_name == "docs.search":
+                categories = "science,it"
+            cat_param = f"&categories={categories}" if categories else ""
+            return _http_request_json(f"{base}/search?q={q}&format=json{cat_param}")
 
         elif connector_id == "crawl4ai":
             base = cfg.get("base_url", "http://127.0.0.1:11235").rstrip("/")
@@ -783,15 +781,53 @@ class ConnectorRegistry:
                 from forgejo_client import ForgejoClient  # type: ignore[no-redef]
             client = ForgejoClient(
                 base_url=cfg.get("base_url", _FORGEJO_DEFAULT_URL),
-                owner=cfg.get("owner", "sabrina"),
+                owner=cfg.get("owner", "ego"),
                 token=cfg.get("api_token", ""),
             )
+            repo_name = str(params.get("repo_name") or cfg.get("repo_name") or "sabrina")
             if action_name == "version.get":
                 return client.get_version()
             if action_name == "packages.list":
                 return client.list_packages(package_type=params.get("package_type"), limit=int(params.get("limit", 50)))
             if action_name == "repos.list":
                 return client.list_repos(limit=int(params.get("limit", 50)))
+            if action_name == "branches.list":
+                return client.list_branches(repo_name=repo_name, limit=int(params.get("limit", 50)))
+            if action_name == "pulls.list":
+                return client.list_pull_requests(state=str(params.get("state", "open")), repo_name=repo_name, limit=int(params.get("limit", 25)))
+            if action_name == "pulls.diff":
+                return client.get_pull_request_diff(int(params["index"]), repo_name=repo_name)
+            if action_name == "comments.list":
+                return client.list_comments(int(params["index"]), repo_name=repo_name)
+            if action_name == "branches.create":
+                return client.create_branch(str(params["new_branch"]), old_branch=str(params.get("old_branch", "main")), repo_name=repo_name)
+            if action_name == "files.patch":
+                return client.apply_file_patches(
+                    str(params["branch"]),
+                    dict(params.get("files") or {}),
+                    str(params.get("commit_message", "chore: swarm patch")),
+                    base_branch=str(params.get("base_branch", "main")),
+                    repo_name=repo_name,
+                )
+            if action_name == "pulls.create":
+                return client.create_pull_request(
+                    str(params["title"]),
+                    str(params.get("body", "")),
+                    str(params["head"]),
+                    base=str(params.get("base", "main")),
+                    repo_name=repo_name,
+                )
+            if action_name == "comments.create":
+                return client.create_comment(int(params["index"]), str(params["body"]), repo_name=repo_name)
+            if action_name == "reviews.create":
+                return client.create_pull_review(
+                    int(params["index"]),
+                    body=str(params.get("body", "")),
+                    event=str(params.get("event", "COMMENT")),
+                    comments=params.get("comments"),
+                    commit_id=str(params.get("commit_id", "")),
+                    repo_name=repo_name,
+                )
             if action_name == "pypi.sync_wheelhouse":
                 wh = params.get("wheelhouse_dir") or str(Path(__file__).resolve().parent.parent / "artifacts" / "wheels")
                 return client.sync_wheelhouse(wh)

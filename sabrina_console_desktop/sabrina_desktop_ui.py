@@ -85,6 +85,9 @@ from swarm_console.workspace_sandbox import (
 ROOT_IMPORT = Path(__file__).resolve().parent
 if str(ROOT_IMPORT) not in sys.path:
     sys.path.append(str(ROOT_IMPORT))
+if __name__ == "__main__":
+    sys.modules.setdefault("sabrina_console_desktop.sabrina_desktop_ui", sys.modules[__name__])
+    sys.modules.setdefault("sabrina_desktop_ui", sys.modules[__name__])
 
 try:
     from sabrina_console_desktop.live_swarm_runner import LiveSwarmRunner
@@ -728,20 +731,12 @@ class SabrinaDesktopBridge:
             else (0.35 if self._isolated_test_mode else 1.1)
         )
         self._remote_lock = threading.Lock()
-        self._kraken_review_lock = threading.Lock()
         self._remote_refreshing = False
         self._remote_last_ts = 0.0
         self._remote_cache: dict[str, Any] = {
             "api_ok": False,
             "health": {"status": "local fallback active"},
             "jobs": [],
-            "kraken": {
-                "execution_authorized": False,
-                "status": "PASS (Phase 4 Verified)",
-                "contract": "H1-v2.1-PDLR",
-                "verifier_receipt": "ee6d1830f09d7eab16e691865562c9c8b65954b1d80a0d2937b5a6835deea389",
-                "artifacts_verified": 24,
-            },
             "backend_swarm": {"status": "offline", "members": []},
             "ollama_models": [],
         }
@@ -870,6 +865,11 @@ class SabrinaDesktopBridge:
             llm_caller=effective_llm_caller,
             updates=self.harness_updates,
         )
+        try:  # Read-only Ego host awareness (mcp__ego_host__*); handlers reach Ego only when called.
+            from sabrina_console_desktop import ego_host_tools
+            ego_host_tools.register(self.harness_registry.get("mcp_harness"))
+        except Exception as exc:  # never block Console startup on an optional tool server
+            print(f"[ego_host] tools not mounted: {exc}", flush=True)
         runner_kwargs: dict[str, Any] = {
             "workspace_root": SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent,
             "artifacts_dir": missions_dir,
@@ -911,9 +911,15 @@ class SabrinaDesktopBridge:
                 self.promotion_ledger = None
         self.swarm_runner = LiveSwarmRunner(**runner_kwargs)
         if not self._isolated_test_mode and hasattr(self.swarm_runner, "configure_topology"):
-            self.swarm_runner.configure_topology(topology_mode="m_eulerian_join_cut", branching_order=3)
+            self.swarm_runner.configure_topology(
+                topology_mode="m_eulerian_join_cut",
+                branching_order=3,
+                coordinator_count=4,
+                workers_per_coordinator=16,
+            )
         self.swarm_runner.skill_lookup_fn = self.match_swarm_skills
         self.swarm_runner.capability_manifest_fn = self.get_preflight_manifest
+        self.swarm_runner.web_grounding_fn = self.ground_swarm_web
         if llm_caller is None and not self._isolated_test_mode:
             self.swarm_runner.model_readiness = lambda role, model: self._call_swarm_llm(
                 role, model, "", "", readiness_only=True,
@@ -1250,11 +1256,6 @@ class SabrinaDesktopBridge:
         api_ok = False
         health: dict[str, Any] = {"status": "local fallback active"}
         jobs: list[dict[str, Any]] = []
-        kraken: dict[str, Any] = {
-            "execution_authorized": False,
-            "api_connected": False,
-            "status": "OFFLINE (API :8087 unreachable)",
-        }
         backend_swarm: dict[str, Any] = {"status": "offline", "members": []}
         ollama_models: list[dict[str, Any]] = []
 
@@ -1311,14 +1312,6 @@ class SabrinaDesktopBridge:
                 jobs.append(item)
 
         if api_ok:
-            try:
-                k_res = _http_json(f"{API_8087}/api/kraken/status", timeout=0.8)
-                if isinstance(k_res, dict):
-                    k_res["execution_authorized"] = False
-                    k_res["api_connected"] = True
-                    kraken = k_res
-            except Exception:
-                pass
             try:
                 sw = call_console_backend("SABRINA_SWARM_CONTROL_API_BASE", "/api/swarm/state", get_live_swarm_state, timeout=1.0)
                 if isinstance(sw, dict):
@@ -1389,7 +1382,6 @@ class SabrinaDesktopBridge:
                 "api_8095_ok": api_8095_ok,
                 "health": health,
                 "jobs": jobs,
-                "kraken": kraken,
                 "backend_swarm": backend_swarm,
                 "ollama_models": ollama_models,
                 "active_prompt_state": active_prompt_state,
@@ -1631,11 +1623,6 @@ class SabrinaDesktopBridge:
             item = dict(rj)
             item["execution_kind"] = self._resolve_job_execution_kind(item)
             jobs.append(item)
-        kraken: dict[str, Any] = dict(
-            remote.get("kraken")
-            or {"execution_authorized": False, "api_connected": False, "status": "OFFLINE (API :8087 unreachable)"}
-        )
-        kraken["execution_authorized"] = False
         models: list[dict[str, Any]] = []
         chat_roster: list[dict[str, Any]] = []
         chat_history: list[dict[str, Any]] = []
@@ -1976,7 +1963,6 @@ class SabrinaDesktopBridge:
             "schema_audit": schema_audit,
             "health": health,
             "jobs": jobs,
-            "kraken": kraken,
             "lab": lab,
             "models": models,
             "chat_roster": chat_roster,
@@ -2418,21 +2404,27 @@ class SabrinaDesktopBridge:
         if not target:
             return {"ok": False, "error": "Empty query or URL."}
 
-        if clean_kind == "web_search":
+        if clean_kind in ("web_search", "docs_search"):
             try:
                 if hasattr(self, "connector_registry") and self.connector_registry.is_configured("searxng"):
-                    c_res = self.connector_registry.execute_action("searxng", "web.search", {"query": target})
+                    action_name = "docs.search" if clean_kind == "docs_search" else "web.search"
+                    c_res = self.connector_registry.execute_action("searxng", action_name, {"query": target})
                     if c_res.get("ok"):
-                        return {"ok": True, "source": "searxng", "text": json.dumps(c_res.get("data") or c_res)[:3500]}
+                        return {"ok": True, "source": "searxng" if action_name == "web.search" else "searxng_docs", "text": json.dumps(c_res.get("data") or c_res)[:3500]}
             except Exception:
                 pass
             if "gemini" in self._unlocked_providers():
                 api_key = self.vault.get_key("gemini", include_env=True) if hasattr(self.vault, "get_key") else None
                 if api_key and self._provider_cooldowns.get("gemini") != float("inf"):
                     try:
+                        search_prefix = (
+                            f"Search scientific papers, arXiv, documentation, and technical literature for:\n{target}"
+                            if clean_kind == "docs_search"
+                            else f"Search the web and provide a concise, factual summary with source URLs for:\n{target}"
+                        )
                         txt = _call_gemini_interactions(
                             "gemini-3.5-flash-lite",
-                            f"Search the web and provide a concise, factual summary with source URLs for:\n{target}",
+                            search_prefix,
                             api_key,
                             tools=[{"type": "google_search"}],
                         )
@@ -2464,9 +2456,28 @@ class SabrinaDesktopBridge:
                 if not resp.headers.get_content_type().startswith("text/"):
                     return {"ok": False, "error": "fetch_url source did not return a text document."}
                 raw_html = resp.read(262144).decode("utf-8", errors="replace")
-            cleaned = re.sub(r"<(script|style|head|nav)\b[^>]*>.*?</\1\s*>", " ", raw_html, flags=re.S | re.I)
-            cleaned = re.sub(r"<[^>]+>", " ", cleaned)
-            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+            # High-fidelity extraction via Trafilatura (HTML boilerplate removal -> clean Markdown)
+            cleaned = ""
+            try:
+                import trafilatura
+                extracted_md = trafilatura.extract(
+                    raw_html,
+                    url=source_url,
+                    output_format="markdown",
+                    include_links=True,
+                    include_tables=True,
+                )
+                if extracted_md and len(extracted_md.strip()) > 50:
+                    cleaned = extracted_md.strip()
+            except Exception:
+                pass
+
+            if not cleaned:
+                cleaned = re.sub(r"<(script|style|head|nav)\b[^>]*>.*?</\1\s*>", " ", raw_html, flags=re.S | re.I)
+                cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+                cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
             if not cleaned:
                 return {"ok": False, "error": "fetch_url source returned no readable text."}
             return {"ok": True, "source": "http_fetch", "source_url": source_url, "verified": True, "text": cleaned[:3500]}
@@ -2593,10 +2604,6 @@ class SabrinaDesktopBridge:
                 return {"ok": False, "error": "tab_not_found"}
             command = "/plugin run " + name + " " + json.dumps({"operation": tab["operation"]})
             res = execute_command(command)
-            if not res.get("ok") and name == "kraken_monitor":
-                fallback_res = execute_command('/plugin run kraken_monitor {"operation": "dashboard"}')
-                if fallback_res.get("ok"):
-                    return fallback_res
             return res
         except Exception as exc:
             return {"ok": False, "error": type(exc).__name__}
@@ -2641,17 +2648,14 @@ class SabrinaDesktopBridge:
         except Exception as exc:
             return {"ok": False, "error": type(exc).__name__}
 
-    def run_product_qa(self, target: str = "kraken", run_tests: bool = True) -> dict[str, Any]:
-        """Run deterministic Product QA & headless GUI smoke checks against the active or Sabrina workspace."""
+    def run_product_qa(self, target: str = ".", run_tests: bool = True) -> dict[str, Any]:
+        """Run deterministic Product QA & headless GUI smoke checks against the active workspace."""
         try:
             from sabrina_console_desktop.product_qa import run_product_qa as _exec_qa
         except ImportError:
             from product_qa import run_product_qa as _exec_qa  # type: ignore[no-redef]
         ws_root = self.swarm_runner.workspace_root
-        if str(target or "").strip().lower().startswith("kraken") and not (ws_root / "sabrina_console_desktop" / "launch_kraken_monitor.py").is_file():
-            if SABRINA_WORKSPACE.is_dir():
-                ws_root = SABRINA_WORKSPACE
-        res = _exec_qa(ws_root, target=str(target or "kraken").strip() or ".", run_tests=bool(run_tests))
+        res = _exec_qa(ws_root, target=str(target or ".").strip() or ".", run_tests=bool(run_tests))
         self.local_feed.insert(
             0,
             {
@@ -2664,93 +2668,6 @@ class SabrinaDesktopBridge:
             },
         )
         return res
-
-    def get_kraken_analyst_round(self, run_id: str) -> dict[str, Any]:
-        from sabrina_console_desktop.kraken_model_review import analyst_round
-        return analyst_round(run_id)
-
-    def get_kraken_pair_report(self, symbol: str) -> dict[str, Any]:
-        from sabrina_console_desktop.kraken_pair_analyst import get_pair_report
-        return get_pair_report(self, symbol, http_json=_http_json)
-
-    def read_kraken_pair_report(self, report_id: str) -> dict[str, Any]:
-        from sabrina_console_desktop.kraken_pair_analyst import read_pair_report
-        return read_pair_report(report_id)
-
-    def get_kraken_replacement_status(self) -> dict[str, Any]:
-        from sabrina_console_desktop.kraken_model_review import replacement_status
-        return replacement_status()
-
-    def run_kraken_model_review(self) -> dict[str, Any]:
-        try:
-            from sabrina_console_desktop.kraken_model_review import fetch_paper_review_data, review
-            from sabrina_console_desktop.kraken_review_cli import consult
-        except ImportError:
-            return {"ok": False, "error": "The Kraken review tools are unavailable in this Sabrina installation."}
-
-        if not self._kraken_review_lock.acquire(blocking=False):
-            return {"ok": False, "error": "A Kraken paper review is already in progress."}
-        try:
-            data = fetch_paper_review_data()
-
-            def invoke(provider, model, system, prompt):
-                result = self._invoke_provider_text(provider, model, system, prompt,
-                                                    self.vault.get_key(provider), max_reply_tokens=768)
-                if not self._isolated_test_mode:
-                    usage_ledger.record("kraken_paper_review", result)
-                return result
-
-            return review(data, invoke, subscription=consult)
-        except (ValueError, KeyError, OSError, TypeError, RuntimeError, subprocess.SubprocessError):
-            return {"ok": False, "error": "The Kraken forward paper runner did not return a usable snapshot."}
-        finally:
-            self._kraken_review_lock.release()
-
-    def launch_kraken_monitor_gui(self) -> dict[str, Any]:
-        """Launch the standalone Sabrina Kraken Live & $1,000 Paper Desktop Monitor window."""
-        launcher = ROOT / "launch_kraken_monitor.py"
-        if not launcher.is_file():
-            return {"ok": False, "error": f"Kraken launcher not found: {launcher}", "execution_authorized": False}
-        py_exe = Path(sys.executable)
-        pyw = py_exe.with_name("pythonw.exe")
-        exe_to_use = str(pyw if pyw.is_file() else py_exe)
-        env = dict(os.environ)
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        base_tcl = Path(sys.base_prefix) / "tcl" / "tcl8.6"
-        if (base_tcl / "init.tcl").is_file():
-            env.pop("TCL_LIBRARY", None)
-            env.pop("TK_LIBRARY", None)
-        proc = subprocess.Popen(
-            [exe_to_use, "-B", str(launcher)],
-            cwd=str(ROOT),
-            env=env,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        msg = f"Launched Sabrina Kraken Desktop Monitor (PID {proc.pid})."
-        self.local_feed.insert(
-            0,
-            {
-                "ts": time.time(),
-                "time": time.strftime("%H:%M:%S"),
-                "ago": "just now",
-                "badge": "KRAKEN_GUI",
-                "actor": "Rogue Colony",
-                "summary": msg,
-            },
-        )
-        return {"ok": True, "pid": proc.pid, "message": msg, "execution_authorized": False}
-
-    def launch_kraken_qa_mission(self, goal: str = "") -> dict[str, Any]:
-        """Point workspace to Sabrina repo (if needed) and launch a live Swarm Product QA mission on Kraken GUI."""
-        if SABRINA_WORKSPACE.is_dir() and not (self.swarm_runner.workspace_root / "sabrina_console_desktop" / "launch_kraken_monitor.py").is_file():
-            self.swarm_runner.set_workspace_root(SABRINA_WORKSPACE)
-        eff_goal = str(goal or "").strip() or (
-            "Perform full Product Quality Assurance (QA) on the Kraken GUI product "
-            "(launch_kraken_monitor.py, tools/kraken_desktop_widget.py, sabrina_operator_console.py KrakenView, "
-            "and Kraken unit tests): verify entrypoint imports, headless Tcl/Tk GUI smoke construction, "
-            "UI parity, and unit test execution, and produce a sealed QA verification report."
-        )
-        return self.launch_mission(eff_goal, mode="product_qa", physical_input=False)
 
     def launch_powershell_mission(self, goal: str) -> dict[str, Any]:
         return self.swarm_runner.launch_mission(goal, mode=WINDOWS_POWERSHELL_MODE)
@@ -4026,7 +3943,12 @@ class SabrinaDesktopBridge:
             max_reply_tokens=max_reply_tokens,
         )
         if not readiness_only:
-            usage_ledger.record(role, result)
+            ledger_path = (
+                Path(self._swarm_display_path).with_name("usage_ledger.jsonl")
+                if self._isolated_test_mode
+                else usage_ledger.DEFAULT_LEDGER
+            )
+            usage_ledger.record(role, result, path=ledger_path)
         return result
 
     def _call_swarm_llm_inner(
@@ -4083,14 +4005,49 @@ class SabrinaDesktopBridge:
             "transcribe", "lyria", "genie", "decision", "shieldgemma",
         )
 
+        def _normalize_candidate_model(raw_model: str) -> str:
+            cm = str(raw_model or "").strip()
+            if not cm:
+                return ""
+            low = cm.lower()
+            # Strip erroneous cross-provider or duplicate ollama prefixes (e.g. gemini/ollama/..., ollama/ollama/...)
+            if "/ollama/" in low:
+                cm = "ollama/" + cm.split("/ollama/", 1)[1].lstrip("/")
+                low = cm.lower()
+            while low.startswith("ollama/ollama/"):
+                cm = cm[len("ollama/") :]
+                low = cm.lower()
+            # Resolve generic local placeholders to actual installed Ollama models when cached
+            if low in {"ollama/local-coder", "local-coder-model", "ollama/local-general", "local-reasoning-model"}:
+                want_coder = "coder" in low
+                usable_local: list[str] = []
+                for om in cached_ollama_models:
+                    oname = str(om.get("name") or "").strip()
+                    while oname.lower().startswith("ollama/"):
+                        oname = oname[len("ollama/") :]
+                    if oname and not any(tok in oname.lower() for tok in non_chat_tokens):
+                        usable_local.append(oname)
+                if not usable_local:
+                    return ""
+                if want_coder:
+                    picked = next(
+                        (n for n in usable_local if any(k in n.lower() for k in ("qwen2.5-coder", "coder", "codestral", "deepseek-coder"))),
+                        usable_local[0],
+                    )
+                else:
+                    picked = next(
+                        (n for n in usable_local if any(k in n.lower() for k in ("gemma3:12b", "qwen", "llama", "gemma3"))),
+                        usable_local[0],
+                    )
+                return f"ollama/{picked}"
+            return cm
+
         def _push(cand_model: str) -> None:
-            cm = str(cand_model or "").strip()
+            cm = _normalize_candidate_model(cand_model)
             if not cm:
                 return
             if any(tok in cm.lower() for tok in non_chat_tokens):
                 return
-            while cm.lower().startswith("ollama/ollama/"):
-                cm = cm[len("ollama/") :]
             prov = infer_model_provider(cm)
             if prov == "unknown" and "/" in cm:
                 prov = cm.split("/", 1)[0].lower()
@@ -4177,7 +4134,7 @@ class SabrinaDesktopBridge:
 
         # Include safe GA defaults for any unlocked cloud provider
         provider_defaults: dict[str, list[str]] = {
-            "gemini": ["gemini-4-neon", "gemini-neo", "gemini-3.5-flash-lite", "gemini-4-hydrogen", "gemini-4-argon", "gemini-4-carbon"],
+            "gemini": ["gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-4-neon", "gemini-4-hydrogen", "gemini-4-argon", "gemini-4-carbon"],
             "openai": ["openai/gpt-4.1-mini"],
             "anthropic": ["anthropic/claude-sonnet-4"],
             "openrouter": ["openrouter/google/gemini-3.5-flash-lite", "openrouter/qwen/qwen3-32b:free"],
@@ -4623,7 +4580,7 @@ class SabrinaDesktopBridge:
                     "phase": swarm.get("verifier_verdict", "active"),
                     "threads": swarm.get("long_horizon_projects", []),
                 },
-                "safety": {"execution_authorized": bool((snap.get("kraken") or {}).get("execution_authorized", False))},
+                "safety": {"execution_authorized": False},
                 "roster": {"workers": {w.get("name") or w.get("id") or f"w-{i}": w for i, w in enumerate(swarm.get("workers") or [])}},
                 "lock_matrix": {"conflicts": []},
                 "board": swarm.get("activity_feed", [])[:20],
@@ -6572,21 +6529,25 @@ class SabrinaDesktopBridge:
     # Dependencies & Local Artifact Repository Endpoints
     # ------------------------------------------------------------------
 
+    def _resolve_ws_root(self) -> Path:
+        if self.workspace_sandbox is not None:
+            return self.workspace_sandbox.root
+        return SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent
+
+    def _get_forgejo_pypi_index_url(self, *, include_token: bool) -> str:
+        try:
+            if self.connector_registry.is_configured("forgejo"):
+                return self._forgejo_client().pypi_simple_url(include_token=include_token)
+        except Exception:
+            pass
+        return ""
+
     def get_dependencies_status(self) -> dict[str, Any]:
         """Return status of uv, local wheelhouse, and installed packages for the dependencies tab."""
         try:
-            ws_root = (
-                self.workspace_sandbox.root
-                if self.workspace_sandbox is not None
-                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
-            )
+            ws_root = self._resolve_ws_root()
             from swarm_console.workspace_sandbox import WorkspaceSandbox
-            forgejo_pypi_url = ""
-            try:
-                if self.connector_registry.is_configured("forgejo"):
-                    forgejo_pypi_url = self._forgejo_client().pypi_simple_url(include_token=False)
-            except Exception:
-                forgejo_pypi_url = ""
+            forgejo_pypi_url = self._get_forgejo_pypi_index_url(include_token=False)
             sb = WorkspaceSandbox(
                 ws_root,
                 allow_local_venv_fallback=True,
@@ -6615,6 +6576,8 @@ class SabrinaDesktopBridge:
                 "cached_wheels": cache_info.get("cached_wheels", []),
                 "cache_dir": cache_info.get("cache_dir", ""),
                 "forgejo_pypi_url": cache_info.get("forgejo_pypi_url", ""),
+                "forgejo_configured": bool(forgejo_pypi_url),
+                "forgejo_host_default": f"http://{self._cross_system_ego_host()}:3003",
                 "installed_packages": packages,
                 "installed_count": len(packages),
                 "active_revision": active_profile.revision,
@@ -6623,21 +6586,18 @@ class SabrinaDesktopBridge:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def install_dependency_package(self, packages: list[str], wheelhouse_only: bool = False) -> dict[str, Any]:
+    def install_dependency_package(
+        self,
+        packages: list[str],
+        wheelhouse_only: bool = False,
+        source_mode: str = "auto",
+    ) -> dict[str, Any]:
         """Install one or more packages using the sandbox dependency manager."""
         try:
-            ws_root = (
-                self.workspace_sandbox.root
-                if self.workspace_sandbox is not None
-                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
-            )
+            ws_root = self._resolve_ws_root()
             from swarm_console.workspace_sandbox import WorkspaceSandbox
-            forgejo_pypi_url = ""
-            try:
-                if not wheelhouse_only and self.connector_registry.is_configured("forgejo"):
-                    forgejo_pypi_url = self._forgejo_client().pypi_simple_url(include_token=True)
-            except Exception:
-                forgejo_pypi_url = ""
+            force_offline = bool(wheelhouse_only) or source_mode == "wheelhouse_only"
+            forgejo_pypi_url = "" if force_offline else self._get_forgejo_pypi_index_url(include_token=True)
             sb = WorkspaceSandbox(
                 ws_root,
                 allow_local_venv_fallback=True,
@@ -6646,30 +6606,37 @@ class SabrinaDesktopBridge:
             )
             res = sb.execute_tool(
                 "manage_dependencies",
-                {"action": "install", "packages": packages, "wheelhouse_only": bool(wheelhouse_only)},
+                {"action": "install", "packages": packages, "wheelhouse_only": force_offline},
             )
             return res
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def cache_dependency_wheels(self, packages: list[str]) -> dict[str, Any]:
-        """Download wheels to local wheelhouse for offline access."""
+    def cache_dependency_wheels(
+        self,
+        packages: list[str],
+        push_to_forgejo: bool = False,
+    ) -> dict[str, Any]:
+        """Download wheels to local wheelhouse for offline access and optionally push to Forgejo."""
         try:
-            ws_root = (
-                self.workspace_sandbox.root
-                if self.workspace_sandbox is not None
-                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
-            )
+            ws_root = self._resolve_ws_root()
             from swarm_console.workspace_sandbox import WorkspaceSandbox
+            forgejo_pypi_url = self._get_forgejo_pypi_index_url(include_token=True)
             sb = WorkspaceSandbox(
                 ws_root,
                 allow_local_venv_fallback=True,
                 policy_profile="sandboxed_edit",
+                pypi_index_url=forgejo_pypi_url or None,
             )
             res = sb.execute_tool(
                 "manage_dependencies",
                 {"action": "cache_wheel", "packages": packages},
             )
+            if res.get("ok") and push_to_forgejo and self.connector_registry.is_configured("forgejo"):
+                wh = ws_root / "artifacts" / "wheels"
+                if not wh.is_dir():
+                    wh = (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent) / "artifacts" / "wheels"
+                res["forgejo_sync"] = self._forgejo_client().sync_wheelhouse(wh)
             return res
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -6735,7 +6702,7 @@ class SabrinaDesktopBridge:
             return {"ok": False, "error": str(exc)}
 
     # ------------------------------------------------------------------
-    # Self-Hosted Forgejo (Git, PyPI & RSI Artifact Registry) Endpoints
+    # Self-Hosted Forgejo (Git, PyPI & Actions CI/CD Registry) Endpoints
     # ------------------------------------------------------------------
 
     def _cross_system_ego_host(self) -> str:
@@ -6758,38 +6725,122 @@ class SabrinaDesktopBridge:
             token=cfg.get("api_token") or "",
         )
 
-    def get_forgejo_status(self) -> dict[str, Any]:
-        """Return Forgejo connection config, health probe, PyPI URL, and hosted packages."""
+    def _get_local_git_forgejo_state(self, ws_root: Path, remote_name: str = "forgejo") -> dict[str, Any]:
+        """Inspect local Git branch, dirty file count, remote URL, and ahead/behind vs forgejo."""
+        info: dict[str, Any] = {
+            "is_git_repo": False,
+            "branch": "",
+            "remote_configured": False,
+            "remote_url": "",
+            "ahead": 0,
+            "behind": 0,
+            "dirty_count": 0,
+            "compare_ref": "",
+        }
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            br = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=str(ws_root), capture_output=True, text=True, timeout=4, creationflags=flags,
+            )
+            if br.returncode != 0:
+                return info
+            branch = br.stdout.strip()
+            info["is_git_repo"] = True
+            info["branch"] = branch
+
+            rem = subprocess.run(
+                ["git", "remote", "get-url", remote_name],
+                cwd=str(ws_root), capture_output=True, text=True, timeout=4, creationflags=flags,
+            )
+            if rem.returncode == 0:
+                info["remote_configured"] = True
+                info["remote_url"] = rem.stdout.strip()
+
+            st = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=str(ws_root), capture_output=True, text=True, timeout=4, creationflags=flags,
+            )
+            if st.returncode == 0:
+                info["dirty_count"] = len([ln for ln in st.stdout.splitlines() if ln.strip()])
+
+            if info["remote_configured"] and branch and branch != "HEAD":
+                for ref in (f"{remote_name}/{branch}", f"{remote_name}/main"):
+                    cnt = subprocess.run(
+                        ["git", "rev-list", "--left-right", "--count", f"HEAD...{ref}"],
+                        cwd=str(ws_root), capture_output=True, text=True, timeout=4, creationflags=flags,
+                    )
+                    if cnt.returncode == 0:
+                        parts = cnt.stdout.strip().split()
+                        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                            info["ahead"] = int(parts[0])
+                            info["behind"] = int(parts[1])
+                            info["compare_ref"] = ref
+                        break
+        except Exception:
+            pass
+        return info
+
+    def get_forgejo_status(self, include_files: bool = True) -> dict[str, Any]:
+        """Return Forgejo config, health, paginated packages, repo state, and Actions CI runs."""
         try:
             cfg = self.connector_registry.get_config("forgejo")
             configured = self.connector_registry.is_configured("forgejo")
+            repo_name = cfg.get("repo_name") or "sabrina"
             client = self._forgejo_client()
             ver = client.get_version()
             reachable = bool(ver.get("ok"))
             packages: list[dict[str, Any]] = []
+            platform_counts = {"any": 0, "win_amd64": 0, "linux_x86_64": 0, "other": 0}
+            repo_status: dict[str, Any] = {}
+            recent_ci_runs: list[dict[str, Any]] = []
             if reachable:
-                pkg_res = client.list_packages(limit=50)
+                pkg_res = client.list_packages(limit=50, paginate=True)
                 if pkg_res.get("ok") and isinstance(pkg_res.get("data"), list):
-                    packages = [
+                    raw_packages = [
                         {
                             "name": p.get("name", ""),
                             "version": p.get("version", ""),
                             "type": p.get("type", ""),
+                            "html_url": p.get("html_url", ""),
+                            "created_at": p.get("created_at", ""),
                         }
                         for p in pkg_res["data"]
                         if isinstance(p, dict)
                     ]
+                    if include_files:
+                        packages, platform_counts = client.enrich_package_platforms(raw_packages)
+                    else:
+                        packages = raw_packages
+                repo_res = client.get_repo_status(repo_name)
+                if repo_res.get("ok"):
+                    repo_status = repo_res
+                ci_res = client.list_action_runs(repo_name, limit=5)
+                if ci_res.get("ok"):
+                    recent_ci_runs = ci_res.get("runs") or []
+
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            git_status = self._get_local_git_forgejo_state(ws_root)
             return {
                 "ok": True,
                 "configured": configured,
                 "reachable": reachable,
                 "base_url": client.base_url,
+                "default_base_url": f"http://{self._cross_system_ego_host()}:3003",
                 "owner": client.owner,
-                "repo_name": cfg.get("repo_name") or "sabrina",
+                "repo_name": repo_name,
                 "pypi_simple_url": client.pypi_simple_url(include_token=False),
                 "version": ver.get("version", "") if reachable else "",
                 "packages": packages,
                 "packages_count": len(packages),
+                "platform_counts": platform_counts,
+                "repo": repo_status,
+                "recent_ci_runs": recent_ci_runs,
+                "git": git_status,
                 "probe_error": "" if reachable else str(ver.get("error") or ""),
             }
         except Exception as exc:
@@ -6817,7 +6868,7 @@ class SabrinaDesktopBridge:
             return {"ok": False, "error": str(exc)}
 
     def deploy_forgejo_container(self, dry_run: bool = False) -> dict[str, Any]:
-        """Deploy/start the Forgejo container on ego (/mnt/14tb/forgejo)."""
+        """Deploy/start the Forgejo container on ego (/home/ego/agent_stack/forgejo + NVMe)."""
         try:
             from agent_stack.forgejo.deploy_to_ego import deploy_forgejo
             return deploy_forgejo(dry_run=bool(dry_run))
@@ -6841,13 +6892,257 @@ class SabrinaDesktopBridge:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def push_branch_to_forgejo(self, branch: str = "", remote: str = "forgejo") -> dict[str, Any]:
+        """Push committed HEAD on the active (or selected) branch to Forgejo without staging dirty files."""
+        import re as _re
+        try:
+            rem_name = (remote or "forgejo").strip()
+            if not _re.fullmatch(r"[A-Za-z0-9._-]+", rem_name):
+                return {"ok": False, "error": "Invalid git remote name."}
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            git_state = self._get_local_git_forgejo_state(ws_root, rem_name)
+            if not git_state.get("is_git_repo"):
+                return {"ok": False, "error": "Workspace is not a Git repository."}
+            if not git_state.get("remote_configured"):
+                return {"ok": False, "error": f"Git remote '{rem_name}' is not configured."}
+            target_branch = (branch or git_state.get("branch") or "").strip()
+            if not target_branch or target_branch == "HEAD":
+                return {"ok": False, "error": "HEAD is detached; checkout a named branch before pushing."}
+            if not _re.fullmatch(r"[A-Za-z0-9._/-]+", target_branch):
+                return {"ok": False, "error": "Invalid branch name."}
+
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            res = subprocess.run(
+                ["git", "push", rem_name, target_branch],
+                cwd=str(ws_root),
+                capture_output=True,
+                text=True,
+                timeout=30,
+                creationflags=flags,
+            )
+            out = (res.stdout + "\n" + res.stderr).strip()
+            if res.returncode != 0:
+                return {"ok": False, "error": out or f"git push {rem_name} {target_branch} failed"}
+            return {
+                "ok": True,
+                "remote": rem_name,
+                "branch": target_branch,
+                "dirty_files_skipped": git_state.get("dirty_count", 0),
+                "output": out or "Everything up-to-date",
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def seed_linux_wheels_to_forgejo(self, python_version: str = "3.12") -> dict[str, Any]:
+        """Download linux_x86_64 wheels on ego matching local wheelhouse packages and upload to Forgejo PyPI."""
+        try:
+            if not self.connector_registry.is_configured("forgejo"):
+                return {"ok": False, "error": "Configure Forgejo URL, owner, and API token first."}
+            cfg = self.connector_registry.get_config("forgejo")
+            token = (cfg.get("api_token") or "").strip()
+            owner = (cfg.get("owner") or "ego").strip()
+            if not token:
+                return {"ok": False, "error": "Forgejo API token is required to seed Linux wheels."}
+            py_ver = (python_version or "3.12").strip()
+            if py_ver not in {"3.11", "3.12", "3.13"}:
+                return {"ok": False, "error": "Supported Python ABI targets: 3.11, 3.12, 3.13."}
+
+            ws_root = (
+                self.workspace_sandbox.root
+                if self.workspace_sandbox is not None
+                else (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent)
+            )
+            wh = ws_root / "artifacts" / "wheels"
+            if not wh.is_dir():
+                wh = (SABRINA_WORKSPACE if SABRINA_WORKSPACE.is_dir() else ROOT.parent) / "artifacts" / "wheels"
+
+            try:
+                from sabrina_console_desktop.forgejo_client import parse_wheel_filename
+            except ImportError:
+                from forgejo_client import parse_wheel_filename  # type: ignore[no-redef]
+
+            win_only = {"pywin32", "clr-loader", "pythonnet", "wmi", "win32-setctime", "pywinpty"}
+            specs: list[str] = []
+            seen: set[str] = set()
+            if wh.is_dir():
+                for w in sorted(wh.glob("*.whl")):
+                    try:
+                        name, ver, _ = parse_wheel_filename(w.name)
+                    except ValueError:
+                        continue
+                    key = f"{name.lower()}=={ver}"
+                    if name.lower() in win_only or key in seen:
+                        continue
+                    seen.add(key)
+                    specs.append(key)
+            if not specs:
+                return {"ok": False, "error": f"No local wheels found in {wh} to derive Linux mirror list."}
+
+            remote_script = (
+                "import hashlib, json, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request, uuid\n"
+                "from pathlib import Path\n"
+                "cfg = json.loads(sys.stdin.read())\n"
+                "owner = urllib.parse.quote(cfg['owner'])\n"
+                "token = cfg['token']\n"
+                "specs = cfg['specs']\n"
+                "py_ver = cfg['py_ver']\n"
+                "base = 'http://127.0.0.1:3003'\n"
+                "uploaded = 0\n"
+                "skipped = 0\n"
+                "failed_pkgs = []\n"
+                "errors = []\n"
+                "with tempfile.TemporaryDirectory(prefix='fj-linux-wh-') as tmp:\n"
+                "    for spec in specs:\n"
+                "        dl = subprocess.run([\n"
+                "            sys.executable, '-m', 'pip', 'download', '--no-deps', '--only-binary=:all:',\n"
+                "            '--platform', 'manylinux2014_x86_64', '--platform', 'manylinux_2_17_x86_64',\n"
+                "            '--platform', 'linux_x86_64', '--python-version', py_ver, '-d', tmp, spec\n"
+                "        ], capture_output=True, text=True)\n"
+                "        if dl.returncode != 0:\n"
+                "            failed_pkgs.append(spec)\n"
+                "    wheels = sorted(Path(tmp).glob('*.whl'))\n"
+                "    for p in wheels:\n"
+                "        parts = p.name[:-4].split('-')\n"
+                "        if len(parts) < 5:\n"
+                "            continue\n"
+                "        name = parts[0].replace('_', '-')\n"
+                "        ver = parts[1]\n"
+                "        py = parts[-3]\n"
+                "        raw = p.read_bytes()\n"
+                "        sha = hashlib.sha256(raw).hexdigest()\n"
+                "        bnd = f'----SabrinaLinux{uuid.uuid4().hex}'\n"
+                "        fields = {':action':'file_upload','protocol_version':'1','name':name,'version':ver,'filetype':'bdist_wheel','pyversion':py,'sha256_digest':sha}\n"
+                "        chunks = []\n"
+                "        for k, v in fields.items():\n"
+                "            chunks.append(f'--{bnd}\\r\\nContent-Disposition: form-data; name=\"{k}\"\\r\\n\\r\\n{v}\\r\\n'.encode())\n"
+                "        chunks.append(f'--{bnd}\\r\\nContent-Disposition: form-data; name=\"content\"; filename=\"{p.name}\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n'.encode())\n"
+                "        chunks.append(raw + f'\\r\\n--{bnd}--\\r\\n'.encode())\n"
+                "        req = urllib.request.Request(f'{base}/api/packages/{owner}/pypi', data=b''.join(chunks), method='POST',\n"
+                "            headers={'Authorization': f'token {token}', 'Content-Type': f'multipart/form-data; boundary={bnd}'})\n"
+                "        try:\n"
+                "            with urllib.request.urlopen(req, timeout=60):\n"
+                "                uploaded += 1\n"
+                "        except urllib.error.HTTPError as exc:\n"
+                "            body = exc.read().decode('utf-8', 'replace').lower()\n"
+                "            if exc.code in (400, 409) and ('exist' in body or 'duplicate' in body):\n"
+                "                skipped += 1\n"
+                "            else:\n"
+                "                errors.append(f'{p.name}: HTTP {exc.code}')\n"
+                "        except Exception as exc:\n"
+                "            errors.append(f'{p.name}: {exc}')\n"
+                "    print(json.dumps({'ok': len(errors) == 0, 'requested': len(specs), 'downloaded': len(wheels), 'uploaded': uploaded, 'skipped_existing': skipped, 'failed_downloads': failed_pkgs[:15], 'errors': errors}))\n"
+            )
+            import base64 as _b64
+            payload_b64 = _b64.b64encode(
+                json.dumps({"owner": owner, "token": token, "specs": specs, "py_ver": py_ver}).encode("utf-8")
+            ).decode("ascii")
+            bundled_script = remote_script.replace(
+                "import hashlib, json, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request, uuid",
+                "import base64, hashlib, json, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request, uuid",
+            ).replace(
+                "cfg = json.loads(sys.stdin.read())",
+                f"cfg = json.loads(base64.b64decode('{payload_b64}').decode('utf-8'))",
+            )
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            proc = subprocess.run(
+                ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=6", "ego", "python3", "-"],
+                input=bundled_script,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                creationflags=flags,
+            )
+            if proc.returncode != 0:
+                return {"ok": False, "error": proc.stderr.strip() or proc.stdout.strip() or "SSH Linux wheel seeding failed"}
+            lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip().startswith("{")]
+            if not lines:
+                return {"ok": False, "error": proc.stdout.strip() or "Unexpected output from ego Linux wheel seeder"}
+            return json.loads(lines[-1])
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def publish_rsi_artifacts_to_forgejo(self) -> dict[str, Any]:
-        """Publish Evo-Bench scorecards and mission reports to Forgejo Generic registry."""
+        """Publish Evo-Bench scorecards and mission reports to Forgejo Generic registry (legacy helper)."""
         try:
             if not self.connector_registry.is_configured("forgejo"):
                 return {"ok": False, "error": "Configure Forgejo URL, owner, and API token first."}
             art_dir = self.swarm_runner.artifacts_dir
             return self._forgejo_client().publish_rsi_artifacts(art_dir)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def list_forgejo_pull_requests(self, state: str = "open") -> dict[str, Any]:
+        """List Forgejo pull requests for the configured repository."""
+        try:
+            cfg = self.connector_registry.get_config("forgejo")
+            repo_name = cfg.get("repo_name") or "sabrina"
+            return self._forgejo_client().list_pull_requests(state=state, repo_name=repo_name)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def create_forgejo_patch_pr(
+        self,
+        branch_name: str,
+        title: str,
+        body: str,
+        files: dict[str, str],
+        base_branch: str = "main",
+    ) -> dict[str, Any]:
+        """Apply file patches onto a Forgejo branch and open a pull request."""
+        try:
+            if not self.connector_registry.is_configured("forgejo"):
+                return {"ok": False, "error": "Configure Forgejo URL, owner, and API token first."}
+            cfg = self.connector_registry.get_config("forgejo")
+            repo_name = cfg.get("repo_name") or "sabrina"
+            client = self._forgejo_client()
+            patch_res = client.apply_file_patches(
+                branch_name,
+                files,
+                title or "chore: swarm patch",
+                base_branch=base_branch,
+                repo_name=repo_name,
+            )
+            if not patch_res.get("ok"):
+                return patch_res
+            pr_res = client.create_pull_request(
+                title=title,
+                body=body,
+                head=branch_name,
+                base=base_branch,
+                repo_name=repo_name,
+            )
+            return {**pr_res, "patch": patch_res}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def post_forgejo_code_comment(
+        self,
+        index: int,
+        body: str,
+        path: str = "",
+        line: int = 0,
+        event: str = "COMMENT",
+    ) -> dict[str, Any]:
+        """Post either an inline PR review comment (if path & line provided) or a general PR/issue comment."""
+        try:
+            if not self.connector_registry.is_configured("forgejo"):
+                return {"ok": False, "error": "Configure Forgejo URL, owner, and API token first."}
+            cfg = self.connector_registry.get_config("forgejo")
+            repo_name = cfg.get("repo_name") or "sabrina"
+            client = self._forgejo_client()
+            if path and line > 0:
+                return client.create_pull_review(
+                    int(index),
+                    body="",
+                    event=event,
+                    comments=[{"path": path, "new_position": int(line), "body": body}],
+                    repo_name=repo_name,
+                )
+            return client.create_comment(int(index), body, repo_name=repo_name)
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -7093,6 +7388,8 @@ def run_desktop_ui() -> None:
             html_path = SABRINA_WORKSPACE / "sabrina_desktop_ui.html"
         if not html_path.is_file():
             raise FileNotFoundError(f"Console UI template not found at {html_path}")
+        html_mtime = datetime.datetime.fromtimestamp(html_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[INIT] UI Template: {html_path} (mtime={html_mtime})", flush=True)
 
         special_local_mode = (len(sys.argv) == 3 and sys.argv[1] == "--replay-release") or sys.argv[1:] == ["--powershell-check"]
         bridge = SabrinaDesktopBridge(coordinator_only=not special_local_mode)

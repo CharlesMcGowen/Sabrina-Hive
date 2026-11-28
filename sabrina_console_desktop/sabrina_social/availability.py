@@ -26,7 +26,7 @@ RECOVERABLE = {
     'social.cybersecurity_scout', 'linkedin.jobs_discover', 'linkedin.jobs_inspect',
     'linkedin.inbox_triage', 'linkedin.performance_report',
     'ai_services.health_and_recover', 'rsi.universal_reflect', 'system.health_report',
-    'kraken.inspect', 'capabilities.dual_orchestration',
+    'capabilities.dual_orchestration',
     'frontier.research.rsi_augment', 'frontier.research.wsp_thinking',
     'frontier.research.hard_challenge', 'frontier.research.synthesis',
     'frontier.research.blt_augmentation',

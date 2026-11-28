@@ -97,6 +97,9 @@ tests/
 
 # Tools directory (kept local for separate upload)
 sabrina_console_desktop/tools/
+sabrina_console_desktop/data/control/paper_portfolios.json
+sabrina_console_desktop/data/control/crypto_market_research_schema.json
+*.before-*
 
 # IDE & OS files
 .DS_Store

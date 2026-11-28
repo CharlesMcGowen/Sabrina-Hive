@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -89,33 +90,27 @@ def main(argv: list[str] | None = None) -> None:
     if is_supervised_mode(argv):
         run_supervised()
         return
+    tunnel_stop = threading.Event()
+    tunnel_thread = None
+    managed_tunnels = {}
+    def start_tunnel(port: int) -> None:
+        process = subprocess.Popen(
+            ["ssh.exe", "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
+             "-o", "ConnectTimeout=2", "-o", "ServerAliveInterval=30",
+             "-L", f"127.0.0.1:{port}:127.0.0.1:{port}", "ego"],
+            stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        managed_tunnels[port] = process
+        tunnels.append(process)
+
     try:
         # Optional: attempt SSH tunnel to ego if reachable (non-blocking, never crashes console)
         for port in (8087, 8095):
             if listening(port):
                 continue
             try:
-                process = subprocess.Popen(
-                    [
-                        "ssh.exe",
-                        "-N",
-                        "-o",
-                        "BatchMode=yes",
-                        "-o",
-                        "ExitOnForwardFailure=yes",
-                        "-o",
-                        "ConnectTimeout=2",
-                        "-o",
-                        "ServerAliveInterval=30",
-                        "-L",
-                        f"127.0.0.1:{port}:127.0.0.1:{port}",
-                        "ego",
-                    ],
-                    stdout=log,
-                    stderr=log,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-                tunnels.append(process)
+                start_tunnel(port)
+                process = managed_tunnels[port]
                 deadline = time.monotonic() + 1.5
                 while not listening(port) and time.monotonic() < deadline:
                     if process.poll() is not None:
@@ -124,11 +119,27 @@ def main(argv: list[str] | None = None) -> None:
             except Exception:
                 pass
 
+        def maintain_tunnels() -> None:
+            while not tunnel_stop.wait(5):
+                for port in (8087, 8095):
+                    existing = managed_tunnels.get(port)
+                    if listening(port) or (existing is not None and existing.poll() is None):
+                        continue
+                    try:
+                        start_tunnel(port)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+
+        tunnel_thread = threading.Thread(target=maintain_tunnels, name="sabrina-ego-tunnels", daemon=True)
+        tunnel_thread.start()
+
         try:
             from sabrina_desktop_ui import run_desktop_ui
 
             run_desktop_ui()
-        except ImportError:
+        except ImportError as exc:
+            print(f"[WARN] Falling back to legacy Tkinter console after ImportError: {exc}", flush=True)
+            traceback.print_exc()
             from sabrina_operator_console import Console
 
             app = Console()
@@ -136,12 +147,16 @@ def main(argv: list[str] | None = None) -> None:
     except Exception:
         traceback.print_exc()
         _show_fatal_error(
-            "Sabrina Kraken Console",
+            "Rogue Colony Console",
             f"Could not launch the console. Details are in {ROOT / 'console-launch.log'}",
         )
     finally:
+        tunnel_stop.set()
+        if tunnel_thread is not None:
+            tunnel_thread.join(timeout=2)
         for process in tunnels:
-            process.terminate()
+            if process.poll() is None:
+                process.terminate()
 
 
 if __name__ == "__main__":
